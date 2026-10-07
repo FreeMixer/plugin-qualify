@@ -61,6 +61,8 @@
   "files": [
     "bin",
     "dist",
+    "src",
+    "!src/**/*.test.ts",
     "tools",
     "!tools/test_*.py",
     "fixtures",

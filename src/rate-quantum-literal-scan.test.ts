@@ -12,7 +12,8 @@
  * `tools/_declarations.py` (`tools/gen-python-declarations.mjs`, checked byte-identical by
  * `python-declarations-conformance.test.ts`).
  */
-import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -50,12 +51,12 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const SCANNED = () => ["src", "tools", "bin"].flatMap((d) => walk(join(PKG, d)));
+const SCANNED = (root = PKG) => ["src", "tools", "bin"].flatMap((d) => walk(join(root, d)));
 
-function scan(pattern: RegExp): { relPath: string; line: number; text: string }[] {
+function scan(pattern: RegExp, root = PKG): { relPath: string; line: number; text: string }[] {
   const hits: { relPath: string; line: number; text: string }[] = [];
-  for (const full of SCANNED()) {
-    const rel = full.slice(PKG.length + 1);
+  for (const full of SCANNED(root)) {
+    const rel = full.slice(root.length + 1);
     if (isTest(rel.slice(rel.lastIndexOf("/") + 1)) || ALLOWED[rel]) continue;
     readFileSync(full, "utf8").split("\n").forEach((line, i) => {
       if (pattern.test(line)) hits.push({ relPath: rel, line: i + 1, text: line.trim() });
@@ -85,13 +86,15 @@ describe("the rate and quantum are declared exactly once", () => {
     expect(QUANTUM_LITERAL.test("const MAX_BANDS = 640;")).toBe(false);
   });
 
-  it("sabotage: a bare rate planted in a real .py file on disk is caught", () => {
-    const probe = join(PKG, "tools", "__sabotage_probe.py");
-    writeFileSync(probe, "PLANTED_RATE = 96000\n");
+  it("sabotage: a bare rate planted in a .py file on disk is caught", () => {
+    // A copy of the scanned tree, so the planted file never sits in the real one.
+    const root = mkdtempSync(join(tmpdir(), "plugin-qualify-scan-"));
     try {
-      expect(scan(RATE_LITERAL).filter((h) => h.relPath.endsWith("__sabotage_probe.py")).length).toBe(1);
+      for (const d of ["src", "tools", "bin"]) cpSync(join(PKG, d), join(root, d), { recursive: true });
+      writeFileSync(join(root, "tools", "__sabotage_probe.py"), "PLANTED_RATE = 96000\n");
+      expect(scan(RATE_LITERAL, root).filter((h) => h.relPath.endsWith("__sabotage_probe.py")).length).toBe(1);
     } finally {
-      rmSync(probe);
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
