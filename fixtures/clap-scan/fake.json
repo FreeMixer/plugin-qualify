@@ -1,0 +1,16 @@
+{"scanner":"omx-clap-scan","version":"0.1.0","files":[
+{"path":"fake.clap","plugins":[
+{"id":"org.omx-clap-host.test.wide","name":"wide","vendor":"omx-clap-host","version":"0","description":"wide","url":"","features":["audio-effect"],"params":[
+{"id":0,"name":"latency","module":"","min":0,"max":4096,"default":64,"flags":["stepped"]}
+],"audio_ports":{"inputs":[{"id":0,"name":"in 0","role":"main","channels":4}],"outputs":[{"id":0,"name":"out 0","role":"main","channels":4}]},"note_ports":{"inputs":0,"outputs":0},"latency":64},
+{"id":"org.omx-clap-host.test.sidechain","name":"sidechain","vendor":"omx-clap-host","version":"0","description":"sidechain","url":"","features":["audio-effect"],"params":[
+{"id":0,"name":"latency","module":"","min":0,"max":4096,"default":64,"flags":["stepped"]}
+],"audio_ports":{"inputs":[{"id":0,"name":"in 0","role":"main","channels":2},{"id":1,"name":"in 1","role":"aux","channels":1}],"outputs":[{"id":0,"name":"out 0","role":"main","channels":2}]},"note_ports":{"inputs":0,"outputs":0},"latency":64},
+{"id":"org.omx-clap-host.test.notes","name":"notes","vendor":"omx-clap-host","version":"0","description":"notes","url":"","features":["audio-effect"],"params":[
+{"id":0,"name":"latency","module":"","min":0,"max":4096,"default":64,"flags":["stepped"]}
+],"audio_ports":{"inputs":[{"id":0,"name":"in 0","role":"main","channels":2}],"outputs":[{"id":0,"name":"out 0","role":"main","channels":2}]},"note_ports":{"inputs":1,"outputs":0},"latency":64},
+{"id":"org.omx-clap-host.test.passthrough","name":"passthrough","vendor":"omx-clap-host","version":"0","description":"passthrough","url":"","features":["audio-effect"],"params":[
+{"id":0,"name":"latency","module":"","min":0,"max":4096,"default":64,"flags":["stepped"]}
+],"audio_ports":{"inputs":[{"id":0,"name":"in 0","role":"main","channels":2}],"outputs":[{"id":0,"name":"out 0","role":"main","channels":2}]},"note_ports":{"inputs":0,"outputs":0},"latency":64}
+]}
+]}

@@ -1,0 +1,21 @@
+@prefix atom: <http://lv2plug.in/ns/ext/atom#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix patch: <http://lv2plug.in/ns/ext/patch#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix urid: <http://lv2plug.in/ns/ext/urid#> .
+
+<urn:openmixer:eval:zero-path#model> a lv2:Parameter ; rdfs:label "model" ; rdfs:range atom:Path .
+
+<urn:openmixer:eval:zero-path> a lv2:Plugin , lv2:UtilityPlugin ;
+  doap:name "omx eval zero-size Path" ; lv2:requiredFeature urid:map ;
+  patch:writable <urn:openmixer:eval:zero-path#model> ;
+  patch:readable <urn:openmixer:eval:zero-path#model> ;
+  lv2:port [ a lv2:InputPort , atom:AtomPort ; atom:bufferType atom:Sequence ;
+             atom:supports patch:Message ; lv2:designation lv2:control ;
+             lv2:index 0 ; lv2:symbol "control" ; lv2:name "Control" ] ,
+           [ a lv2:OutputPort , atom:AtomPort ; atom:bufferType atom:Sequence ;
+             atom:supports patch:Message ; lv2:designation lv2:control ;
+             lv2:index 1 ; lv2:symbol "notify" ; lv2:name "Notify" ] ,
+           [ a lv2:AudioPort , lv2:InputPort ; lv2:index 2 ; lv2:symbol "in" ; lv2:name "In" ] ,
+           [ a lv2:AudioPort , lv2:OutputPort ; lv2:index 3 ; lv2:symbol "out" ; lv2:name "Out" ] .

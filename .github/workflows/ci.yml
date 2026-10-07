@@ -1,0 +1,55 @@
+name: ci
+
+# Type-check, the TypeScript and Python tests, and the generated Python declarations, on every
+# pull request and every push to main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.33.0
+
+      - name: Install and build
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Generated Python declarations are current
+        run: pnpm check:generated
+
+      - name: Python tools
+        run: |
+          python -m pip install --quiet pytest
+          pnpm test:py
+
+      - name: The packed package carries its build
+        run: |
+          set -euo pipefail
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          tar -tzf "$RUNNER_TEMP"/freemixer-plugin-qualify-*.tgz | grep -qx 'package/dist/index.js'
+          tar -tzf "$RUNNER_TEMP"/freemixer-plugin-qualify-*.tgz | grep -qx 'package/fixtures/clap-scan/fake.json'

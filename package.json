@@ -1,0 +1,84 @@
+{
+  "name": "@freemixer/plugin-qualify",
+  "version": "0.1.0",
+  "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, a mod-host hosting sweep, and a fail-closed rating.",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FreeMixer/plugin-qualify.git"
+  },
+  "author": "Pau Aliagas <linuxnow@gmail.com>",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "plugin-qualify": "./bin/plugin-qualify.mjs"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./declarations": {
+      "types": "./dist/qualify-declarations.d.ts",
+      "import": "./dist/qualify-declarations.js",
+      "default": "./src/qualify-declarations.ts"
+    },
+    "./measurement": {
+      "types": "./dist/measurement/index.d.ts",
+      "import": "./dist/measurement/index.js",
+      "default": "./src/measurement/index.ts"
+    },
+    "./measurement/fixtures": {
+      "types": "./dist/measurement/fixtures.d.ts",
+      "import": "./dist/measurement/fixtures.js",
+      "default": "./src/measurement/fixtures.ts"
+    },
+    "./tools/hosting-sweep.mjs": "./tools/hosting-sweep.mjs",
+    "./tools/lv2-measure.mjs": "./tools/lv2-measure.mjs",
+    "./rating": {
+      "types": "./dist/rating.d.ts",
+      "import": "./dist/rating.js",
+      "default": "./src/rating.ts"
+    },
+    "./host-profiles": {
+      "types": "./dist/host-profiles.d.ts",
+      "import": "./dist/host-profiles.js",
+      "default": "./src/host-profiles.ts"
+    },
+    "./hosting-suitability": {
+      "types": "./dist/hosting-suitability.d.ts",
+      "import": "./dist/hosting-suitability.js",
+      "default": "./src/hosting-suitability.ts"
+    },
+    "./package.json": "./package.json",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "tools",
+    "!tools/test_*.py",
+    "fixtures",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "vitest run src",
+    "lint": "tsc -p tsconfig.lint.json",
+    "test:py": "python3 -m pytest tools -q",
+    "check:generated": "node tools/gen-python-declarations.mjs --check"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
