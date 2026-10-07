@@ -40,7 +40,8 @@ const PY_NAMES = [
 
 const py = (v) => (Array.isArray(v) ? `(${v.join(', ')})` : String(v));
 
-export function declarationsFile() {
+/** `decl` defaults to the built declarations; a test passes moved ones to prove the Python side follows. */
+export function declarationsFile(decl = D) {
   return (
     `# SPDX-License-Identifier: GPL-3.0-or-later\n` +
     `# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>\n` +
@@ -54,7 +55,7 @@ export function declarationsFile() {
     `# Regenerate: node tools/gen-python-declarations.mjs --write\n` +
     `# Verify:     node tools/gen-python-declarations.mjs --check\n` +
     `\n` +
-    PY_NAMES.map((n) => `${n} = ${py(D[n])}\n`).join('')
+    PY_NAMES.map((n) => `${n} = ${py(decl[n])}\n`).join('')
   );
 }
 

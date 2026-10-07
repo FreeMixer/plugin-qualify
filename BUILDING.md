@@ -17,7 +17,7 @@ benchmark read the same rates, quanta and timeouts as the TypeScript code. After
 declarations, regenerate it and commit both:
 
 ```
-node tools/gen-python-declarations.mjs
+node tools/gen-python-declarations.mjs --write
 ```
 
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
