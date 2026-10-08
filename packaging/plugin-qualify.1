@@ -1,0 +1,47 @@
+.TH PLUGIN-QUALIFY 1 "October 2026" "plugin-qualify" "User Commands"
+.SH NAME
+plugin-qualify \- find out whether an audio plugin is safe to run in a real-time audio engine
+.SH SYNOPSIS
+.B plugin-qualify
+[\fIoptions\fR] \fIuri\fR|\fIbundle-path\fR...
+.br
+.B plugin-qualify
+[\fIoptions\fR] \fB\-\-all\fR
+.SH DESCRIPTION
+Scans each plugin, measures its latency and CPU cost per sample rate and buffer size, runs it under
+a real host with memory checking, and prints one verdict per plugin: suitable, conditional, unknown
+or unsuitable. A plugin that was not measured is never rated suitable.
+A target is a plugin URI or an LV2 bundle (every plugin in it).
+.SH OPTIONS
+.TP
+.B \-\-all
+Every plugin lilv finds; LV2_PATH is honoured.
+.TP
+.BI \-\-rates " list"
+Sample rates to measure at, comma-separated (default 44100,48000,96000,192000).
+.TP
+.BI \-\-quanta " list"
+Buffer sizes in frames to rate cost at, comma-separated (default 128,256,512,1024).
+.TP
+.BI \-\-out " dir"
+Write one JSON measurement document per run into this directory.
+.TP
+.BI \-\-format " json|text"
+The verdicts as JSON, or as text (default).
+.TP
+.B \-\-isolate
+Measure each plugin in a fresh worker, so a crash or hang takes only that plugin.
+.TP
+.B \-\-no\-host\-sweep
+Offline measurement only, without mod-host.
+.TP
+.BI \-\-host\-profile " file|id"
+Judge against this host: openmixer-console (default), jalv, mod-host, or a profile JSON file.
+Repeat or comma-separate for one verdict per profile.
+.TP
+.B \-\-help
+Print the options.
+.SH EXIT STATUS
+0 every plugin qualified, 1 some did not, 2 something could not be measured.
+.SH SEE ALSO
+https://github.com/FreeMixer/plugin-qualify
