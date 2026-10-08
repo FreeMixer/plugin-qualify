@@ -7,13 +7,28 @@ Licence: GPL-3.0-or-later (`LICENSE`).
 
 ## Install
 
+Fedora:
+
 ```
-pnpm add github:FreeMixer/plugin-qualify#v0.1.0
+sudo dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
+sudo dnf install plugin-qualify
 ```
 
-This installs the library and the `plugin-qualify` command; the package compiles itself on
-install. The measuring tools also want Python 3 with the lilv bindings (`python3-lilv`) and, for
-the hosting sweep, `mod-host`. Working from a checkout is described in `BUILDING.md`.
+Debian bookworm and trixie, and Raspberry Pi OS: add the apt line from <https://freemixer.github.io>, then
+
+```
+sudo apt install plugin-qualify
+```
+
+Or from npm, to use it as a library or without a system package:
+
+```
+npm install @openmixer/plugin-qualify
+```
+
+All three give the library and the `plugin-qualify` command. It needs Node.js 22 or newer. The
+measuring tools also want Python 3 with the lilv bindings (`python3-lilv`) and, for the hosting
+sweep, `mod-host`. Working from a checkout is described in `BUILDING.md`.
 
 ## Run it on your own plugin
 
@@ -115,7 +130,7 @@ With several profiles, the exit code is `0` only if every plugin qualifies under
 ### The JSON document
 
 `--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.2,
-spec `docs/design/specs/lv2-measurement-interchange.md` in [FreeMixer/openmixer](https://github.com/FreeMixer/openmixer)). The
+the same format the OpenMixer console reads). The
 `plugins` array holds the raw, host-free measurements. Beside it, `hostProfiles` holds each
 profile the run judged against, in full, and `verdicts` holds one entry per plugin per profile:
 

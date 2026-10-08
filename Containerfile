@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # plugin-qualify in a box: lilv for the scan and the offline measurement, the distro's mod-host
 # for the hosting sweep, and an ASan build of mod-host so a plugin's memory error is caught and
-# attributed to the plugin (docs/design/specs/2026-09-25-plugin-qualify.md §2, §8). The ASan
-# build uses the same flags as the eval image (tools/mod-host-upstream-eval/build.sh).
+# attributed to the plugin.
 #
 #   podman build -t plugin-qualify -f Containerfile .
 #   podman run --rm -v /usr/lib64/lv2:/usr/lib64/lv2:ro plugin-qualify <uri|bundle-path>

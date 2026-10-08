@@ -26,3 +26,23 @@ AddressSanitizer build of mod-host:
 ```
 podman build -t plugin-qualify -f Containerfile .
 ```
+
+## Packages
+
+The npm package, the RPM and the DEB are made from this tree; a release is a `v<version>` tag.
+
+```
+npm pack --dry-run                                # the files npm would publish
+packaging/build.sh "$PWD/root" /usr/lib           # the same files, installed into ./root
+rpmbuild -ba packaging/plugin-qualify.spec        # needs the source tarball in ~/rpmbuild/SOURCES
+dpkg-buildpackage -b -uc -us                      # the DEB
+```
+
+`CHANGELOG.md` is the only changelog. After editing it, regenerate the spec's `%changelog` and
+`debian/changelog` with `changelog.sh sync` from the
+[FreeMixer/.github](https://github.com/FreeMixer/.github) changelog action; CI refuses a tree where
+they differ. Bump `version` in `package.json` and `Version:` in the spec with it.
+
+The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github and the npm
+package through npm trusted publishing (`.github/workflows/publish-npm.yml`, no token). Pull requests
+build both package kinds as a dry run and publish nothing.
