@@ -1,0 +1,54 @@
+name: release
+
+# A version tag builds the RPM (Fedora 44, x86_64 and aarch64) and the DEB (Debian bookworm and trixie,
+# amd64 and arm64), signs them, publishes them into the rpm/ and deb/ trees of the FreeMixer Pages
+# repository and attaches them to the GitHub release. Anything else builds unsigned trees and publishes
+# nothing. Everything is in FreeMixer/.github; the secrets are the organisation's. The npm package has
+# its own workflow, publish-npm.yml, on the same tag.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Sign and publish; only a run on a tag publishes'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      arm:
+        type: boolean
+        default: true
+        description: 'Build the aarch64/arm64 packages too; the pull-request dry run passes false (arm builds run at release only)'
+
+permissions:
+  contents: write
+
+jobs:
+  rpm:
+    uses: FreeMixer/.github/.github/workflows/build-rpm.yml@main
+    with:
+      package-name: plugin-qualify
+      publish: ${{ github.event_name == 'push' || inputs.publish == true }}
+      needs-mod-host: false
+      channel-deps: false
+      arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["x86_64"]' || '["x86_64", "aarch64"]' }}
+    secrets: inherit
+
+  # after the RPM: both publish into one tree, and a push that loses a race is refused
+  deb:
+    needs: rpm
+    if: ${{ !cancelled() }}
+    uses: FreeMixer/.github/.github/workflows/build-deb.yml@main
+    with:
+      package-name: plugin-qualify
+      publish: ${{ github.event_name == 'push' || inputs.publish == true }}
+      dependencies: ''
+      requires: ''
+      channel-deps: false
+      arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["amd64"]' || '["amd64", "arm64"]' }}
+    secrets: inherit
