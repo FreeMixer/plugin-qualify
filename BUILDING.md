@@ -1,6 +1,6 @@
 # Building plugin-qualify
 
-You need Node.js 18 or newer and pnpm 10 (`npm install -g pnpm@10`, or `corepack enable`). The
+You need Node.js 20 or newer (the tool itself runs on 18) and pnpm 10 (`npm install -g pnpm@10`, or `corepack enable`). The
 Python tools need Python 3 and, to scan real plugins, the lilv bindings (`python3-lilv` on Fedora,
 `python3-lilv` on Debian). The tests use `pytest`.
 
