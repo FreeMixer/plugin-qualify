@@ -59,9 +59,13 @@ jobs:
         run: |
           set -euo pipefail
           pnpm pack --pack-destination "$RUNNER_TEMP"
-          tar -tzf "$RUNNER_TEMP"/openmixer-plugin-qualify-*.tgz | grep -qx 'package/dist/index.js'
-          tar -tzf "$RUNNER_TEMP"/openmixer-plugin-qualify-*.tgz | grep -qx 'package/fixtures/clap-scan/fake.json'
-          ! tar -tzf "$RUNNER_TEMP"/openmixer-plugin-qualify-*.tgz | grep -E '__pycache__|\.pyc$'
+          tarball=("$RUNNER_TEMP"/openmixer-plugin-qualify-*.tgz)
+          # List into a file first: grep -q exits on its first match, and a tar still
+          # writing into a pipe then dies of SIGPIPE, which pipefail reports as a failure.
+          tar -tzf "$tarball" > "$RUNNER_TEMP/packed-files.txt"
+          grep -qxF 'package/dist/index.js' "$RUNNER_TEMP/packed-files.txt"
+          grep -qxF 'package/fixtures/clap-scan/fake.json' "$RUNNER_TEMP/packed-files.txt"
+          ! grep -E '__pycache__|\.pyc$' "$RUNNER_TEMP/packed-files.txt"
 
   # the RPM and the DEB are built, linted and assembled into unsigned trees; nothing is published
   packages:
