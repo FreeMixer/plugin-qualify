@@ -12,6 +12,14 @@ permissions:
   contents: read
 
 jobs:
+  changelog:
+    name: CHANGELOG.md agrees with the spec and debian/changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: FreeMixer/.github/.github/actions/changelog@main
+
   test:
     name: build and test
     runs-on: ubuntu-latest
@@ -51,9 +59,20 @@ jobs:
         run: |
           set -euo pipefail
           pnpm pack --pack-destination "$RUNNER_TEMP"
-          tarball=("$RUNNER_TEMP"/freemixer-plugin-qualify-*.tgz)
+          tarball=("$RUNNER_TEMP"/openmixer-plugin-qualify-*.tgz)
           # List into a file first: grep -q exits on its first match, and a tar still
           # writing into a pipe then dies of SIGPIPE, which pipefail reports as a failure.
           tar -tzf "$tarball" > "$RUNNER_TEMP/packed-files.txt"
           grep -qxF 'package/dist/index.js' "$RUNNER_TEMP/packed-files.txt"
           grep -qxF 'package/fixtures/clap-scan/fake.json' "$RUNNER_TEMP/packed-files.txt"
+          ! grep -E '__pycache__|\.pyc$' "$RUNNER_TEMP/packed-files.txt"
+
+  # the RPM and the DEB are built, linted and assembled into unsigned trees; nothing is published
+  packages:
+    name: packages, dry run
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      publish: false
+      arm: false  # aarch64/arm64 build at release only

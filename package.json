@@ -1,6 +1,6 @@
 {
-  "name": "@freemixer/plugin-qualify",
-  "version": "0.1.0",
+  "name": "@openmixer/plugin-qualify",
+  "version": "0.1.1",
   "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, a mod-host hosting sweep, and a fail-closed rating.",
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -9,8 +9,12 @@
     "url": "git+https://github.com/FreeMixer/plugin-qualify.git"
   },
   "author": "Pau Aliagas <linuxnow@gmail.com>",
+  "homepage": "https://github.com/FreeMixer/plugin-qualify#readme",
+  "bugs": {
+    "url": "https://github.com/FreeMixer/plugin-qualify/issues"
+  },
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "bin": {
     "plugin-qualify": "./bin/plugin-qualify.mjs"
@@ -65,6 +69,8 @@
     "!src/**/*.test.ts",
     "tools",
     "!tools/test_*.py",
+    "!**/__pycache__",
+    "!**/*.pyc",
     "fixtures",
     "README.md",
     "LICENSE"
@@ -82,5 +88,9 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@10.33.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

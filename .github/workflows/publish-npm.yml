@@ -1,0 +1,50 @@
+name: publish-npm
+
+# A version tag publishes @openmixer/plugin-qualify to npm. There is no token: npm trusted publishing
+# exchanges this workflow's OIDC identity for a short-lived credential, and the package is published with
+# provenance. The trusted publisher on npmjs.com names this repository and this workflow file.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: The tag is the package's version
+        run: |
+          set -euo pipefail
+          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - uses: FreeMixer/.github/.github/actions/changelog@main
+        with:
+          tag: ${{ github.ref_name }}
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.33.0
+
+      - name: Build and test
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+
+      # trusted publishing needs npm 11.5.1 or newer, which node 24 carries
+      - name: Publish
+        run: npm publish --provenance --access public

@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 vitest-result.json
+debian/.debhelper/
+debian/plugin-qualify/
+debian/files
+debian/*.substvars
+debian/debhelper-build-stamp
+debian/*.debhelper.log
