@@ -26,7 +26,7 @@ Or from npm, to use it as a library or without a system package:
 npm install @openmixer/plugin-qualify
 ```
 
-All three give the library and the `plugin-qualify` command. It needs Node.js 22 or newer. The
+All three give the library and the `plugin-qualify` command. It needs Node.js 18 or newer. The
 measuring tools also want Python 3 with the lilv bindings (`python3-lilv`) and, for the hosting
 sweep, `mod-host`. Working from a checkout is described in `BUILDING.md`.
 

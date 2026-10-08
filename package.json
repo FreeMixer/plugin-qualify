@@ -14,7 +14,7 @@
     "url": "https://github.com/FreeMixer/plugin-qualify/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "bin": {
     "plugin-qualify": "./bin/plugin-qualify.mjs"

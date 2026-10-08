@@ -2,14 +2,14 @@ Source: plugin-qualify
 Section: sound
 Priority: optional
 Maintainer: Pau Aliagas <linuxnow@gmail.com>
-Build-Depends: debhelper-compat (= 13), nodejs (>= 22), npm
+Build-Depends: debhelper-compat (= 13), nodejs (>= 18), npm
 Standards-Version: 4.6.2
 Homepage: https://github.com/FreeMixer/plugin-qualify
 Rules-Requires-Root: no
 
 Package: plugin-qualify
 Architecture: all
-Depends: ${misc:Depends}, nodejs (>= 22), python3, python3-lilv
+Depends: ${misc:Depends}, nodejs (>= 18), python3, python3-lilv
 Recommends: mod-host
 Description: find out whether an audio plugin is safe to run live
  A plugin that glitches on stage is worse than one you never installed.

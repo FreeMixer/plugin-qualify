@@ -10,10 +10,10 @@ BuildArch: noarch
 
 Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
-BuildRequires: nodejs >= 22
+BuildRequires: nodejs >= 18
 BuildRequires: npm
 
-Requires: nodejs >= 22
+Requires: nodejs >= 18
 Requires: python3
 Requires: python3-lilv
 Recommends: mod-host
