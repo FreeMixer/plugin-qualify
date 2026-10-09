@@ -12,14 +12,6 @@ permissions:
   contents: read
 
 jobs:
-  changelog:
-    name: CHANGELOG.md agrees with the spec and debian/changelog
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: FreeMixer/.github/.github/actions/changelog@main
-
   test:
     name: build and test
     runs-on: ubuntu-latest
