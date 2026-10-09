@@ -38,10 +38,8 @@ rpmbuild -ba packaging/plugin-qualify.spec        # needs the source tarball in 
 dpkg-buildpackage -b -uc -us                      # the DEB
 ```
 
-`CHANGELOG.md` is the only changelog. After editing it, regenerate the spec's `%changelog` and
-`debian/changelog` with `changelog.sh sync` from the
-[FreeMixer/.github](https://github.com/FreeMixer/.github) changelog action; CI refuses a tree where
-they differ. Bump `version` in `package.json` and `Version:` in the spec with it.
+There is no changelog file: git history is the changelog. `debian/changelog` and the spec's `%changelog`
+are packaging metadata. Bump `version` in `package.json` and `Version:` in the spec together.
 
 The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github and the npm
 package through npm trusted publishing (`.github/workflows/publish-npm.yml`, no token). Pull requests
