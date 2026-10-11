@@ -7,28 +7,19 @@ Licence: GPL-3.0-or-later (`LICENSE`).
 
 ## Install
 
-Fedora:
+No release has been published yet, so there is no RPM, DEB or npm package to install. Use a checkout
+(Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
 
 ```
-sudo dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
-sudo dnf install plugin-qualify
+git clone https://github.com/FreeMixer/plugin-qualify.git
+cd plugin-qualify
+pnpm install
+pnpm exec plugin-qualify --help
 ```
 
-Debian bookworm and trixie, and Raspberry Pi OS: add the apt line from <https://freemixer.github.io>, then
-
-```
-sudo apt install plugin-qualify
-```
-
-Or from npm, to use it as a library or without a system package:
-
-```
-npm install @openmixer/plugin-qualify
-```
-
-All three give the library and the `plugin-qualify` command. It needs Node.js 18 or newer. The
-measuring tools also want Python 3 with the lilv bindings (`python3-lilv`) and, for the hosting
-sweep, `mod-host`. Working from a checkout is described in `BUILDING.md`.
+It needs Node.js 18 or newer to run. The measuring tools also want Python 3 with the lilv bindings
+(`python3-lilv`) and, for the hosting sweep, `mod-host`. The `Containerfile` builds an image with all of
+them. The commands below are written as `plugin-qualify`; from a checkout run them with `pnpm exec`.
 
 ## Run it on your own plugin
 
