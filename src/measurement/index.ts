@@ -3,12 +3,12 @@
 /**
  * **The LV2 plugin measurement interchange format, and the tool that produces it.**
  *
- * This directory is written to leave. Issue #343's proposal is that measured LV2 plugin
+ * This directory is written to stand alone. The idea is that measured LV2 plugin
  * characteristics — per-rate latency with its scaling law, per-rate CPU cost, topology, and
  * above all the PROVENANCE without which none of it is comparable — should be publishable
  * in a shape any LV2 host can read, rather than re-derived by each project from a prober it
- * wrote itself. openmixer is the format's first consumer, which is what keeps it honest; it
- * is not meant to be the only one.
+ * wrote itself. The OpenMixer console is the format's first consumer, which is what keeps it
+ * honest; it is not meant to be the only one.
  *
  * ## What is in here, and what is deliberately not
  *
@@ -23,11 +23,10 @@
  * | `plan.ts` | which rates to measure, and how long it might take |
  * | `cli.ts` | `lv2-measure`'s decisions, with the subprocess spawning left to `tools/lv2-measure.mjs` |
  *
- * Nothing in this directory imports anything outside it — not the catalog's descriptor
- * types, not its suitability rules, not `@freemixer/core`. Extraction is a directory copy
- * plus `tools/{scan,benchmark}.py` and `tools/lv2-measure.mjs`. The openmixer-facing
- * adapters — turning a merged view back into catalog descriptors — live one level up in
- * `../measurement-catalog.ts`, on purpose.
+ * Nothing in this directory imports anything outside it — not a catalog's descriptor
+ * types, not suitability rules, not a console's core library. Extraction is a directory copy
+ * plus `tools/{scan,benchmark}.py` and `tools/lv2-measure.mjs`. Adapters that turn a merged
+ * view into a host's own descriptors belong in that host, on purpose.
  */
 
 export * from "./format.js";

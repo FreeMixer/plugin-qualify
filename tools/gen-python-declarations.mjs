@@ -3,8 +3,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /*
  * gen-python-declarations.mjs — `tools/_declarations.py`, generated from the package's ONE
- * declarations module, `src/qualify-declarations.ts` (`docs/design/specs/2026-09-25-plugin-qualify.md` §4;
- * first written for the 2026-09-17 declare-derive audit, F8, as harness/catalog-python-declarations-gen.mjs).
+ * declarations module, `src/qualify-declarations.ts`.
  * `benchmark.py`'s `DEFAULT_BLOCK`, `DEFAULT_RATES` and timeouts are these facts under its own names.
  *
  * `benchmark.py` cannot import a TS module — that scan's own comment already names the mirror as

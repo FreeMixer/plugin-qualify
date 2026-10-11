@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * EVERY NUMBER plugin-qualify uses, declared once (`docs/design/specs/2026-09-25-plugin-qualify.md`
- * §4). The CLI's defaults and `--help`, the rating, and the Python tools (through the generated
+ * EVERY NUMBER plugin-qualify uses, declared once. The CLI's defaults and `--help`, the rating, and the Python tools (through the generated
  * `tools/_declarations.py`) all READ these; a consumer holding its own copy is what the package's
  * perturbation test catches (R-094).
  */
 
 /**
- * The reference rate cost is quoted at: the rig's rate (2026-09-14 ruling, 96 kHz). Moved here
- * from `@freemixer/catalog`'s `cpu-cost.ts`, which re-exports it.
+ * The reference rate cost is quoted at: the rig's rate, 96 kHz.
  */
 export const COST_REFERENCE_RATE = 96000;
 
 /**
  * The reference quantum in frames: the rig's buffer, and the block `benchmark.py` runs.
- * Moved here from `@freemixer/catalog`'s `types.ts`, which re-exports it.
  */
 export const QUANTUM_FRAMES = 1024;
 
@@ -57,8 +54,7 @@ export const CLAP_SCAN_TIMEOUT_S = 300;
 
 
 
-// The rating's thresholds (`2026-09-04-lv2-hosting-path.md` §3), moved here from
-// `@freemixer/catalog`'s `hosting-suitability.ts`.
+// The rating's thresholds.
 
 /** Every threshold, so none is baked into the code. */
 export interface HostingPolicy {

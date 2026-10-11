@@ -289,7 +289,7 @@ class Scanner:
         comment = declared_comment(plugin, self.w)
         if comment:
             out["lv2Comment"] = comment
-        # The presets the plugin SHIPS (docs/design/specs/2026-10-01-plugin-presets.md section 2b):
+        # The presets the plugin SHIPS:
         # a DECLARED fact like the comment above, read off the bundle and judged against the params
         # just read. Always present on a scanned plugin — `[]` is "ships none", never "not read".
         out["presets"] = read_presets(self.w, plugin, params)

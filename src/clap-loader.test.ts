@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The CLAP arm of the one discovery seam (`docs/design/specs/2026-09-25-plugin-qualify.md` §7):
+ * The CLAP arm of the one discovery seam:
  * the loader runs `omx-clap-scan`, located by ONE declared setting, and turns its JSON into
  * targets and interchange rows. The goldens in `fixtures/clap-scan/` are the real tool's output
  * (against omx-clap-host's `tests/fake.clap`, and a directory holding a crashing and a broken

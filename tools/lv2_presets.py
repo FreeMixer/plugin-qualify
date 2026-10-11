@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 """
 The presets an LV2 plugin SHIPS, read off its bundle with lilv.
-Law: docs/design/specs/2026-10-01-plugin-presets.md section 2b.
 
 A preset is a `pset:Preset` resource related to the plugin (`plugin.get_related`). For each one
 this reads its label, its bank, the port values it sets and whether it carries a `state:state`

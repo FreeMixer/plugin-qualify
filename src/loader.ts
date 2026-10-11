@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The ONE plugin-discovery seam (`docs/design/specs/2026-09-25-plugin-qualify.md` §7). A format
+ * The ONE plugin-discovery seam. A format
  * loader turns a command-line target into the plugins it names. `lv2Loader` and `clapLoader` are
  * its implementations.
  */

@@ -33,13 +33,13 @@ import type {
 
 /**
  * What a reason may interpolate: wire-serialisable scalars only. Structurally the same record as
- * `@freemixer/core`'s `CodedRefusalParams`, so a consumer passes it straight through.
+ * the console's coded-refusal parameters, so a consumer passes it straight through.
  */
 export type CodedRefusalParams = Readonly<Record<string, string | number>>;
 
 /**
  * The plugin the rating reads — exactly the fields it judges, and nothing a host's own catalog
- * adds. `@freemixer/catalog`'s `PluginDescriptor` satisfies it structurally; the standalone CLI
+ * adds. The console's plugin descriptor satisfies it structurally; the standalone CLI
  * builds it from the scan and the interchange document.
  */
 export interface QualifiedPlugin {

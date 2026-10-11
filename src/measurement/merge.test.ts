@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The precedence rule of issue #342, defended case by case.
+ * The precedence rule, defended case by case.
  *
  * "Local measurements win" is one sentence with four edges, and every one of them is a way
  * for an installation to end up with figures that are worse than the ones it shipped with:

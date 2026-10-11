@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The `plugin-qualify` CLI's decisions, as pure functions (`docs/design/specs/2026-09-25-plugin-qualify.md`
- * §5): parse the arguments against `QUALIFY_OPTIONS`, print `--help` from the same table, resolve
+ * The `plugin-qualify` CLI's decisions, as pure functions: parse the arguments against `QUALIFY_OPTIONS`, print `--help` from the same table, resolve
  * the named targets through the loader seam, turn each plugin's measurements into
  * `classifyPluginHosting`'s verdict (never a second one), and pick the exit code.
  * `bin/plugin-qualify.mjs` only spawns the measuring tools and calls these.

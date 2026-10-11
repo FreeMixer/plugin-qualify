@@ -4,7 +4,7 @@
  * The controlled vocabularies the interchange format speaks.
  *
  * This is the boring file that decides whether two projects' measurements can be merged
- * (issue #343, point 3). Everyone who has written an LV2 prober has invented their own
+ * Everyone who has written an LV2 prober has invented their own
  * words for "there was nothing to measure here", so nobody's results combine. The words
  * are fixed here, each with the ONE property a merger actually needs to branch on —
  * whether the plugin has nothing to measure or whether OUR PROBE failed — and each with
@@ -46,9 +46,8 @@ export interface UnmeasuredTerm {
 }
 
 /**
- * Every reason a figure may be absent. The census in
- * `packages/catalog/data/CATALOG_PROVENANCE.md` is what these were derived from — each
- * one is an outcome the 958-plugin sweep actually produced, not a hypothetical.
+ * Every reason a figure may be absent. These were derived from a sweep of 958 plugins — each
+ * one is an outcome that sweep actually produced, not a hypothetical.
  */
 export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
   {

@@ -348,7 +348,7 @@ class ClassifyScaling(unittest.TestCase):
 
 
 class UnreliableReadings(unittest.TestCase):
-    """The incoherent readings tabulated in issue #338, and the rounding they must not catch."""
+    """The incoherent readings the benchmark can produce, and the rounding they must not catch."""
 
     def test_an_interior_zero_between_two_nonzero_rates_is_condemned(self):
         # Gxjcm800pre as measured. No latency reads 16 frames at 48 kHz and 0 at 96.
@@ -383,7 +383,7 @@ class UnreliableReadings(unittest.TestCase):
 
 
 class CoherentClassification(unittest.TestCase):
-    """Issue #338: `nonconforming` must not fire on the onset detector's own noise."""
+    """`nonconforming` must not fire on the onset detector's own noise."""
 
     def test_a_dropped_reading_does_not_define_a_class(self):
         # ZamTube as measured: a flat 32-frame plugin with one failed reading, not a
@@ -427,7 +427,7 @@ class CoherentClassification(unittest.TestCase):
 
 
 class OperationalRates(unittest.TestCase):
-    """Issue #345: a reading below the operational floor is informational for the class.
+    """A reading below the operational floor is informational for the class.
 
     The eight below are the reference sweep's own figures: each holds one millisecond figure at
     48/96/192 kHz and rounds its 44.1 kHz buffer to the 48 kHz FRAME count, which alone made it

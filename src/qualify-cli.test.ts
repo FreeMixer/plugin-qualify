@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The `plugin-qualify` CLI's decisions (`docs/design/specs/2026-09-25-plugin-qualify.md` §5):
+ * The `plugin-qualify` CLI's decisions:
  * argument parsing and `--help` read the OPTIONS table and the declarations; the single-plugin
  * path (by URI, by bundle path) is its own case, never `--all` filtered; the verdict is
  * `classifyPluginHosting`'s and nothing else; the exit code is 0/1/2 as declared.
