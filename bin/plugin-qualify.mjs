@@ -5,11 +5,30 @@
  * `plugin-qualify` — the entry point (spec 2026-09-25-plugin-qualify.md §5). Every decision is a
  * pure function in `src/qualify-cli.ts`; this file only reads argv, prints and exits.
  *
- * NOT YET WIRED (refused with exit 2, never a silent partial run): driving the offline pass
+ * CLAP targets are qualified here: the prober (`native/clap-qualify`) runs each under the interposer
+ * and every plugin gets its RT-safety verdict document, per binary hash and console.
+ *
+ * NOT YET WIRED for LV2 (refused with exit 2, never a silent partial run): driving the offline pass
  * (`tools/lv2-measure.mjs`) for a named subset and the mod-host hosting sweep from this entry
- * point. Until then a run that would measure refuses and says which step is missing.
+ * point. Until then a run that would measure an LV2 refuses and says which step is missing.
  */
-import { ClapScanError, EXIT_CODE, clapLoader, helpText, lv2Loader, parseQualifyArgs, resolveHostProfiles, resolveTargets } from "../dist/index.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  ClapScanError,
+  EXIT_CODE,
+  clapLoader,
+  exitCodeFor,
+  helpText,
+  lv2Loader,
+  parseQualifyArgs,
+  qualifyClapTargets,
+  resolveHostProfiles,
+  resolveTargets,
+  rtSafetyDocumentName,
+  textTable,
+} from "../dist/index.js";
 
 const parsed = parseQualifyArgs(process.argv.slice(2));
 if (!parsed.ok) {
@@ -40,6 +59,16 @@ if (!parsed.args.all) {
     process.exit(EXIT_CODE.couldNotMeasure);
   }
   for (const p of r.plugins) process.stderr.write(`plugin-qualify: target ${p.uri}${p.bundle ? ` (${p.bundle})` : ""}\n`);
+  if (r.plugins.every((p) => p.format === "clap")) {
+    const pass = qualifyClapTargets(r.plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
+    for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
+    if (parsed.args.out !== undefined) {
+      mkdirSync(parsed.args.out, { recursive: true });
+      for (const doc of pass.documents) writeFileSync(join(parsed.args.out, rtSafetyDocumentName(doc)), `${JSON.stringify(doc, null, 2)}\n`);
+    }
+    process.stdout.write(parsed.args.format === "json" ? `${JSON.stringify(pass.documents, null, 2)}\n` : textTable(pass.verdicts));
+    process.exit(exitCodeFor(pass.verdicts));
+  }
 }
 process.stderr.write(
   "plugin-qualify: measuring from this entry point is not wired yet " +
