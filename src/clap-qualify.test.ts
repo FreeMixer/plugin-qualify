@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+/**
+ * The CLAP arm of the one qualifier. The live tests run the built prober (`make -C native`) under
+ * the built interposer against the two fixture plugins, which differ only in that one allocates in
+ * `process()`: the known RT-safe one must come out `suitable`, the known RT-unsafe one `unsuitable`
+ * on the interposer's count, each document bound to its file's SHA-256. On CI a missing build is a
+ * failure; elsewhere the live tests skip, saying how to build. The rest needs no binary.
+ */
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+import {
+  ClapQualifyError,
+  RT_SAFETY_DOCUMENT_SCHEMA,
+  parseClapQualifyLine,
+  parseClapQualifyOutput,
+  qualifyClap,
+  qualifyClapTargets,
+  rtSafetyDocument,
+  rtSafetyDocumentName,
+  type ClapQualifyRun,
+} from "./clap-qualify.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { OMX_CLAP_HOST_EXTENSIONS, OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
+import { CLAP_QUALIFY_TOOL_ENV, CLAP_SWEEP_BLOCKS, QUALIFY_RATES, RT_INTERPOSE_ENV } from "./qualify-declarations.js";
+import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
+
+const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+const FIXTURES = join(PKG, "native", "build", "fixtures");
+const SAFE = join(FIXTURES, "rt-safe.clap");
+const UNSAFE = join(FIXTURES, "rt-unsafe.clap");
+const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
+const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE].every((p) => existsSync(p));
+
+/** A live test: the native build must exist; on CI its absence fails rather than skips. */
+function live(name: string, body: () => void): void {
+  it(name, (ctx) => {
+    if (!BUILT) {
+      if (process.env["CI"]) throw new Error("native/build is missing: CI builds it with make -C native deps all");
+      ctx.skip("native/build is missing: make -C native deps all");
+    }
+    body();
+  });
+}
+
+const sha256 = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+/** A prober line as the tool prints it, with `patch` merged over the facts. */
+function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string[] } = {}): string {
+  return JSON.stringify({
+    uri: `urn:clap:${SAFE_ID}`,
+    format: "clap",
+    id: SAFE_ID,
+    binary: { path: "/x/rt-safe.clap", sha256: "a".repeat(64) },
+    hostExtensions: patch.hostExtensions ?? [...OMX_CLAP_HOST_EXTENSIONS],
+    clap: {
+      mainInputChannels: 2,
+      mainOutputChannels: 2,
+      sidechainInputs: 0,
+      features: ["audio-effect"],
+      headlessOk: true,
+      noteInputs: 0,
+      latency: { "48000": { declaredFrames: 0, measuredFrames: 0 } },
+      threadViolations: 0,
+      processErrors: 0,
+      processCalls: 512,
+      nonFinite: false,
+      ...patch.clap,
+    },
+    rtSafety: {
+      interposer: true,
+      swept: true,
+      sweepApplicable: true,
+      blocks: 512,
+      blockFrames: 512,
+      allocationsInRun: 0,
+      locksInRun: 0,
+      syscallsInRun: 0,
+      events: [],
+      ...patch.rtSafety,
+    },
+  });
+}
+
+describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins", () => {
+  live("the RT-safe plugin is suitable on a clean count, its document bound to the file's SHA-256 and the console", () => {
+    const [l] = qualifyClap(SAFE, undefined, { rates: QUALIFY_RATES });
+    const doc = rtSafetyDocument(l!);
+    expect(doc.schema).toBe(RT_SAFETY_DOCUMENT_SCHEMA);
+    expect(doc.plugin).toEqual({ uri: `urn:clap:${SAFE_ID}`, format: "clap", binary: { path: SAFE, sha256: sha256(SAFE) } });
+    expect(doc.console).toBe(OPENMIXER_CONSOLE_PROFILE.id);
+    expect(doc.verdict).toMatchObject({ rating: "suitable", rtSafe: true });
+    expect(doc.verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
+    expect(doc.measured.rtSafety).toMatchObject({ interposer: true, swept: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
+    expect(doc.measured.clap.processCalls).toBe(CLAP_SWEEP_BLOCKS * QUALIFY_RATES.length);
+    expect(Object.keys(doc.measured.clap.latency)).toEqual(QUALIFY_RATES.map(String));
+  });
+
+  live("the RT-unsafe plugin is unsuitable on the interposer's count, and the events name the allocation", () => {
+    const [l] = qualifyClap(UNSAFE, UNSAFE_ID, { rates: QUALIFY_RATES });
+    const doc = rtSafetyDocument(l!);
+    expect(doc.plugin.binary.sha256).toBe(sha256(UNSAFE));
+    expect(doc.verdict).toMatchObject({ rating: "unsuitable", rtSafe: false });
+    expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
+    // one malloc and one free per swept block, at every rate
+    expect(doc.measured.rtSafety.allocationsInRun).toBe(2 * CLAP_SWEEP_BLOCKS * QUALIFY_RATES.length);
+    expect(doc.measured.rtSafety.events).toContain("malloc");
+  });
+
+  live("the prober offers exactly the console's CLAP host extensions", () => {
+    const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+    expect(l!.hostExtensions).toEqual(OMX_CLAP_HOST_EXTENSIONS);
+  });
+
+  live("without the interposer nothing is counted, and the verdict is unknown, never clean", () => {
+    const r = spawnSync(clapQualifyToolPath(), ["--rates", String(QUALIFY_RATES[0]), "--blocks", "4", UNSAFE], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const [l] = parseClapQualifyOutput(r.stdout);
+    expect(l!.rtSafety).toEqual({ interposer: false });
+    const doc = rtSafetyDocument(l!);
+    expect(doc.verdict.rating).toBe("unknown");
+    expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyUnmeasured);
+  });
+});
+
+describe("parseClapQualifyLine — the prober's line, refused when it is not one", () => {
+  it("reads a line into the measurement, keeping the interposer's events", () => {
+    const l = parseClapQualifyLine(line({ rtSafety: { allocationsInRun: 2, events: ["malloc", "free"] } }));
+    expect(l.rtSafety.allocationsInRun).toBe(2);
+    expect(l.rtSafety.events).toEqual(["malloc", "free"]);
+    expect(l.clap.latency).toEqual({ "48000": { declaredFrames: 0, measuredFrames: 0 } });
+  });
+
+  it("refuses what is not the prober's line, naming how it differs", () => {
+    expect(() => parseClapQualifyLine("nope")).toThrow(ClapQualifyError);
+    expect(() => parseClapQualifyLine(line().replace('"format":"clap"', '"format":"lv2"'))).toThrow(/format/);
+    expect(() => parseClapQualifyLine(line().replace("a".repeat(64), "A".repeat(64)))).toThrow(/sha256/);
+    expect(() => parseClapQualifyLine(line({ rtSafety: { allocationsInRun: -1 } }))).toThrow(/allocationsInRun/);
+    expect(() => parseClapQualifyLine(line({ clap: { headlessOk: "yes" } }))).toThrow(/headlessOk/);
+    expect(() => parseClapQualifyLine(line().replace(`"uri":"urn:clap:${SAFE_ID}"`, '"uri":"urn:clap:other"'))).toThrow(/uri/);
+  });
+});
+
+describe("rtSafetyDocument — the rtSafety dimension's verdict, and nothing else's", () => {
+  it("a lock or a syscall in process() is as unsuitable as an allocation", () => {
+    for (const patch of [{ locksInRun: 1 }, { syscallsInRun: 3 }]) {
+      const doc = rtSafetyDocument(parseClapQualifyLine(line({ rtSafety: patch })));
+      expect(doc.verdict.rating).toBe("unsuitable");
+      expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
+    }
+  });
+
+  it("a thread violation or a process error is unsuitable; a sweep that ran nothing is unknown", () => {
+    expect(rtSafetyDocument(parseClapQualifyLine(line({ clap: { threadViolations: 1 } }))).verdict.deciding?.code).toBe(HOSTING_CODE.clapThreadViolation);
+    expect(rtSafetyDocument(parseClapQualifyLine(line({ clap: { processErrors: 2 } }))).verdict.deciding?.code).toBe(HOSTING_CODE.clapProcessError);
+    const none = rtSafetyDocument(parseClapQualifyLine(line({ clap: { processCalls: 0 } })));
+    expect(none.verdict.rating).toBe("unknown");
+    expect(none.verdict.deciding?.code).toBe(HOSTING_CODE.clapUnqualified);
+  });
+
+  it("a plugin with no parameter is measured at rest: nothing to sweep is not unswept", () => {
+    const doc = rtSafetyDocument(parseClapQualifyLine(line({ rtSafety: { swept: false, sweepApplicable: false } })));
+    expect(doc.verdict.rating).toBe("suitable");
+  });
+
+  it("a line taken with other host extensions than the console's is not the console's measurement", () => {
+    const doc = rtSafetyDocument(parseClapQualifyLine(line({ hostExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] })));
+    expect(doc.verdict.rating).toBe("unknown");
+    expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
+  });
+
+  it("is recorded per binary hash and console", () => {
+    const l = parseClapQualifyLine(line());
+    const jalv = shippedHostProfile("jalv")!;
+    expect(rtSafetyDocumentName(rtSafetyDocument(l))).toBe(`${"a".repeat(64)}.${OPENMIXER_CONSOLE_PROFILE.id}.rt-safety.json`);
+    expect(rtSafetyDocument(l, jalv).console).toBe(jalv.id);
+  });
+});
+
+describe("qualifyClap — the run, fail closed", () => {
+  const answering = (stdout: string, extra: { status?: number; signal?: string } = {}): { run: ClapQualifyRun; calls: unknown[] } => {
+    const calls: unknown[] = [];
+    return { calls, run: (tool, args, env) => (calls.push({ tool, args, preload: env["LD_PRELOAD"] }), { status: extra.status ?? 0, signal: extra.signal ?? null, stdout }) };
+  };
+  const exists = () => true;
+
+  it("runs the named prober under the named interposer, at the rates asked", () => {
+    const { run, calls } = answering(line());
+    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
+    qualifyClap("/p/x.clap", SAFE_ID, { rates: [44100, 48000], run, env, exists });
+    expect(calls).toEqual([
+      { tool: "/t/clap-qualify", args: ["--rates", "44100,48000", "--block", "512", "--blocks", "512", "/p/x.clap", SAFE_ID], preload: "/t/rt.so" },
+    ]);
+  });
+
+  it("an absent prober or interposer is refused, naming the setting", () => {
+    const { run } = answering(line());
+    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: (p) => !p.endsWith(".so") })).toThrow(new RegExp(RT_INTERPOSE_ENV));
+    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: () => false })).toThrow(new RegExp(CLAP_QUALIFY_TOOL_ENV));
+  });
+
+  it("a crash, a failed load or silence is no measurement", () => {
+    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering("", { signal: "SIGSEGV", status: null as never }).run, env: {}, exists })).toThrow(/SIGSEGV/);
+    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering(line(), { status: 2 }).run, env: {}, exists })).toThrow(/exited 2/);
+    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering("").run, env: {}, exists })).toThrow(/nothing/);
+  });
+
+  it("a target that cannot be measured reads unknown, unmeasured, under every profile", () => {
+    const pass = qualifyClapTargets([{ format: "clap", uri: `urn:clap:${SAFE_ID}` }], {
+      rates: [48000],
+      env: {},
+      exists,
+      profiles: [OPENMIXER_CONSOLE_PROFILE, shippedHostProfile("jalv")!],
+    });
+    expect(pass.documents).toEqual([]);
+    expect(pass.failures).toHaveLength(1);
+    expect(pass.verdicts.map((v) => [v.host, v.measured, v.rating])).toEqual([
+      [OPENMIXER_CONSOLE_PROFILE.id, false, "unknown"],
+      ["jalv", false, "unknown"],
+    ]);
+  });
+});

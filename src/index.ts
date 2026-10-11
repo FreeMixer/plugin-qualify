@@ -14,5 +14,6 @@ export * from "./hosting-codes.js";
 export * from "./loader.js";
 export * from "./lv2-loader.js";
 export * from "./clap-loader.js";
+export * from "./clap-qualify.js";
 export * from "./qualify-options.js";
 export * from "./qualify-cli.js";
