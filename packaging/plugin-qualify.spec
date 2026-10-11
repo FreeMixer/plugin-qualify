@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.1.1
+Version: 0.2.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -49,6 +49,17 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_prefix}/lib/node_modules/@openmixer/
 
 %changelog
+* Sun Oct 11 2026 Pau Aliagas <linuxnow@gmail.com> - 0.2.0-1
+- New hosting code `hosting.output.non-finite`: the refusal the
+  libomx-clap-core CLAP host gives a plugin whose output goes non-finite.
+- `CLAP_CORE_REFUSALS` lists the refusals libomx-clap-core returns from
+  open, activate and the timed open, each by the hosting code it answers
+  with.
+- `ScalingNoteCode` types the words `latency.scalingNote` may carry, and a
+  test keeps `benchmark.py`'s scaling notes equal to the declared list.
+- The CLAP host extensions list is documented as the mirror of the header
+  libomx-clap-core's host object offers.
+
 * Thu Oct 08 2026 Pau Aliagas <linuxnow@gmail.com> - 0.1.1-1
 - plugin-qualify installs from the FreeMixer package channel: `dnf install
   plugin-qualify` on Fedora, `apt install plugin-qualify` on Debian bookworm

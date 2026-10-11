@@ -1,3 +1,17 @@
+plugin-qualify (0.2.0) unstable; urgency=medium
+
+  * New hosting code `hosting.output.non-finite`: the refusal the
+    libomx-clap-core CLAP host gives a plugin whose output goes non-finite.
+  * `CLAP_CORE_REFUSALS` lists the refusals libomx-clap-core returns from
+    open, activate and the timed open, each by the hosting code it answers
+    with.
+  * `ScalingNoteCode` types the words `latency.scalingNote` may carry, and a
+    test keeps `benchmark.py`'s scaling notes equal to the declared list.
+  * The CLAP host extensions list is documented as the mirror of the header
+    libomx-clap-core's host object offers.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sun, 11 Oct 2026 12:00:00 +0000
+
 plugin-qualify (0.1.1) unstable; urgency=medium
 
   * plugin-qualify installs from the FreeMixer package channel: `dnf install
