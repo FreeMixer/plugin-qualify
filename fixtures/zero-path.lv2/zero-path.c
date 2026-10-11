@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
-/* Evaluation fixture (docs/design/notes/2026-09-25-mod-host-upstream-fixes-eval.md): an audio
+/* Evaluation fixture: an audio
  * pass-through that emits, on its notify port, a patch:Set whose value is an atom:Path of body
  * size ZERO — what NAM does with no model loaded (mod-host PR #98, 7e1f143). Emitted on the first
  * cycle after activate and then every 32 cycles, so a racked instance keeps feeding mod-host's

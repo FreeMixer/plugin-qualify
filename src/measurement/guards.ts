@@ -3,8 +3,7 @@
 /**
  * The only shape primitives this directory uses.
  *
- * `src/measurement/` is written to be lifted out of openmixer as a directory copy
- * (issue #343), so it imports NOTHING from its parent package — not even the catalog's
+ * `src/measurement/` is written to be lifted out as a directory copy, so it imports NOTHING from its parent package — not even the catalog's
  * own `guards.ts`, whose header explains the same reasoning one level up. Keep it that
  * way: any import that reaches outside this directory turns a copy into a port.
  *

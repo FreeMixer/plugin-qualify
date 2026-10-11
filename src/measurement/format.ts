@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * **The LV2 plugin measurement interchange format** — one measurement run, on one
- * machine, in one document (issue #343).
+ * machine, in one document.
  *
  * `lv2:latency` is a declared port and it is often wrong: the 958-plugin sweep behind
  * `data/catalog.json` found 57 declared-vs-measured mismatches. Measured figures exist in
@@ -404,7 +404,7 @@ export interface MeasuredPlugin {
   readonly name?: string;
   /**
    * The plugin's own version (`lv2:minorVersion.lv2:microVersion`), when it declares one.
-   * A latency figure attached to no version is the trap #343 names: the next release moves
+   * A latency figure attached to no version is a trap: the next release moves
    * the window and the figure becomes wrong without becoming absent.
    */
   readonly version?: string;

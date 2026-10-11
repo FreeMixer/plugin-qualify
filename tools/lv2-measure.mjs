@@ -3,13 +3,13 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * `lv2-measure` — measure the LV2 plugins on THIS machine and write a versioned
- * measurement document (issue #343).
+ * measurement document.
  *
  * Standalone by construction: it needs `python3` with the `lilv` bindings, the two probers
  * next to this file (`scan.py`, `benchmark.py`), and an LV2 world to look at. It does not
- * need openmixer's engine, its server, PipeWire, JACK, an audio interface, or root. Nothing
- * it writes is openmixer-shaped — the output is the interchange format documented in
- * `docs/design/lv2-measurement-interchange.md`, which any LV2 host can read.
+ * need the OpenMixer engine, its server, PipeWire, JACK, an audio interface, or root. Nothing
+ * it writes is openmixer-shaped — the output is the interchange format described in
+ * `src/measurement/format.ts`, which any LV2 host can read.
  *
  * This file is deliberately thin. Every decision — argument parsing, the pass order, the
  * progress heuristic, the assembly of the document — lives in `src/measurement/cli.ts` and
@@ -31,7 +31,7 @@
  * ## Machine-readable progress
  *
  * With `--progress-json`, one JSON object per line is written to stderr, each prefixed
- * `@progress `. A supervising process (openmixer's Setup screen, issue #342) parses those and
+ * `@progress `. A supervising process (the OpenMixer console's Setup screen) parses those and
  * ignores everything else, so the human log stays readable.
  */
 import { spawn } from "node:child_process";

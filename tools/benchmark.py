@@ -87,9 +87,8 @@ SCALING_TOL_MS_REL = 0.02
 # could reach a mix; under this floor the flag fires on the onset detector's own noise
 # and devalues itself where rate-dependence is real.
 #
-# 2 ms is the per-channel latency budget of
-# `docs/design/latency-budget-and-plugin-curation.md` — the amount ONE plugin is
-# allowed to spend — not a number tuned to this dataset. The measured population
+# 2 ms is the per-channel latency budget,
+# the amount ONE plugin is allowed to spend — not a number tuned to this dataset. The measured population
 # happens to leave it unambiguous: over the 124 plugins that read non-zero at any
 # rate, the `nonconforming` set is bimodal in its worst-rate latency, nine plugins
 # between 0.34 and 1.13 ms (every one a non-linear waveshaper: the guitarix amp/
@@ -148,8 +147,7 @@ DEFAULT_COST_BLOCK = 512
 # discarded (only their median is kept, as evidence the discard was warranted):
 # the first blocks pay for lazy allocation, filter-table building, cold i-cache
 # and the branch predictor still learning the plugin's inner loops. 64 is the
-# empirically-derived figure — see docs/design/plugin-cpu-cost.md for the
-# convergence run that chose it.
+# empirically-derived figure: the cost readings stopped moving by then.
 DEFAULT_COST_WARMUP = 64
 # Ceiling on timed blocks per plugin per rate. More blocks buy a better tail
 # estimate; past a few hundred they only buy wall-clock across 958 plugins x 4 rates.

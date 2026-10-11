@@ -3,7 +3,7 @@
 /**
  * Where the package's own tools live, resolved from this module so it follows the package
  * wherever it is installed (a checkout, an RPM's bundled node_modules, a pnpm store). The
- * tools are shipped RUNTIME artefacts (issue #342), not dev scripts.
+ * tools are shipped RUNTIME artefacts, not dev scripts.
  */
 import { fileURLToPath } from "node:url";
 

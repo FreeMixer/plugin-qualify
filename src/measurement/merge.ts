@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * **Shipped defaults, overridden by local measurement** (issue #342) — and the operator can
+ * **Shipped defaults, overridden by local measurement** — and the operator can
  * always see which is which.
  *
  * The rule is one sentence: *what we ship is a sensible default; a local run overrides it.*
@@ -17,7 +17,7 @@
  *
  * So a local run REPLACES a plugin's whole dimension or none of it. A rate the local run did
  * not cover comes back as MISSING, not as the shipped number wearing a local label
- * ({@link MergedMeasurements.missingRates}) — which is exactly what #342 asks for when the
+ * ({@link MergedMeasurements.missingRates}) — which is what a reader wants when the
  * operator later adds a rate: *"the affected figures are missing rather than wrong — surface
  * that, and offer to measure the new rate rather than quietly interpolating."*
  *

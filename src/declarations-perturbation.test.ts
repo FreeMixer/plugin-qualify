@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * R-094 for the package (`docs/design/specs/2026-09-25-plugin-qualify.md` §4): a declared
+ * R-094 for the package: a declared
  * number is MOVED and every consumer must move with it — here the CLI's defaults and `--help`,
  * both read through `qualify-options.ts` — and a declaration no production module (or the
  * Python-declarations generator) reads is dead.

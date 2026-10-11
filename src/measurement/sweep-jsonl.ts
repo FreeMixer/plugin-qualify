@@ -3,8 +3,8 @@
 /**
  * The hosting sweep's JSONL → the interchange format's three hosting dimensions.
  *
- * `lv2-measure` (the C lilv host, `packages/pipewire-native/tools/lv2-measure.c`) under
- * `rt-interpose.c` writes one JSON line per plugin, and the sweep ran it in THREE passes a
+ * `lv2-measure` (a C lilv host, run under an
+ * allocation-and-syscall interposer) writes one JSON line per plugin, and the sweep ran it in THREE passes a
  * reader has to put back together:
  *
  * - the QUICK pass (`all-measurements.jsonl`): every plugin, 30 lifecycles, the interposer's

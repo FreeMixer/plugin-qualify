@@ -3,7 +3,7 @@
 /**
  * What a run is going to do, decided before it starts.
  *
- * Two questions, and #342 answers both in the same breath: *"Measure at least the rates this
+ * Two questions, answered in the same breath: *"Measure at least the rates this
  * installation can actually use … but it must not silently fall back to a rate it does not
  * use"*, and *"show progress"* — which needs a duration, which nobody can honestly produce
  * for a machine they have never seen.
@@ -196,7 +196,7 @@ export function estimateRunSeconds(
  * Rates a completed run covers that the installation no longer cares about, and rates the
  * installation now uses that the run never covered.
  *
- * The second list is #342's rate-change case: the operator moved the rig to 96 kHz, so the
+ * The second list is the rate-change case: the operator moved the rig to 96 kHz, so the
  * figures for 96 kHz are MISSING rather than wrong, and the console should offer to measure
  * them instead of interpolating across a boundary 19 nonconforming plugins prove cannot be
  * interpolated across.

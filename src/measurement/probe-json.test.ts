@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The prober's free text becoming a controlled vocabulary — #343's point 3, which is the
- * part that decides whether anyone else's measurements can ever be merged with ours.
+ * The prober's free text becoming a controlled vocabulary — the part that decides whether anyone else's measurements can ever be merged with ours.
  *
  * The direction of the mapping matters more than its coverage: an unrecognised failure must
  * land on `probe-error` (a run property) and never on a structural reason, because a

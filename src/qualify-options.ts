@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The `plugin-qualify` CLI's OPTIONS, declared once (`docs/design/specs/2026-09-25-plugin-qualify.md`
- * §5). The parser, `--help` and the tests all read this table; every default is a declaration
+ * The `plugin-qualify` CLI's OPTIONS, declared once. The parser, `--help` and the tests all read this table; every default is a declaration
  * from `declarations.ts`, never a literal here.
  */
 import { QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";

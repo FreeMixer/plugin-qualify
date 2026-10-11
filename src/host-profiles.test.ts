@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The host profiles as declared (`docs/design/specs/2026-09-25-plugin-qualify.md` §3a): the
+ * The host profiles as declared: the
  * shipped three, the lists they cite, and the reader a project's own profile file goes through —
  * which refuses a missing or mistyped field rather than filling in a host it was not told about.
  */

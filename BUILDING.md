@@ -41,6 +41,10 @@ dpkg-buildpackage -b -uc -us                      # the DEB
 There is no changelog file: git history is the changelog. `debian/changelog` and the spec's `%changelog`
 are packaging metadata. Bump `version` in `package.json` and `Version:` in the spec together.
 
-The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github and the npm
-package through npm trusted publishing (`.github/workflows/publish-npm.yml`, no token). Pull requests
+The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github. Pull requests
 build both package kinds as a dry run and publish nothing.
+
+The npm package is not published yet. `.github/workflows/publish-npm.yml` publishes it by npm trusted
+publishing (no token) when run by hand; npm accepts a trusted publisher only for a name that already
+exists, so the owner publishes a placeholder and sets the trusted publisher on npmjs.com first, then
+the workflow can be moved back to the tag.

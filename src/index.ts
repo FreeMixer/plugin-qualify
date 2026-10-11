@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * plugin-qualify — scan, offline measurement, hosting sweep and the fail-closed rating of audio
- * plugins (`docs/design/specs/2026-09-25-plugin-qualify.md`).
+ * plugins.
  */
 export * from "./qualify-declarations.js";
 export * from "./measurement/index.js";

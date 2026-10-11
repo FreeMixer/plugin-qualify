@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
-"""The presets a plugin ships (docs/design/specs/2026-10-01-plugin-presets.md section 2b, section 7.1).
+"""The presets a plugin ships.
 
 The pure half needs no lilv; the installed half reads two real bundles through the scan and is
 skipped, naming what is missing, on a host that does not have them.

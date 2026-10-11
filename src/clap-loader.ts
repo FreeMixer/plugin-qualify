@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The CLAP implementation of the one discovery seam (`loader.ts`, spec
- * `docs/design/specs/2026-09-25-plugin-qualify.md` §7). A target that is a `.clap` file, or a
+ * The CLAP implementation of the one discovery seam (`loader.ts`). A target that is a `.clap` file, or a
  * directory holding one, is scanned by `omx-clap-scan --json` (the scanner of omx-clap-host),
  * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. The
  * scanner's JSON is the input: {@link clapScanDescriptors} normalises it into the interchange

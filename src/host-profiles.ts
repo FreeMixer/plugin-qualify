@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * HOST PROFILES — the host a verdict is judged against, declared (`docs/design/specs/2026-09-25-plugin-qualify.md`
- * §3a). The measurements are profile-free; `classifyPluginHosting` reads one of these to say
+ * HOST PROFILES — the host a verdict is judged against, declared. The measurements are profile-free; `classifyPluginHosting` reads one of these to say
  * whether THAT host can run the plugin. A profile names only what differs between hosts; every
  * other rule is the one classifier's.
  */
@@ -20,11 +19,11 @@ export { readHostProfile, type HostProfile, type HostProfileRead } from "./measu
 import type { HostProfile } from "./measurement/format.js";
 
 /**
- * The LV2 features the in-process stage provides — the ONE list (host-backend-one-contract §3).
+ * The LV2 features the in-process stage provides — the ONE list (the console's host-backend contract).
  * The verdict judges `required ⊆ provided` against it (as the `openmixer-console` profile), and
  * the console hands the same array to the in-process LV2 table at `omx_host_backend_configure`,
  * which builds one provider per URI and refuses a URI it cannot provide; there is no C copy (the
- * native test reads this export through `packages/pipewire-native/tools/lv2-inprocess-features.sh`).
+ * console's native test reads this export).
  */
 export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/urid#map",

@@ -2,9 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 //
 // The rating vocabulary every verdict speaks: four ratings, their severity order, the
-// worst-wins fold, and whether a reason is physics or taste. Moved here from
-// `@freemixer/catalog`'s `destination-suitability.ts`, which re-exports it
-// (`docs/design/specs/2026-09-25-plugin-qualify.md` §3).
+// worst-wins fold, and whether a reason is physics or taste.
 
 import type { VerdictRating } from "./measurement/vocabulary.js";
 
