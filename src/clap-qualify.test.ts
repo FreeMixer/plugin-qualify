@@ -9,10 +9,11 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   ClapQualifyError,
@@ -27,7 +28,7 @@ import {
 } from "./clap-qualify.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { OMX_CLAP_HOST_EXTENSIONS, OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
-import { CLAP_QUALIFY_TOOL_ENV, CLAP_SWEEP_BLOCKS, QUALIFY_RATES, RT_INTERPOSE_ENV } from "./qualify-declarations.js";
+import { CLAP_QUALIFY_TOOL_ENV, CLAP_SCAN_TOOL_ENV, CLAP_SWEEP_BLOCKS, QUALIFY_RATES, RT_INTERPOSE_ENV } from "./qualify-declarations.js";
 import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,6 +38,9 @@ const UNSAFE = join(FIXTURES, "rt-unsafe.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
 const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE].every((p) => existsSync(p));
+
+const scratch = mkdtempSync(join(tmpdir(), "clap-qualify-"));
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** A live test: the native build must exist; on CI its absence fails rather than skips. */
 function live(name: string, body: () => void): void {
@@ -126,6 +130,33 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     const doc = rtSafetyDocument(l!);
     expect(doc.verdict.rating).toBe("unknown");
     expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyUnmeasured);
+  });
+
+  live("plugin-qualify on a .clap: one verdict per plugin, a document per hash and console in --out, the exit code", () => {
+    // the scan is the scanner's: a stub answers with the two fixtures' rows
+    const doc = (path: string, id: string) =>
+      `{"path":${JSON.stringify(path)},"plugins":[{"id":"${id}","name":"g","vendor":"","version":"1","description":"","url":"","features":["audio-effect"],"params":[],"audio_ports":{"inputs":[{"id":0,"name":"in","role":"main","channels":2}],"outputs":[{"id":0,"name":"out","role":"main","channels":2}]},"note_ports":{"inputs":0,"outputs":0}}]}`;
+    const stub = join(scratch, "scan.sh");
+    writeFileSync(
+      stub,
+      `#!/bin/sh\ncase "$2" in *rt-unsafe*) f='${doc(UNSAFE, UNSAFE_ID)}';; *) f='${doc(SAFE, SAFE_ID)}';; esac\n` +
+        `printf '{"scanner":"omx-clap-scan","version":"0","files":[%s]}' "$f"\n`,
+    );
+    chmodSync(stub, 0o755);
+    const bin = join(PKG, "bin", "plugin-qualify.mjs");
+    const run = (target: string, out: string) =>
+      spawnSync(process.execPath, [bin, "--rates", String(QUALIFY_RATES[0]), "--out", out, target], {
+        encoding: "utf8",
+        env: { ...process.env, [CLAP_SCAN_TOOL_ENV]: stub },
+      });
+    const safeOut = join(scratch, "safe");
+    const safe = run(SAFE, safeOut);
+    expect(safe.status).toBe(0);
+    expect(safe.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));
+    expect(readdirSync(safeOut)).toEqual([`${sha256(SAFE)}.${OPENMIXER_CONSOLE_PROFILE.id}.rt-safety.json`]);
+    const unsafe = run(UNSAFE, join(scratch, "unsafe"));
+    expect(unsafe.status).toBe(1);
+    expect(unsafe.stdout).toContain(HOSTING_CODE.rtSafetyViolations);
   });
 });
 
