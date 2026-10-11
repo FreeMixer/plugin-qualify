@@ -1,3 +1,10 @@
+plugin-qualify (0.2.1) unstable; urgency=medium
+
+  * The GitHub release carries the npm tarball
+    openmixer-plugin-qualify-0.2.1.tgz, dist/ built in.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sun, 11 Oct 2026 18:00:00 +0000
+
 plugin-qualify (0.2.0) unstable; urgency=medium
 
   * New hosting code `hosting.output.non-finite`: the refusal the
