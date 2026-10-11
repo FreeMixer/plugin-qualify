@@ -191,7 +191,7 @@ export function isKnownScalingCode(code: string): boolean {
  * detector's rather than the plugin's, and `informational-rate`, where only a reading below
  * the operational rates breaks the law (`lv2-measurement-interchange.md` §1a).
  */
-export const SCALING_NOTE_TERMS: readonly ScalingTerm[] = [
+export const SCALING_NOTE_TERMS = [
   {
     code: "below-budget",
     description:
@@ -204,7 +204,10 @@ export const SCALING_NOTE_TERMS: readonly ScalingTerm[] = [
       "The readings together fit no law, but those at the operational rates (48 kHz and up) do; " +
       "the reading below them stays in perRate as information and does not flag the plugin.",
   },
-];
+] as const satisfies readonly ScalingTerm[];
+
+/** One of the {@link SCALING_NOTE_TERMS} codes — the words `latency.scalingNote` may carry. */
+export type ScalingNoteCode = (typeof SCALING_NOTE_TERMS)[number]["code"];
 
 /**
  * Why one rate's reading was excluded from the fit and from every rate resolution. A
