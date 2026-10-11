@@ -1,12 +1,21 @@
 name: publish-npm
 
-# A version tag publishes @openmixer/plugin-qualify to npm. There is no token: npm trusted publishing
-# exchanges this workflow's OIDC identity for a short-lived credential, and the package is published with
-# provenance. The trusted publisher on npmjs.com names this repository and this workflow file.
+# Publishes @openmixer/plugin-qualify to npm. There is no token: npm trusted publishing exchanges this
+# workflow's OIDC identity for a short-lived credential, and the package is published with provenance.
+# The trusted publisher on npmjs.com names this repository and this workflow file.
+#
+# Run by hand, from a version tag, until the name exists on npm: npm only accepts a trusted publisher for a
+# package that has been published once, so the first publish (a placeholder, as for omx-contract) and the
+# trusted-publisher setting are done on npmjs.com by the owner. After that, add `push: tags: ['v*']` here.
+# A dry run, the default, packs and checks everything and publishes nothing.
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Pack and run `npm publish --dry-run` only'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -30,7 +39,12 @@ jobs:
       - name: The tag is the package's version
         run: |
           set -euo pipefail
-          test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+          else
+            echo "not a tag: only a dry run makes sense here"
+            test "${{ inputs.dry-run }}" = true
+          fi
 
       - name: Install pnpm
         run: npm install -g pnpm@10.33.0
@@ -43,4 +57,11 @@ jobs:
 
       # trusted publishing needs npm 11.5.1 or newer, which node 24 carries
       - name: Publish
-        run: npm publish --provenance --access public
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            npm publish --dry-run --provenance --access public
+          else
+            npm publish --provenance --access public
+          fi
