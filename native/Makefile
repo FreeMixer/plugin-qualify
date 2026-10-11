@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+#
+# The CLAP prober, the interposer it runs under and the fixture plugins its tests qualify.
+#
+#   make -C native           build/clap-qualify, build/rt_interpose.so, build/fixtures/rt-{safe,unsafe}.clap
+#   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
+#
+# The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
+# header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd.
+
+CC ?= cc
+PKG_CONFIG ?= pkg-config
+BUILD ?= build
+
+CLAP_REF := 1.2.6
+PLUGIN_HOSTD_REF := v0.1.3
+
+ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
+CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
+else
+CLAP_CFLAGS ?= -Ideps/clap/include
+endif
+ifeq ($(shell $(PKG_CONFIG) --exists plugin-hostd && echo true),true)
+PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-hostd)
+else
+PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
+endif
+
+CFLAGS ?= -O2 -g
+CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
+
+all: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap
+
+$(BUILD) $(BUILD)/fixtures:
+	mkdir -p $@
+
+# -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
+$(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
+	$(CC) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) -o $@ $< -ldl -lm
+
+$(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
+
+$(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden -o $@ $<
+
+$(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden -o $@ $<
+
+deps:
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
+
+clean:
+	rm -rf $(BUILD)
+
+.PHONY: all deps clean
