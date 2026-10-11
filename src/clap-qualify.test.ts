@@ -24,6 +24,7 @@ import {
   qualifyClapTargets,
   rtSafetyDocument,
   rtSafetyDocumentName,
+  rtSafetyVerdict,
   type ClapQualifyRun,
 } from "./clap-qualify.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
@@ -204,6 +205,25 @@ describe("rtSafetyDocument — the rtSafety dimension's verdict, and nothing els
     const doc = rtSafetyDocument(parseClapQualifyLine(line({ hostExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] })));
     expect(doc.verdict.rating).toBe("unknown");
     expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
+  });
+
+  it("a host with no CLAP path is not judged by the console's extensions (#19)", () => {
+    const jalv = shippedHostProfile("jalv")!;
+    const doc = rtSafetyDocument(parseClapQualifyLine(line()), jalv);
+    expect(doc.console).toBe("jalv");
+    expect(doc.verdict.rating).toBe("unknown");
+    expect(doc.verdict.rtSafe).toBe(false);
+    expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.clapFormatNotHosted);
+    expect(rtSafetyVerdict(doc)).toMatchObject({ host: "jalv", qualified: false, rating: "unknown" });
+  });
+
+  it("a profile with its own extension list is judged by that list, not the console's (#19)", () => {
+    const own = { ...OPENMIXER_CONSOLE_PROFILE, id: "own", clapExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] };
+    const asOwn = rtSafetyDocument(parseClapQualifyLine(line({ hostExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] })), own);
+    expect(asOwn.verdict.rating).toBe("suitable");
+    const asConsole = rtSafetyDocument(parseClapQualifyLine(line()), own);
+    expect(asConsole.verdict.rating).toBe("unknown");
+    expect(asConsole.verdict.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
   });
 
   it("is recorded per binary hash and console", () => {

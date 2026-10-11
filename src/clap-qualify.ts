@@ -29,7 +29,7 @@ import {
   type PluginClapMeasurement,
   type PluginRtSafetyMeasurement,
 } from "./hosting-suitability.js";
-import { OMX_CLAP_HOST_EXTENSIONS, OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js";
+import { OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js";
 import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
@@ -205,23 +205,28 @@ export interface RtSafetyDocument {
 
 /**
  * The verdict document for one prober line under one host profile. The interposer's counts and the
- * two violations only a CLAP commits decide it; a line from a prober that offered other host
- * extensions than the console's is not this console's measurement and reads `unknown`.
+ * two violations only a CLAP commits decide it. The line is judged against the profile's own CLAP
+ * host extensions: a line from a prober that offered others is not that host's measurement, and a
+ * host with no CLAP path has none; both read `unknown`.
  */
 export function rtSafetyDocument(line: ClapQualifyLine, profile: HostProfile = OPENMIXER_CONSOLE_PROFILE): RtSafetyDocument {
-  const offeredAsConsole =
-    line.hostExtensions.length === OMX_CLAP_HOST_EXTENSIONS.length && OMX_CLAP_HOST_EXTENSIONS.every((e) => line.hostExtensions.includes(e));
-  const reasons: HostingReason[] = offeredAsConsole
-    ? [...rtSafetyReasons(line.rtSafety), ...clapRtReasons(line.clap)]
-    : [
-        {
-          dimension: "rtSafety",
-          kind: "objective",
-          rating: "unknown",
-          code: HOSTING_CODE.clapExtensionsNotCovered,
-          params: { extensions: line.hostExtensions.join(" ") },
-        },
-      ];
+  const offered = profile.clapExtensions;
+  const offeredAsProfile =
+    offered !== null && line.hostExtensions.length === offered.length && offered.every((e) => line.hostExtensions.includes(e));
+  const reasons: HostingReason[] =
+    offered === null
+      ? [{ dimension: "rtSafety", kind: "objective", rating: "unknown", code: HOSTING_CODE.clapFormatNotHosted, params: {} }]
+      : offeredAsProfile
+        ? [...rtSafetyReasons(line.rtSafety), ...clapRtReasons(line.clap)]
+        : [
+            {
+              dimension: "rtSafety",
+              kind: "objective",
+              rating: "unknown",
+              code: HOSTING_CODE.clapExtensionsNotCovered,
+              params: { extensions: line.hostExtensions.join(" ") },
+            },
+          ];
   const rating = worstRating(reasons.map(contributedHostingRating));
   const deciding = [...reasons]
     .sort((a, b) => RATING_SEVERITY[contributedHostingRating(b)] - RATING_SEVERITY[contributedHostingRating(a)])
