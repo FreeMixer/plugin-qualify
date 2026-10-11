@@ -52,8 +52,10 @@ dpkg-buildpackage -b -uc -us                      # the DEB
 There is no changelog file: git history is the changelog. `debian/changelog` and the spec's `%changelog`
 are packaging metadata. Bump `version` in `package.json` and `Version:` in the spec together.
 
-The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github. Pull requests
-build both package kinds as a dry run and publish nothing.
+The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github and attaches the
+`pnpm pack` tarball, `openmixer-plugin-qualify-<version>.tgz` with `dist/` built in, to the GitHub
+release. Pull requests build both package kinds and pack the tarball as a dry run and publish nothing;
+`node packaging/check-tarball.mjs <tarball>` checks it carries every `exports` target.
 
 The npm package is not published yet. `.github/workflows/publish-npm.yml` publishes it by npm trusted
 publishing (no token) when run by hand; npm accepts a trusted publisher only for a name that already
