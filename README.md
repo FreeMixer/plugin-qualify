@@ -78,6 +78,11 @@ document per plugin binary and host profile, named `<sha256>.<profile>.rt-safety
 verdict never outlives the bytes it was measured on. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
 name the prober and the interposer when they are not the checkout's own build.
 
+The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
+keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
+the plugin's `value_to_text` renders them), each parameter's module, and the plugin's
+remote-control pages.
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own

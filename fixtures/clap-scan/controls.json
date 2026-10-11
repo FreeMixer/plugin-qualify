@@ -1,0 +1,8 @@
+{"scanner":"clap-qualify","version":"1","files":[
+{"path":"controls.clap","plugins":[
+{"id":"org.freemixer.plugin-qualify.fixture.controls","name":"controls","vendor":"plugin-qualify","version":"1","description":"plugin-qualify fixture","url":"","features":["audio-effect"],"params":[
+{"id":3,"name":"shape","module":"Oscillator","min":0,"max":2,"default":0,"flags":["stepped","automatable","enum"],"labels":[{"value":0,"label":"Sine"},{"value":1,"label":"Square"},{"value":2,"label":"Saw"}]},
+{"id":5,"name":"cutoff","module":"Filter/Envelope","min":20,"max":20000,"default":1000,"flags":["automatable"]}
+],"remote_controls":[{"id":7,"section":"Main","name":"Performance","params":[5,3,null,null,null,null,null,null],"forPreset":false}],"audio_ports":{"inputs":[{"id":0,"name":"in","role":"main","channels":2}],"outputs":[{"id":0,"name":"out","role":"main","channels":2}]},"note_ports":{"inputs":0,"outputs":0}}
+]}
+]}

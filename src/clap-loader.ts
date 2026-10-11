@@ -6,6 +6,10 @@
  * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. The
  * scanner's JSON is the input: {@link clapScanDescriptors} normalises it into the interchange
  * rows. A scan that cannot be read is a {@link ClapScanError}, never an empty result.
+ *
+ * plugin-qualify's own prober writes the same document (`native/clap-qualify --json`, set as the
+ * scanner by the same setting), and with it an enum parameter's labels and the plugin's
+ * remote-control pages; a row keeps them, and each parameter's module, wherever the scan read them.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -16,6 +20,8 @@ import { CLAP_SCAN_TIMEOUT_S, CLAP_SCAN_TOOL_DEFAULT, CLAP_SCAN_TOOL_ENV } from 
 
 /** The scanner's own name in its document — anything else is not its output. */
 const SCANNER_NAME = "omx-clap-scan";
+/** The same document from plugin-qualify's own prober (`native/clap-qualify --json`). */
+const SCANNER_NAMES: readonly string[] = [SCANNER_NAME, "clap-qualify"];
 const CLAP_URI = /^urn:clap:(\S+)$/;
 const CLAP_SUFFIX = ".clap";
 /** A `.clap` directory listing can be tens of megabytes of JSON. */
@@ -39,6 +45,22 @@ export interface ClapScanParam {
   readonly max: number | null;
   readonly default: number | null;
   readonly flags: readonly string[];
+  /** An enum parameter's labels, as `value_to_text` renders each whole value of its range. */
+  readonly labels?: readonly ClapScanLabel[];
+}
+
+export interface ClapScanLabel {
+  readonly value: number;
+  readonly label: string;
+}
+
+/** A remote-control page: eight slots, each a parameter id or null when empty. */
+export interface ClapScanRemotePage {
+  readonly id: number;
+  readonly section: string;
+  readonly name: string;
+  readonly params: readonly (number | null)[];
+  readonly forPreset: boolean;
 }
 
 export interface ClapScanPort {
@@ -58,6 +80,8 @@ export interface ClapScanPlugin {
   readonly url: string;
   readonly features: readonly string[];
   readonly params: readonly ClapScanParam[];
+  /** Absent where the scanner does not read the pages. */
+  readonly remote_controls?: readonly ClapScanRemotePage[];
   readonly audio_ports: { readonly inputs: readonly ClapScanPort[]; readonly outputs: readonly ClapScanPort[] };
   readonly note_ports: { readonly inputs: number; readonly outputs: number };
   /** Frames, present only when the plugin reported more than 0 before it was activated. */
@@ -116,6 +140,19 @@ function parsePort(v: unknown, where: string): ClapScanPort {
   return { id: num(v, "id", where), name: str(v, "name", where), role, channels: num(v, "channels", where) };
 }
 
+function parseLabel(v: unknown, where: string): ClapScanLabel {
+  if (!isRecord(v)) return bad(`${where} is not an object`);
+  return { value: num(v, "value", where), label: str(v, "label", where) };
+}
+
+function parsePage(v: unknown, where: string): ClapScanRemotePage {
+  if (!isRecord(v)) return bad(`${where} is not an object`);
+  const slots = list(v, "params", where).map((p) => (p === null || typeof p === "number" ? p : bad(`${where} has a slot that is not an id or null`)));
+  const forPreset = v["forPreset"];
+  if (typeof forPreset !== "boolean") return bad(`${where} has no boolean forPreset`);
+  return { id: num(v, "id", where), section: str(v, "section", where), name: str(v, "name", where), params: slots, forPreset };
+}
+
 function parsePlugin(v: unknown, where: string): ClapScanPlugin | ClapScanPluginError {
   if (!isRecord(v)) return bad(`${where} is not an object`);
   const id = str(v, "id", where);
@@ -136,8 +173,10 @@ function parsePlugin(v: unknown, where: string): ClapScanPlugin | ClapScanPlugin
       max: bound(p, "max", w),
       default: bound(p, "default", w),
       flags: list(p, "flags", w).map((f) => (typeof f === "string" ? f : bad(`${w} has a flag that is not a string`))),
+      ...(p["labels"] === undefined ? {} : { labels: list(p, "labels", w).map((l, k) => parseLabel(l, `${w} label ${k}`)) }),
     };
   });
+  const pages = v["remote_controls"] === undefined ? undefined : list(v, "remote_controls", where).map((r, i) => parsePage(r, `${where} page ${i}`));
   return {
     id,
     name,
@@ -152,6 +191,7 @@ function parsePlugin(v: unknown, where: string): ClapScanPlugin | ClapScanPlugin
       outputs: list(ports, "outputs", `${where} audio_ports`).map((p, i) => parsePort(p, `${where} output ${i}`)),
     },
     note_ports: { inputs: num(notes, "inputs", `${where} note_ports`), outputs: num(notes, "outputs", `${where} note_ports`) },
+    ...(pages === undefined ? {} : { remote_controls: pages }),
     ...(v["latency"] === undefined ? {} : { latency: num(v, "latency", where) }),
   };
 }
@@ -165,7 +205,8 @@ export function parseClapScan(text: string): ClapScanDocument {
     throw new ClapScanError(`${SCANNER_NAME} printed something that is not JSON`);
   }
   if (!isRecord(doc)) return bad("not an object");
-  if (doc["scanner"] !== SCANNER_NAME) return bad(`scanner is ${JSON.stringify(doc["scanner"])}`);
+  const scanner = doc["scanner"];
+  if (typeof scanner !== "string" || !SCANNER_NAMES.includes(scanner)) return bad(`scanner is ${JSON.stringify(scanner)}`);
   const files = list(doc, "files", "the document").map((f, i): ClapScanFile => {
     const where = `file ${i}`;
     if (!isRecord(f)) return bad(`${where} is not an object`);
@@ -173,7 +214,7 @@ export function parseClapScan(text: string): ClapScanDocument {
     if (typeof f["error"] === "string") return { path, error: f["error"] };
     return { path, plugins: list(f, "plugins", `file ${path}`).map((p, j) => parsePlugin(p, `plugin ${j} of ${path}`)) };
   });
-  return { scanner: SCANNER_NAME, version: str(doc, "version", "the document"), files };
+  return { scanner, version: str(doc, "version", "the document"), files };
 }
 
 // --- the interchange row -------------------------------------------------------------------------
@@ -187,6 +228,18 @@ export interface ClapDescriptorParam extends ClapControlBounds {
   /** The CLAP parameter id in decimal — the key `param_set` takes. */
   readonly symbol: string;
   readonly name: string;
+  /** The parameter's module path (`Filter/Envelope`), where the plugin names one. */
+  readonly module?: string;
+  /** An enum parameter's labels, where the scan read them. */
+  readonly scalePoints?: readonly { readonly label: string; readonly value: number }[];
+}
+
+/** A remote-control page, its slots as parameter symbols (null where empty). */
+export interface ClapDescriptorRemotePage {
+  readonly id: number;
+  readonly section: string;
+  readonly name: string;
+  readonly params: readonly (string | null)[];
 }
 
 /** Each bound is absent where the plugin leaves it open. */
@@ -208,6 +261,8 @@ export interface ClapDescriptorRow {
   readonly format: "clap";
   readonly binaryPath: string;
   readonly latency?: { readonly reportedFrames: number };
+  /** The plugin's remote-control pages (presets' own pages excluded), where the scan read them. */
+  readonly remoteControls?: readonly ClapDescriptorRemotePage[];
 }
 
 function isPlugin(p: ClapScanPlugin | ClapScanPluginError): p is ClapScanPlugin {
@@ -226,7 +281,13 @@ function controlOf(p: ClapScanParam): ClapDescriptorParam {
     isInteger: stepped,
     isToggle: stepped && p.min === 0 && p.max === 1,
     isEnumeration: p.flags.includes("enum"),
+    ...(p.module === "" ? {} : { module: p.module }),
+    ...(p.labels === undefined || p.labels.length === 0 ? {} : { scalePoints: p.labels.map(({ label, value }) => ({ label, value })) }),
   };
+}
+
+function pageOf(page: ClapScanRemotePage): ClapDescriptorRemotePage {
+  return { id: page.id, section: page.section, name: page.name, params: page.params.map((id) => (id === null ? null : String(id))) };
 }
 
 const channels = (ports: readonly ClapScanPort[]): number => ports.reduce((n, p) => n + p.channels, 0);
@@ -254,6 +315,7 @@ export function clapScanDescriptors(doc: ClapScanDocument): ClapDescriptorRow[] 
         format: "clap",
         binaryPath,
         ...(p.latency === undefined ? {} : { latency: { reportedFrames: p.latency } }),
+        ...(p.remote_controls === undefined ? {} : { remoteControls: p.remote_controls.filter((r) => !r.forPreset).map(pageOf) }),
       });
     }
   }
