@@ -1,3 +1,19 @@
+plugin-qualify (0.3.0) unstable; urgency=medium
+
+  * plugin-qualify now checks CLAP plugins directly. It loads each .clap
+    file without a display, runs it at every sample rate and sweeps every
+    parameter while watching for anything unsafe on the audio thread, then
+    writes a verdict for that exact binary and console. A plugin that has
+    changed since it was checked is never trusted on the old verdict.
+  * The verdict follows the extensions the chosen host profile really
+    offers: asking for a profile with no CLAP support now reads as unknown
+    instead of borrowing the OpenMixer console's answer.
+  * The CLAP scan keeps parameter value names, the plugin's modules and its
+    remote-control pages, so a console can show named choices and the
+    plugin's own control pages.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Mon, 12 Oct 2026 12:00:00 +0000
+
 plugin-qualify (0.2.1) unstable; urgency=medium
 
   * The GitHub release carries the npm tarball
