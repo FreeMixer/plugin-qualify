@@ -131,6 +131,25 @@ export { HOSTING_CODE };
 
 export type HostingCode = (typeof HOSTING_CODE)[keyof typeof HOSTING_CODE];
 
+/**
+ * The refusals libomx-clap-core returns from `open`, `activate` and the timed open, each named by the KEY of the
+ * `HOSTING_CODE` it answers with — never by the string, so no second spelling of a code exists. The console's
+ * generator renders them into omx-clap-host's `clap_host_limits.h` as `CLAP_HOST_CODE_<NAME>`, the left column's
+ * name in upper snake case. The facts the qualifier judges from a measurement (latency, thread violations, process
+ * errors, RT safety) are the console's and are not here.
+ */
+export const CLAP_CORE_REFUSALS = {
+  headlessFailed: "clapHeadlessFailed",
+  notAudioEffect: "clapNotAudioEffect",
+  noteInput: "clapNoteInput",
+  noAudioInput: "topologyNoAudioInput",
+  noAudioOutput: "topologyNoAudioOutput",
+  widerThanStrip: "topologyWiderThanStrip",
+  extraInputs: "topologyExtraInputs",
+  crashedLive: "stabilityCrashedLive",
+  outputNonFinite: "outputNonFinite",
+} as const satisfies Record<string, keyof typeof HOSTING_CODE>;
+
 /** One dimension's answer for one plugin. */
 export interface HostingReason {
   readonly dimension: HostingDimension;
