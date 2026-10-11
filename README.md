@@ -57,6 +57,26 @@ with lilv, mod-host and the ASan mod-host, if you do not want to install them yo
 
 Exit code: `0` every plugin qualified, `1` some did not, `2` something could not be measured.
 
+## CLAP plugins: the RT-safety verdict
+
+A `.clap` file, or a directory holding one, is scanned by `omx-clap-scan` (from omx-clap-core; set
+`OMX_CLAP_SCAN` to its path when it is not on `PATH`) and each plugin in it is then qualified by the
+CLAP prober built from `native/` (`make -C native deps all`, see `BUILDING.md`):
+
+```
+plugin-qualify ./my-fx.clap                   # every plugin in the file
+plugin-qualify --out ./out ./my-fx.clap       # and its RT-safety documents
+```
+
+The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
+allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
+the file's SHA-256 beside what it measured. The verdict is the real-time-safety one: **suitable**
+only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
+`process()` or `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. `--out` writes one
+document per plugin binary and host profile, named `<sha256>.<profile>.rt-safety.json`, so a
+verdict never outlives the bytes it was measured on. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
+name the prober and the interposer when they are not the checkout's own build.
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own

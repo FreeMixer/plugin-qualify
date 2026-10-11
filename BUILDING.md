@@ -20,6 +20,17 @@ declarations, regenerate it and commit both:
 node tools/gen-python-declarations.mjs --write
 ```
 
+The CLAP prober, its interposer and the two fixture plugins its tests qualify (a known RT-safe and
+a known RT-unsafe gain) are C, built with make. The CLAP headers come from `pkg-config clap`
+(Fedora `clap-devel`) and plugin-hostd's `pin.h` from `pkg-config plugin-hostd`; where those are
+not installed, `make deps` fetches both at their pinned release tags into `native/deps/`:
+
+```
+make -C native deps all   # native/build/clap-qualify, rt_interpose.so, fixtures/rt-{safe,unsafe}.clap
+```
+
+The CLAP tests run the build; without it they skip, except on CI, where a missing build fails.
+
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
 AddressSanitizer build of mod-host:
 
