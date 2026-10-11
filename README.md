@@ -7,8 +7,28 @@ Licence: GPL-3.0-or-later (`LICENSE`).
 
 ## Install
 
-No release has been published yet, so there is no RPM, DEB or npm package to install. Use a checkout
-(Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
+plugin-qualify is published, signed, in the FreeMixer package channel, for Fedora 44 (x86_64, aarch64)
+and for Debian bookworm and trixie, including Raspberry Pi OS (amd64, arm64).
+
+Fedora:
+
+```
+sudo dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
+sudo dnf install plugin-qualify
+```
+
+Debian and Raspberry Pi OS:
+
+```
+sudo install -d /etc/apt/keyrings
+sudo curl -fsSL -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
+echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/$(. /etc/os-release && echo $VERSION_CODENAME) ./" | sudo tee /etc/apt/sources.list.d/freemixer.list
+sudo apt update
+sudo apt install plugin-qualify
+```
+
+There is no npm package yet. To run from a checkout instead (Node.js 20 or newer and pnpm 10, see
+`BUILDING.md`):
 
 ```
 git clone https://github.com/FreeMixer/plugin-qualify.git
@@ -140,7 +160,7 @@ trust another host's verdict.
 `qualifyPlugins(measured, { profiles })` gives one per plugin per profile. `readHostProfile(json)`
 validates a profile file, and `judgedDocument(run, plugins, profiles, verdicts)` builds the
 document. All of them are exported from the package root. The package depends on no other
-openmixer package.
+OpenMixer package.
 
 ### The container image
 
