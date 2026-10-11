@@ -63,7 +63,7 @@ export interface QualifiedPlugin {
   readonly lv2Features?: PluginLv2Features;
   /** The plugin's binary format, the scan's declared fact (CLAP spec §6); absent reads `lv2`. */
   readonly format?: "lv2" | "clap";
-  /** What `omx-clap-qualify` measured, for a `clap` plugin (CLAP spec §3). */
+  /** What the CLAP prober (`native/clap-qualify`) measured, for a `clap` plugin (CLAP spec §3). */
   readonly clap?: PluginClapMeasurement;
 }
 
@@ -300,7 +300,7 @@ export interface ClapLatencyAtRate {
 }
 
 /**
- * What `omx-clap-qualify` MEASURED about a CLAP plugin, RAW (CLAP spec §3): the facts the CLAP
+ * What the CLAP prober (`native/clap-qualify`) MEASURED about a CLAP plugin, RAW (CLAP spec §3): the facts the CLAP
  * arm of each dimension reads. Whether any of it earns `suitable` is the `clap*Reasons` arms' to say.
  */
 export interface PluginClapMeasurement {

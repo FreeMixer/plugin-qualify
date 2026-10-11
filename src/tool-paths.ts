@@ -20,3 +20,13 @@ export function toolsDir(): string {
 export function lv2MeasureToolPath(): string {
   return fileURLToPath(new URL("../tools/lv2-measure.mjs", import.meta.url));
 }
+
+/** The package's own build of the CLAP prober (`make -C native`). */
+export function clapQualifyToolPath(): string {
+  return fileURLToPath(new URL("../native/build/clap-qualify", import.meta.url));
+}
+
+/** The package's own build of the interposer the CLAP prober runs under. */
+export function rtInterposePath(): string {
+  return fileURLToPath(new URL("../native/build/rt_interpose.so", import.meta.url));
+}
