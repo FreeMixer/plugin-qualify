@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.2.1
+Version: 0.3.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -49,6 +49,19 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_prefix}/lib/node_modules/@openmixer/
 
 %changelog
+* Mon Oct 12 2026 Pau Aliagas <linuxnow@gmail.com> - 0.3.0-1
+- plugin-qualify now checks CLAP plugins directly. It loads each .clap file
+  without a display, runs it at every sample rate and sweeps every parameter
+  while watching for anything unsafe on the audio thread, then writes a
+  verdict for that exact binary and console. A plugin that has changed since
+  it was checked is never trusted on the old verdict.
+- The verdict follows the extensions the chosen host profile really offers:
+  asking for a profile with no CLAP support now reads as unknown instead of
+  borrowing the OpenMixer console's answer.
+- The CLAP scan keeps parameter value names, the plugin's modules and its
+  remote-control pages, so a console can show named choices and the plugin's
+  own control pages.
+
 * Sun Oct 11 2026 Pau Aliagas <linuxnow@gmail.com> - 0.2.1-1
 - The GitHub release carries the npm tarball openmixer-plugin-qualify-0.2.1.tgz,
   dist/ built in.
