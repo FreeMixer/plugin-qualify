@@ -6,6 +6,7 @@
  * It judges nothing: the verdict is plugin-qualify's (`src/clap-qualify.ts`), read from these facts.
  *
  *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] <path.clap> [<id>]
+ *   clap-qualify --json <path>...      the scan (below), the document the CLAP loader reads
  *
  * Per rate the plugin is activated, its latency read, an impulse run through `process()` to see
  * where it lands, and then every parameter is swept across its range through events while noise
@@ -22,14 +23,19 @@
  * (the line still prints with what was read).
  */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <clap/clap.h>
@@ -353,6 +359,11 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
 
 /* ---- JSON ---- */
 
+/* where the JSON goes: stdout, or a scan child's pipe */
+static FILE *g_out;
+static void fputc_out(int c) { fputc(c, g_out); }
+
+
 static int utf8_length(const unsigned char *s) {
   if (s[0] < 0x80) return 1;
   if (s[0] >= 0xC2 && s[0] <= 0xDF && (s[1] & 0xC0) == 0x80) return 2;
@@ -366,32 +377,32 @@ static int utf8_length(const unsigned char *s) {
 /* a JSON string; a byte that is no UTF-8 becomes ? */
 static void put_string(const char *s) {
   const unsigned char *p = (const unsigned char *)(s ? s : "");
-  putchar('"');
+  fputc_out('"');
   while (*p) {
     const int n = utf8_length(p);
     if (n == 0) {
-      putchar('?');
+      fputc_out('?');
       p++;
     } else if (n > 1) {
-      fwrite(p, 1, (size_t)n, stdout);
+      fwrite(p, 1, (size_t)n, g_out);
       p += n;
     } else {
-      if (*p < 0x20 || *p == 0x7F) printf("\\u%04x", *p);
-      else if (*p == '"' || *p == '\\') printf("\\%c", *p);
-      else putchar(*p);
+      if (*p < 0x20 || *p == 0x7F) fprintf(g_out, "\\u%04x", *p);
+      else if (*p == '"' || *p == '\\') fprintf(g_out, "\\%c", *p);
+      else fputc_out(*p);
       p++;
     }
   }
-  putchar('"');
+  fputc_out('"');
 }
 
 static void put_strings(const char *const *list, size_t n) {
-  putchar('[');
+  fputc_out('[');
   for (size_t i = 0; i < n && list[i]; i++) {
-    if (i) putchar(',');
+    if (i) fputc_out(',');
     put_string(list[i]);
   }
-  putchar(']');
+  fputc_out(']');
 }
 
 static size_t count_strings(const char *const *list) {
@@ -403,43 +414,385 @@ static size_t count_strings(const char *const *list) {
 static void put_head(const char *id, const char *path, const char *sha256) {
   char *uri = NULL;
   if (asprintf(&uri, "urn:clap:%s", id) < 0) uri = NULL;
-  printf("{\"uri\":");
+  fprintf(g_out, "{\"uri\":");
   put_string(uri);
   free(uri);
-  printf(",\"format\":\"clap\",\"id\":");
+  fprintf(g_out, ",\"format\":\"clap\",\"id\":");
   put_string(id);
-  printf(",\"binary\":{\"path\":");
+  fprintf(g_out, ",\"binary\":{\"path\":");
   put_string(path);
-  printf(",\"sha256\":");
+  fprintf(g_out, ",\"sha256\":");
   put_string(sha256);
-  printf("},\"hostExtensions\":");
+  fprintf(g_out, "},\"hostExtensions\":");
   put_strings(HOST_EXTENSIONS, HOST_EXTENSION_COUNT);
 }
 
 static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, uint32_t frames) {
-  printf(",\"clap\":{\"mainInputChannels\":%u,\"mainOutputChannels\":%u,\"sidechainInputs\":%u,\"features\":", f->main_in,
+  fprintf(g_out, ",\"clap\":{\"mainInputChannels\":%u,\"mainOutputChannels\":%u,\"sidechainInputs\":%u,\"features\":", f->main_in,
          f->main_out, f->sidechains);
   put_strings(d->features, count_strings(d->features));
-  printf(",\"headlessOk\":%s,\"noteInputs\":%u,\"latency\":{", f->headless_ok ? "true" : "false", f->note_inputs);
+  fprintf(g_out, ",\"headlessOk\":%s,\"noteInputs\":%u,\"latency\":{", f->headless_ok ? "true" : "false", f->note_inputs);
   if (f->headless_ok)
     for (uint32_t r = 0; r < f->n_rates; r++)
-      printf("%s\"%.0f\":{\"declaredFrames\":%u,\"measuredFrames\":%u}", r ? "," : "", f->rates[r], f->declared[r],
+      fprintf(g_out, "%s\"%.0f\":{\"declaredFrames\":%u,\"measuredFrames\":%u}", r ? "," : "", f->rates[r], f->declared[r],
              f->measured[r]);
-  printf("},\"threadViolations\":%u,\"processErrors\":%u,\"processCalls\":%u,\"nonFinite\":%s}", g_host.thread_violations,
+  fprintf(g_out, "},\"threadViolations\":%u,\"processErrors\":%u,\"processCalls\":%u,\"nonFinite\":%s}", g_host.thread_violations,
          f->process_errors, f->process_calls, f->nonfinite ? "true" : "false");
   if (!f->interposer) {
-    printf(",\"rtSafety\":{\"interposer\":false}");
+    fprintf(g_out, ",\"rtSafety\":{\"interposer\":false}");
     return;
   }
-  printf(",\"rtSafety\":{\"interposer\":true,\"swept\":%s,\"sweepApplicable\":%s,\"blocks\":%u,\"blockFrames\":%u,"
+  fprintf(g_out, ",\"rtSafety\":{\"interposer\":true,\"swept\":%s,\"sweepApplicable\":%s,\"blocks\":%u,\"blockFrames\":%u,"
          "\"allocationsInRun\":%llu,\"locksInRun\":%llu,\"syscallsInRun\":%llu,\"events\":[",
          f->params ? "true" : "false", f->params ? "true" : "false", f->process_calls, frames,
          (unsigned long long)f->allocations, (unsigned long long)f->locks, (unsigned long long)f->syscalls);
   for (int i = 0; i < f->n_events; i++) {
     const int k = f->events[i].kind;
-    printf("%s\"%s\"", i ? "," : "", k > 0 && k < (int)(sizeof EVENT_KIND / sizeof EVENT_KIND[0]) ? EVENT_KIND[k] : "unknown");
+    fprintf(g_out, "%s\"%s\"", i ? "," : "", k > 0 && k < (int)(sizeof EVENT_KIND / sizeof EVENT_KIND[0]) ? EVENT_KIND[k] : "unknown");
   }
-  printf("]}");
+  fprintf(g_out, "]}");
+}
+
+/* ---- the scan ---- */
+
+/*
+ * `clap-qualify --json <path>...` lists what CLAP files hold, in the scan document the CLAP loader
+ * reads (`src/clap-loader.ts`): every plugin of every factory, initialised and never activated, with
+ * its parameters, an enum parameter's labels as the plugin renders them, its remote-control pages,
+ * its audio and note ports and latency. Each file is scanned in a child, so a plugin that crashes
+ * or hangs is reported and the scan goes on.
+ */
+
+#define SCAN_TIMEOUT_S 30
+#define MAX_ENUM_LABELS 1024u
+#define CLAP_SUFFIX ".clap"
+
+static const struct { uint32_t bit; const char *name; } PARAM_FLAGS[] = {
+  { CLAP_PARAM_IS_STEPPED, "stepped" },
+  { CLAP_PARAM_IS_PERIODIC, "periodic" },
+  { CLAP_PARAM_IS_HIDDEN, "hidden" },
+  { CLAP_PARAM_IS_READONLY, "readonly" },
+  { CLAP_PARAM_IS_BYPASS, "bypass" },
+  { CLAP_PARAM_IS_AUTOMATABLE, "automatable" },
+  { CLAP_PARAM_IS_AUTOMATABLE_PER_NOTE_ID, "automatable_per_note_id" },
+  { CLAP_PARAM_IS_AUTOMATABLE_PER_KEY, "automatable_per_key" },
+  { CLAP_PARAM_IS_AUTOMATABLE_PER_CHANNEL, "automatable_per_channel" },
+  { CLAP_PARAM_IS_AUTOMATABLE_PER_PORT, "automatable_per_port" },
+  { CLAP_PARAM_IS_MODULATABLE, "modulatable" },
+  { CLAP_PARAM_IS_MODULATABLE_PER_NOTE_ID, "modulatable_per_note_id" },
+  { CLAP_PARAM_IS_MODULATABLE_PER_KEY, "modulatable_per_key" },
+  { CLAP_PARAM_IS_MODULATABLE_PER_CHANNEL, "modulatable_per_channel" },
+  { CLAP_PARAM_IS_MODULATABLE_PER_PORT, "modulatable_per_port" },
+  { CLAP_PARAM_REQUIRES_PROCESS, "requires_process" },
+  { CLAP_PARAM_IS_ENUM, "enum" },
+};
+
+/* JSON has no infinity: a bound the plugin leaves open is null */
+static void put_number(double v) {
+  if (isfinite(v)) fprintf(g_out, "%.17g", v);
+  else fputs("null", g_out);
+}
+
+/* an enum parameter's labels: value_to_text at every whole value of its range */
+static void put_labels(const clap_plugin_t *p, const clap_plugin_params_t *params, const clap_param_info_t *info) {
+  fputs(",\"labels\":[", g_out);
+  int first = 1;
+  if (params->value_to_text && isfinite(info->min_value) && isfinite(info->max_value) &&
+      info->max_value - info->min_value < MAX_ENUM_LABELS) {
+    for (double v = ceil(info->min_value); v <= info->max_value; v += 1.0) {
+      char text[CLAP_NAME_SIZE];
+      memset(text, 0, sizeof text);
+      if (!params->value_to_text(p, info->id, v, text, sizeof text)) continue;
+      text[sizeof text - 1] = '\0';
+      fprintf(g_out, "%s{\"value\":", first ? "" : ",");
+      put_number(v);
+      fputs(",\"label\":", g_out);
+      put_string(text);
+      fputc('}', g_out);
+      first = 0;
+    }
+  }
+  fputc(']', g_out);
+}
+
+static void scan_params(const clap_plugin_t *p) {
+  const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
+  const uint32_t n = params ? params->count(p) : 0;
+  int first = 1;
+  fputs("\"params\":[", g_out);
+  for (uint32_t i = 0; i < n; i++) {
+    clap_param_info_t info;
+    memset(&info, 0, sizeof info);
+    if (!params->get_info(p, i, &info)) continue;
+    info.name[sizeof info.name - 1] = '\0';
+    info.module[sizeof info.module - 1] = '\0';
+    fprintf(g_out, "%s\n{\"id\":%u,\"name\":", first ? "" : ",", info.id);
+    put_string(info.name);
+    fputs(",\"module\":", g_out);
+    put_string(info.module);
+    fputs(",\"min\":", g_out);
+    put_number(info.min_value);
+    fputs(",\"max\":", g_out);
+    put_number(info.max_value);
+    fputs(",\"default\":", g_out);
+    put_number(info.default_value);
+    fputs(",\"flags\":[", g_out);
+    int f1 = 1;
+    for (size_t k = 0; k < sizeof PARAM_FLAGS / sizeof PARAM_FLAGS[0]; k++) {
+      if (!(info.flags & PARAM_FLAGS[k].bit)) continue;
+      fprintf(g_out, "%s\"%s\"", f1 ? "" : ",", PARAM_FLAGS[k].name);
+      f1 = 0;
+    }
+    fputc(']', g_out);
+    if (info.flags & CLAP_PARAM_IS_ENUM) put_labels(p, params, &info);
+    fputc('}', g_out);
+    first = 0;
+  }
+  fputs(first ? "]" : "\n]", g_out);
+}
+
+/* the remote-control pages, each eight slots, an empty slot null */
+static void scan_remote_controls(const clap_plugin_t *p) {
+  const clap_plugin_remote_controls_t *rc = p->get_extension(p, CLAP_EXT_REMOTE_CONTROLS);
+  if (!rc) rc = p->get_extension(p, CLAP_EXT_REMOTE_CONTROLS_COMPAT);
+  const uint32_t n = rc ? rc->count(p) : 0;
+  int first = 1;
+  fputs("\"remote_controls\":[", g_out);
+  for (uint32_t i = 0; i < n; i++) {
+    clap_remote_controls_page_t page;
+    memset(&page, 0, sizeof page);
+    if (!rc->get(p, i, &page)) continue;
+    page.section_name[sizeof page.section_name - 1] = '\0';
+    page.page_name[sizeof page.page_name - 1] = '\0';
+    fprintf(g_out, "%s{\"id\":%u,\"section\":", first ? "" : ",", page.page_id);
+    put_string(page.section_name);
+    fputs(",\"name\":", g_out);
+    put_string(page.page_name);
+    fputs(",\"params\":[", g_out);
+    for (uint32_t k = 0; k < CLAP_REMOTE_CONTROLS_COUNT; k++) {
+      if (k) fputc(',', g_out);
+      if (page.param_ids[k] == CLAP_INVALID_ID) fputs("null", g_out);
+      else fprintf(g_out, "%u", page.param_ids[k]);
+    }
+    fprintf(g_out, "],\"forPreset\":%s}", page.is_for_preset ? "true" : "false");
+    first = 0;
+  }
+  fputc(']', g_out);
+}
+
+static void scan_audio_ports(const clap_plugin_t *p) {
+  const clap_plugin_audio_ports_t *ports = p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
+  fputs("\"audio_ports\":{", g_out);
+  for (int dir = 0; dir < 2; dir++) {
+    const bool input = dir == 0;
+    const uint32_t n = ports ? ports->count(p, input) : 0;
+    int first = 1;
+    fprintf(g_out, "%s\"%s\":[", dir ? "," : "", input ? "inputs" : "outputs");
+    for (uint32_t i = 0; i < n; i++) {
+      clap_audio_port_info_t info;
+      memset(&info, 0, sizeof info);
+      if (!ports->get(p, i, input, &info)) continue;
+      info.name[sizeof info.name - 1] = '\0';
+      fprintf(g_out, "%s{\"id\":%u,\"name\":", first ? "" : ",", info.id);
+      put_string(info.name);
+      fprintf(g_out, ",\"role\":\"%s\",\"channels\":%u}", (info.flags & CLAP_AUDIO_PORT_IS_MAIN) ? "main" : "aux", info.channel_count);
+      first = 0;
+    }
+    fputc(']', g_out);
+  }
+  fputc('}', g_out);
+}
+
+static void scan_plugin(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d) {
+  fputs("{\"id\":", g_out);
+  put_string(d->id);
+  fputs(",\"name\":", g_out);
+  put_string(d->name);
+  fputs(",\"vendor\":", g_out);
+  put_string(d->vendor);
+  fputs(",\"version\":", g_out);
+  put_string(d->version);
+  fputs(",\"description\":", g_out);
+  put_string(d->description);
+  fputs(",\"url\":", g_out);
+  put_string(d->url);
+  fputs(",\"features\":", g_out);
+  put_strings(d->features, count_strings(d->features));
+  const clap_plugin_t *p = factory->create_plugin(factory, &g_clap_host, d->id);
+  if (!p || !p->init(p)) {
+    if (p) p->destroy(p);
+    fputs(",\"error\":\"plugin failed to create or init\"}", g_out);
+    return;
+  }
+  fputc(',', g_out);
+  scan_params(p);
+  fputc(',', g_out);
+  scan_remote_controls(p);
+  fputc(',', g_out);
+  scan_audio_ports(p);
+  const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
+  fprintf(g_out, ",\"note_ports\":{\"inputs\":%u,\"outputs\":%u}", notes ? notes->count(p, true) : 0, notes ? notes->count(p, false) : 0);
+  /* a plugin not yet activated may say 0, so 0 is left out as unknown */
+  const clap_plugin_latency_t *latency = p->get_extension(p, CLAP_EXT_LATENCY);
+  const uint32_t frames = latency ? latency->get(p) : 0;
+  if (frames) fprintf(g_out, ",\"latency\":%u", frames);
+  fputc('}', g_out);
+  p->destroy(p);
+}
+
+static void put_file_error(const char *path, const char *reason) {
+  fputs("{\"path\":", g_out);
+  put_string(path);
+  fputs(",\"error\":", g_out);
+  put_string(reason);
+  fputc('}', g_out);
+}
+
+/* one file's entry, written from the child */
+static void scan_file_entry(const char *path) {
+  char local[PATH_MAX];
+  /* dlopen searches the library path for a name with no slash, and the file is here */
+  const char *open_as = strchr(path, '/') || snprintf(local, sizeof local, "./%s", path) >= (int)sizeof local ? path : local;
+  void *so = dlopen(open_as, RTLD_NOW | RTLD_LOCAL);
+  if (!so) {
+    put_file_error(path, dlerror());
+    return;
+  }
+  const clap_plugin_entry_t *entry = dlsym(so, "clap_entry");
+  if (!entry || !clap_version_is_compatible(entry->clap_version) || !entry->init(open_as)) {
+    put_file_error(path, "no usable clap_entry");
+    return;
+  }
+  const clap_plugin_factory_t *factory = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
+  const uint32_t n = factory ? factory->get_plugin_count(factory) : 0;
+  int first = 1;
+  fputs("{\"path\":", g_out);
+  put_string(path);
+  fputs(",\"plugins\":[", g_out);
+  for (uint32_t i = 0; i < n; i++) {
+    const clap_plugin_descriptor_t *d = factory->get_plugin_descriptor(factory, i);
+    if (!d || !d->id) continue;
+    fputs(first ? "\n" : ",\n", g_out);
+    scan_plugin(factory, d);
+    first = 0;
+  }
+  fputs(first ? "]}" : "\n]}", g_out);
+  entry->deinit();
+}
+
+/* the file scanned in a child; a child that dies or hangs is the reason */
+static void scan_file(const char *path) {
+  int fds[2], status = 0;
+  fflush(g_out);
+  if (pipe(fds) != 0) {
+    put_file_error(path, "no pipe for the scan");
+    return;
+  }
+  const pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    put_file_error(path, "no process for the scan");
+    return;
+  }
+  if (pid == 0) {
+    close(fds[0]);
+    /* what a plugin prints goes to stderr, never into the document */
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+    alarm(SCAN_TIMEOUT_S);
+    g_out = fdopen(fds[1], "w");
+    scan_file_entry(path);
+    fflush(g_out);
+    _exit(0);
+  }
+  close(fds[1]);
+  size_t size = 0, cap = 65536;
+  char *data = malloc(cap);
+  for (;;) {
+    if (size == cap) data = realloc(data, cap *= 2);
+    const ssize_t got = read(fds[0], data + size, cap - size);
+    if (got < 0 && errno == EINTR) continue;
+    if (got <= 0) break;
+    size += (size_t)got;
+  }
+  close(fds[0]);
+  waitpid(pid, &status, 0);
+  char reason[128];
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0 && size > 0) {
+    fwrite(data, 1, size, g_out);
+  } else if (WIFSIGNALED(status)) {
+    if (WTERMSIG(status) == SIGALRM) snprintf(reason, sizeof reason, "timed out after %i s", SCAN_TIMEOUT_S);
+    else snprintf(reason, sizeof reason, "crashed with signal %i (%s)", WTERMSIG(status), strsignal(WTERMSIG(status)));
+    put_file_error(path, reason);
+  } else {
+    put_file_error(path, "the scan ended without a result");
+  }
+  free(data);
+}
+
+struct list { char **items; size_t count; };
+
+static void list_add(struct list *l, char *item) {
+  l->items = realloc(l->items, (l->count + 1) * sizeof *l->items);
+  l->items[l->count++] = item;
+}
+
+static int by_name(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+static int is_clap(const char *name) {
+  const size_t n = strlen(name), m = strlen(CLAP_SUFFIX);
+  return n > m && !strcmp(name + n - m, CLAP_SUFFIX);
+}
+
+/* the .clap files under a directory, in name order */
+static void walk(const char *dir, struct list *files) {
+  struct list names = { NULL, 0 };
+  DIR *h = opendir(dir);
+  if (!h) return;
+  struct dirent *e;
+  while ((e = readdir(h)))
+    if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) list_add(&names, strdup(e->d_name));
+  closedir(h);
+  qsort(names.items, names.count, sizeof *names.items, by_name);
+  for (size_t i = 0; i < names.count; i++) {
+    char *path;
+    struct stat st;
+    if (asprintf(&path, "%s/%s", dir, names.items[i]) < 0) continue;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      walk(path, files);
+      free(path);
+    } else if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && is_clap(names.items[i])) {
+      list_add(files, path);
+    } else {
+      free(path);
+    }
+    free(names.items[i]);
+  }
+  free(names.items);
+}
+
+static int scan(int n, char **paths) {
+  struct list files = { NULL, 0 };
+  int readable = 0, first = 1;
+  for (int i = 0; i < n; i++) {
+    struct stat st;
+    if (stat(paths[i], &st) != 0) continue;
+    readable++;
+    if (S_ISDIR(st.st_mode)) walk(paths[i], &files);
+    else list_add(&files, strdup(paths[i]));
+  }
+  fputs("{\"scanner\":\"clap-qualify\",\"version\":\"1\",\"files\":[", g_out);
+  for (size_t i = 0; i < files.count; i++) {
+    fputs(first ? "\n" : ",\n", g_out);
+    scan_file(files.items[i]);
+    first = 0;
+  }
+  fputs(first ? "]}\n" : "\n]}\n", g_out);
+  if (!readable) {
+    fprintf(stderr, "clap-qualify: no path could be read\n");
+    return 1;
+  }
+  return 0;
 }
 
 /* ---- the program ---- */
@@ -469,7 +822,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     if (p) p->destroy(p);
     put_head(d->id, path, sha256);
     put_facts(d, &f, o->frames);
-    printf("}\n");
+    fprintf(g_out, "}\n");
     return 2;
   }
   f.headless_ok = 1;
@@ -500,7 +853,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
-  printf("}\n");
+  fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;
 }
 
@@ -528,11 +881,16 @@ static int parse_rates(const char *s, struct options *o) {
 }
 
 static int usage(const char *name) {
-  fprintf(stderr, "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] <path.clap> [<id>]\n", name);
+  fprintf(stderr,
+          "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] <path.clap> [<id>]\n"
+          "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n",
+          name, name);
   return 2;
 }
 
 int main(int argc, char **argv) {
+  g_out = stdout;
+  if (argc >= 2 && !strcmp(argv[1], "--json")) return scan(argc - 2, argv + 2);
   struct options o = { .n_rates = 0, .frames = 512, .blocks = 512 };
   int a = 1;
   for (; a < argc && argv[a][0] == '-'; a += 2) {
