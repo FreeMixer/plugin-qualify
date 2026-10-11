@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.2.0
+Version: 0.2.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -49,6 +49,10 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_prefix}/lib/node_modules/@openmixer/
 
 %changelog
+* Sun Oct 11 2026 Pau Aliagas <linuxnow@gmail.com> - 0.2.1-1
+- The GitHub release carries the npm tarball openmixer-plugin-qualify-0.2.1.tgz,
+  dist/ built in.
+
 * Sun Oct 11 2026 Pau Aliagas <linuxnow@gmail.com> - 0.2.0-1
 - New hosting code `hosting.output.non-finite`: the refusal the
   libomx-clap-core CLAP host gives a plugin whose output goes non-finite.
