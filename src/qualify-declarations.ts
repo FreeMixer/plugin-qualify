@@ -51,6 +51,20 @@ export const CLAP_SCAN_TOOL_DEFAULT = "omx-clap-scan";
 /** Seconds one run of the CLAP scanner may take over everything it was pointed at. */
 export const CLAP_SCAN_TIMEOUT_S = 300;
 
+/**
+ * The CLAP prober (`native/clap-qualify.c`) and the interposer it runs under (`native/rt-interpose.c`):
+ * each located by one environment variable, else the package's own build in `native/build/`.
+ */
+export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
+export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
+
+/** The CLAP sweep: blocks of `CLAP_SWEEP_FRAMES` frames per rate, every parameter moved through events. */
+export const CLAP_SWEEP_BLOCKS = 512;
+export const CLAP_SWEEP_FRAMES = 512;
+
+/** Seconds one `.clap` may take to qualify at every rate before the prober is killed. */
+export const CLAP_QUALIFY_TIMEOUT_S = 120;
+
 
 
 
