@@ -8,7 +8,7 @@
  * `.clap` beside it); the live test runs the built tool and requires it to say the same.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ import {
 } from "./clap-loader.js";
 import { lv2Loader } from "./lv2-loader.js";
 import { resolveTargets } from "./qualify-cli.js";
+import { clapQualifyToolPath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "fake.json"), "utf8");
@@ -267,5 +268,65 @@ describe("the real tool", () => {
     const [liveRows, goldenRows] = [clapScanDescriptors(parseClapScan(run.stdout)), clapScanDescriptors(parseClapScan(FAKE_JSON))];
     expect(liveRows.map(({ binaryPath: _b, ...row }) => row)).toEqual(goldenRows.map(({ binaryPath: _b, ...row }) => row));
     expect(liveRows.length).toBe(4);
+  });
+});
+
+describe("enum labels, modules and remote-control pages — the controls fixture plugin", () => {
+  const CONTROLS_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "controls.json"), "utf8");
+  const CONTROLS = join(PKG, "native", "build", "fixtures", "controls.clap");
+  const [row] = clapScanDescriptors(parseClapScan(CONTROLS_JSON));
+
+  it("an enum parameter carries its labels as scale points, as value_to_text rendered them", () => {
+    const shape = row!.params.find((p) => p.name === "shape")!;
+    expect(shape.isEnumeration).toBe(true);
+    expect(shape.scalePoints).toEqual([
+      { label: "Sine", value: 0 },
+      { label: "Square", value: 1 },
+      { label: "Saw", value: 2 },
+    ]);
+  });
+
+  it("a parameter keeps its module; one with none has no module", () => {
+    expect(row!.params.map((p) => [p.symbol, p.module])).toEqual([
+      ["3", "Oscillator"],
+      ["5", "Filter/Envelope"],
+    ]);
+    const [fake] = clapScanDescriptors(parseClapScan(FAKE_JSON));
+    expect("module" in fake!.params[0]!).toBe(false);
+  });
+
+  it("the remote-control pages are kept, each slot a parameter symbol or null", () => {
+    expect(row!.remoteControls).toEqual([{ id: 7, section: "Main", name: "Performance", params: ["5", "3", null, null, null, null, null, null] }]);
+  });
+
+  it("a preset's own page is not the plugin's; a scan that reads no pages claims none", () => {
+    const doc = JSON.parse(CONTROLS_JSON);
+    doc.files[0].plugins[0].remote_controls.push({ id: 8, section: "", name: "preset", params: [5, null, null, null, null, null, null, null], forPreset: true });
+    expect(clapScanDescriptors(parseClapScan(JSON.stringify(doc)))[0]!.remoteControls?.map((p) => p.id)).toEqual([7]);
+    expect(clapScanDescriptors(parseClapScan(FAKE_JSON)).every((r) => !("remoteControls" in r))).toBe(true);
+  });
+
+  it("refuses a label or a page slot that is not one", () => {
+    const badLabel = JSON.parse(CONTROLS_JSON);
+    badLabel.files[0].plugins[0].params[0].labels[0].label = 3;
+    expect(() => parseClapScan(JSON.stringify(badLabel))).toThrow(/label/);
+    const badSlot = JSON.parse(CONTROLS_JSON);
+    badSlot.files[0].plugins[0].remote_controls[0].params[2] = "x";
+    expect(() => parseClapScan(JSON.stringify(badSlot))).toThrow(/slot/);
+  });
+
+  it("live: plugin-qualify's prober scans the fixture into what the golden says — a stale golden fails here", (ctx) => {
+    if (![clapQualifyToolPath(), CONTROLS].every((p) => existsSync(p))) {
+      if (process.env["CI"]) throw new Error("native/build is missing: CI builds it with make -C native deps all");
+      ctx.skip("native/build is missing: make -C native deps all");
+      return;
+    }
+    const targets = clapLoader({ env: { [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath() } }).resolve(CONTROLS);
+    expect(targets?.map((t) => t.uri)).toEqual([row!.uri]);
+    const run = spawnSync(clapQualifyToolPath(), ["--json", CONTROLS], { encoding: "utf8" });
+    const [live] = clapScanDescriptors(parseClapScan(run.stdout));
+    const { binaryPath: _l, ...liveRow } = live!;
+    const { binaryPath: _g, ...goldenRow } = row!;
+    expect(liveRow).toEqual(goldenRow);
   });
 });

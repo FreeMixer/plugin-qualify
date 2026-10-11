@@ -3,7 +3,7 @@
 #
 # The CLAP prober, the interposer it runs under and the fixture plugins its tests qualify.
 #
-#   make -C native           build/clap-qualify, build/rt_interpose.so, build/fixtures/rt-{safe,unsafe}.clap
+#   make -C native           build/clap-qualify, build/rt_interpose.so, build/fixtures/{rt-safe,rt-unsafe,controls}.clap
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
@@ -30,7 +30,8 @@ endif
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
-all: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap
+all: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+	$(BUILD)/fixtures/controls.clap
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -47,6 +48,9 @@ $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
 
 $(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden -o $@ $<
+
+$(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
+	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden -o $@ $<
 
 deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
