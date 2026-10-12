@@ -1,15 +1,17 @@
-name: publish-npm
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+name: Publish to npm
 
-# Publishes @openmixer/plugin-qualify to npm. There is no token: npm trusted publishing exchanges this
-# workflow's OIDC identity for a short-lived credential, and the package is published with provenance.
-# The trusted publisher on npmjs.com names this repository and this workflow file.
-#
-# Run by hand, from a version tag, until the name exists on npm: npm only accepts a trusted publisher for a
-# package that has been published once, so the first publish (a placeholder, as for omx-contract) and the
-# trusted-publisher setting are done on npmjs.com by the owner. After that, add `push: tags: ['v*']` here.
-# A dry run, the default, packs and checks everything and publishes nothing.
+# Publishes @openmixer/plugin-qualify to npmjs.org by npm trusted publishing (OIDC, no token anywhere), with
+# provenance. npmjs.com trusts the CALLER of the publish by repository + workflow filename (+ environment when
+# one is set there; none is), so:
+#   Repository: FreeMixer/plugin-qualify    Workflow filename: publish.yml    Environment: (none)
+# A version tag publishes; a manual dispatch is a dry run unless asked otherwise. Only the public repository
+# publishes: a tag on any other copy of this tree stops before npm.
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       dry-run:
@@ -23,6 +25,7 @@ permissions:
 jobs:
   publish:
     name: npm publish
+    if: github.repository == 'FreeMixer/plugin-qualify'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
