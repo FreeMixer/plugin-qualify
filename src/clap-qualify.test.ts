@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   ClapQualifyError,
   RT_SAFETY_DOCUMENT_SCHEMA,
+  clapQualifyTools,
   parseClapQualifyLine,
   parseClapQualifyOutput,
   qualifyClap,
@@ -29,7 +30,16 @@ import {
 } from "./clap-qualify.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { OMX_CLAP_HOST_EXTENSIONS, OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
-import { CLAP_QUALIFY_TOOL_ENV, CLAP_SCAN_TOOL_ENV, CLAP_SWEEP_BLOCKS, QUALIFY_RATES, RT_INTERPOSE_ENV } from "./qualify-declarations.js";
+import {
+  CLAP_QUALIFY_TOOL_ENV,
+  CLAP_QUALIFY_TOOL_NAME,
+  CLAP_SCAN_TOOL_ENV,
+  CLAP_SWEEP_BLOCKS,
+  NATIVE_TOOL_DIRS,
+  QUALIFY_RATES,
+  RT_INTERPOSE_ENV,
+  RT_INTERPOSE_NAME,
+} from "./qualify-declarations.js";
 import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -293,6 +303,28 @@ describe("qualifyClap — the run, fail closed", () => {
     const { run } = answering(line());
     expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: (p) => !p.endsWith(".so") })).toThrow(new RegExp(RT_INTERPOSE_ENV));
     expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: () => false })).toThrow(new RegExp(CLAP_QUALIFY_TOOL_ENV));
+  });
+
+  it("unset, the prober and the interposer are the installed ones, then the package's own build", () => {
+    const own = [clapQualifyToolPath(), rtInterposePath()];
+    const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
+    const holding = (paths: readonly string[]) => (p: string) => paths.includes(p);
+    expect(clapQualifyTools({}, holding([...installed[1]!, ...own]))).toEqual({ tool: installed[1]![0], interposer: installed[1]![1] });
+    expect(clapQualifyTools({}, holding([...installed[0]!, ...installed[1]!]))).toEqual({ tool: installed[0]![0], interposer: installed[0]![1] });
+    expect(clapQualifyTools({}, holding(own))).toEqual({ tool: own[0], interposer: own[1] });
+    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
+    expect(clapQualifyTools(env, () => true)).toEqual({ tool: "/t/clap-qualify", interposer: "/t/rt.so" });
+  });
+
+  it("a setting naming an absent file is refused, never passed over for an installed tool", () => {
+    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify" };
+    expect(() => clapQualifyTools(env, (p) => p !== "/t/clap-qualify")).toThrow(/no CLAP prober at \/t\/clap-qualify:/);
+  });
+
+  it("absent everywhere, the refusal names every place looked", () => {
+    expect(() => clapQualifyTools({}, () => false)).toThrow(
+      new RegExp([...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME)), clapQualifyToolPath()].join(", ")),
+    );
   });
 
   it("a crash, a failed load or silence is no measurement", () => {
