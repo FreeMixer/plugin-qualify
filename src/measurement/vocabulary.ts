@@ -78,6 +78,13 @@ export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
     description: "A convolver requiring an IR file the prober did not load.",
   },
   {
+    code: "unpinnable",
+    kind: "nothing-to-measure",
+    description:
+      "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
+      "whitespace, or a manifest using @base or a percent-encoded IRI. The plugin stays unpinned, never partly pinned.",
+  },
+  {
     code: "refused-instantiation",
     kind: "probe-failed",
     description: "The plugin would not instantiate at this rate or block size.",

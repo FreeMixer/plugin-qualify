@@ -191,3 +191,52 @@ describe("naming the source of a figure", () => {
     expect(merged.urisFrom("shipped", "cost").sort()).toEqual([EQ, METER].sort());
   });
 });
+
+describe("the pin binds the figures to the bytes (plugin-qualify spec §11.5)", () => {
+  const pin = (digest: string) => ({
+    version: "1.0",
+    files: [{ path: "comp.so", sha256: digest.repeat(64) }, { path: "manifest.ttl", sha256: "c".repeat(64) }],
+    layout: { scheme: "omx-layout/1", sha256: "d".repeat(64) },
+  });
+  const pinned = (digest: string) => ({ ...fixturePlugin(COMP), integrity: pin(digest) });
+
+  it("a local pin is the effective one, and a shipped figure taken on no pin no longer applies", () => {
+    const local = localRun([{ ...fixturePlugin(COMP), latency: undefined, integrity: pin("a") }]);
+    const merged = mergeMeasurements(shipped, local);
+    expect(merged.get(COMP)?.integrity?.source).toBe("local");
+    expect(merged.get(COMP)?.integrity?.value.files?.[0]?.sha256).toBe("a".repeat(64));
+    // the cost is local's own (same pin); the latency came only from shipped, measured on unpinned bytes
+    expect(merged.sourceOf(COMP, "cost")).toBe("local");
+    expect(merged.sourceOf(COMP, "latency")).toBeUndefined();
+  });
+
+  it("a shipped figure taken on the same bytes still applies", () => {
+    const ship = fixtureDocument([pinned("a")], { id: "shipped-ref" });
+    const local = localRun([{ ...fixturePlugin(COMP), latency: undefined, integrity: pin("a") }]);
+    expect(mergeMeasurements(ship, local).sourceOf(COMP, "latency")).toBe("shipped");
+  });
+
+  it("a shipped figure taken on other bytes does not", () => {
+    const ship = fixtureDocument([pinned("b")], { id: "shipped-ref" });
+    const local = localRun([{ ...fixturePlugin(COMP), latency: undefined, integrity: pin("a") }]);
+    expect(mergeMeasurements(ship, local).sourceOf(COMP, "latency")).toBeUndefined();
+  });
+
+  it("with no pin anywhere nothing is bound, and a local probe failure leaves the shipped pin", () => {
+    expect(mergeMeasurements(shipped, localRun([fixturePlugin(COMP)])).get(COMP)?.integrity).toBeUndefined();
+    const ship = fixtureDocument([pinned("b")], { id: "shipped-ref" });
+    const failed = localRun([{ ...fixturePlugin(COMP), integrity: { unmeasuredReason: "probe-crashed" } }]);
+    const merged = mergeMeasurements(ship, failed);
+    expect(merged.get(COMP)?.integrity?.source).toBe("shipped");
+    // local's figures were not taken on the effective pin's bytes
+    expect(merged.sourceOf(COMP, "latency")).toBeUndefined();
+  });
+
+  it("an unpinnable plugin locally overrides a shipped pin with none", () => {
+    const ship = fixtureDocument([pinned("b")], { id: "shipped-ref" });
+    const local = localRun([{ ...fixturePlugin(COMP), integrity: { unmeasuredReason: "unpinnable" } }]);
+    const merged = mergeMeasurements(ship, local);
+    expect(merged.get(COMP)?.integrity?.value.files).toBeUndefined();
+    expect(merged.sourceOf(COMP, "latency")).toBe("local");
+  });
+});

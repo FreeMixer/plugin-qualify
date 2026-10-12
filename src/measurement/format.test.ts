@@ -237,10 +237,10 @@ describe("v1.2 — verdicts per host profile (§3b)", () => {
     expect(r.ok && r.document.verdicts).toEqual([]);
   });
 
-  it("a document with no verdicts has neither field — the v1.1 shape, stamped 1.2", () => {
+  it("a document with no verdicts has neither field — the v1.1 shape, stamped 1.3", () => {
     const doc = buildMeasurementDocument(fixtureRun(), []);
     expect("verdicts" in doc).toBe(false);
     expect("hostProfiles" in doc).toBe(false);
-    expect(doc.formatVersion).toBe("1.2");
+    expect(doc.formatVersion).toBe("1.3");
   });
 });
