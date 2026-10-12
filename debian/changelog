@@ -1,3 +1,11 @@
+plugin-qualify (0.5.0) unstable; urgency=medium
+
+  * The CLAP prober and the measurement interchange (v1.3) carry each
+    plugin's integrity pin: the SHA-256 of the files the host loads and the
+    omx-layout/1 fingerprint, computed through plugin-hostd 0.1.4's pin.h.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Mon, 12 Oct 2026 19:00:00 +0000
+
 plugin-qualify (0.4.1) unstable; urgency=medium
 
   * The npm release builds the native tools before it tests, so this
