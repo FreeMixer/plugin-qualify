@@ -6,22 +6,29 @@ Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
 URL: https://github.com/FreeMixer/plugin-qualify
-BuildArch: noarch
 
 Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires: nodejs >= 18
 BuildRequires: npm
+# the CLAP prober and its interposer: the CLAP headers from Fedora, pin.h from plugin-hostd-devel
+BuildRequires: gcc
+BuildRequires: make
+BuildRequires: pkgconfig
+BuildRequires: pkgconfig(clap)
+BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 
 Requires: nodejs >= 18
 Requires: python3
 Requires: python3-lilv
 Recommends: mod-host
+# omx-clap-scan, which lists the plugins in a .clap before each is qualified
+Recommends: omx-clap-host
 
-# Plain JavaScript and Python: no machine code, so no debug packages.
-%global debug_package %{nil}
-# Nothing here is a compiled module; the tools are scripts run by their interpreters.
+# The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
+# the interposer is preloaded by path, never linked: it provides no library to other packages
+%global __provides_exclude_from ^%{_libexecdir}/%{name}/.*$
 
 %description
 A plugin that glitches on stage is worse than one you never installed.
@@ -37,9 +44,11 @@ different hosts.
 %autosetup
 
 %build
+%make_build -C native
 
 %install
 packaging/build.sh %{buildroot} %{_prefix}/lib
+%make_install -C native LIBEXECDIR=%{_libexecdir}/%{name}
 
 %files
 %license LICENSE
@@ -47,6 +56,7 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_bindir}/plugin-qualify
 %{_mandir}/man1/plugin-qualify.1*
 %{_prefix}/lib/node_modules/@openmixer/
+%{_libexecdir}/%{name}/
 
 %changelog
 * Mon Oct 12 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.0-1

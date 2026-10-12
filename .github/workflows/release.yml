@@ -36,7 +36,8 @@ jobs:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
       needs-mod-host: false
-      channel-deps: false
+      # plugin-hostd-devel, whose pin.h the CLAP prober builds against
+      channel-deps: true
       arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["x86_64"]' || '["x86_64", "aarch64"]' }}
     secrets: inherit
 
