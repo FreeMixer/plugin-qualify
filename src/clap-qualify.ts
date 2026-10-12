@@ -16,9 +16,11 @@ import { existsSync } from "node:fs";
 import {
   CLAP_QUALIFY_TIMEOUT_S,
   CLAP_QUALIFY_TOOL_ENV,
+  CLAP_QUALIFY_TOOL_NAME,
   CLAP_SWEEP_BLOCKS,
   CLAP_SWEEP_FRAMES,
   RT_INTERPOSE_ENV,
+  RT_INTERPOSE_NAME,
 } from "./qualify-declarations.js";
 import {
   HOSTING_CODE,
@@ -33,7 +35,7 @@ import { OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js"
 import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
-import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
+import { nativeToolCandidates } from "./tool-paths.js";
 import { readIntegrity, type IntegrityMeasurement } from "./measurement/format.js";
 
 export class ClapQualifyError extends Error {
@@ -305,14 +307,35 @@ export interface ClapQualifyOptions {
   readonly exists?: (path: string) => boolean;
 }
 
-function setting(env: Readonly<Record<string, string | undefined>>, name: string, fallback: string): string {
+/** One native tool: its setting when set, else the first candidate that exists. Absent, it throws, naming where it looked. */
+function locate(
+  env: Readonly<Record<string, string | undefined>>,
+  what: string,
+  name: string,
+  file: string,
+  exists: (path: string) => boolean,
+): string {
   const v = env[name];
-  return v === undefined || v === "" ? fallback : v;
+  const looked = v === undefined || v === "" ? nativeToolCandidates(file) : [v];
+  const path = looked.find((p) => exists(p));
+  if (path === undefined) {
+    throw new ClapQualifyError(`no CLAP ${what} at ${looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${name}`);
+  }
+  return path;
 }
 
-/** The prober and the interposer this run uses: each its setting, else the package's own build. */
-export function clapQualifyTools(env: Readonly<Record<string, string | undefined>>): { tool: string; interposer: string } {
-  return { tool: setting(env, CLAP_QUALIFY_TOOL_ENV, clapQualifyToolPath()), interposer: setting(env, RT_INTERPOSE_ENV, rtInterposePath()) };
+/**
+ * The prober and the interposer this run uses: each its setting, else the first of the installed
+ * directories (`NATIVE_TOOL_DIRS`) that holds it, else the package's own build.
+ */
+export function clapQualifyTools(
+  env: Readonly<Record<string, string | undefined>>,
+  exists: (path: string) => boolean = existsSync,
+): { tool: string; interposer: string } {
+  return {
+    tool: locate(env, "prober", CLAP_QUALIFY_TOOL_ENV, CLAP_QUALIFY_TOOL_NAME, exists),
+    interposer: locate(env, "interposer", RT_INTERPOSE_ENV, RT_INTERPOSE_NAME, exists),
+  };
 }
 
 /**
@@ -322,11 +345,7 @@ export function clapQualifyTools(env: Readonly<Record<string, string | undefined
  */
 export function qualifyClap(binaryPath: string, id: string | undefined, options: ClapQualifyOptions): ClapQualifyLine[] {
   const env = options.env ?? process.env;
-  const exists = options.exists ?? existsSync;
-  const { tool, interposer } = clapQualifyTools(env);
-  for (const [what, path, name] of [["prober", tool, CLAP_QUALIFY_TOOL_ENV], ["interposer", interposer, RT_INTERPOSE_ENV]] as const) {
-    if (!exists(path)) throw new ClapQualifyError(`no CLAP ${what} at ${path}: build it with make -C native, or set ${name}`);
-  }
+  const { tool, interposer } = clapQualifyTools(env, options.exists ?? existsSync);
   const args = [
     "--rates",
     options.rates.join(","),

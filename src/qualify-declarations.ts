@@ -53,10 +53,22 @@ export const CLAP_SCAN_TIMEOUT_S = 300;
 
 /**
  * The CLAP prober (`native/clap-qualify.c`) and the interposer it runs under (`native/rt-interpose.c`):
- * each located by one environment variable, else the package's own build in `native/build/`.
+ * each located by one environment variable, else the first of `NATIVE_TOOL_DIRS` that holds it, else
+ * the package's own build in `native/build/`.
  */
 export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
+
+/** The file names of the prober and the interposer, in every place they are looked for. */
+export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
+export const RT_INTERPOSE_NAME = "rt_interpose.so";
+
+/**
+ * Where the RPM and the DEB install the prober and the interposer: the libexec directory on Fedora,
+ * `/usr/lib/<package>` on Debian (policy keeps a package's private programs there). The packaging
+ * installs into exactly these; a test holds the spec and `debian/rules` to them.
+ */
+export const NATIVE_TOOL_DIRS: readonly string[] = ["/usr/libexec/plugin-qualify", "/usr/lib/plugin-qualify"];
 
 /** The CLAP sweep: blocks of `CLAP_SWEEP_FRAMES` frames per rate, every parameter moved through events. */
 export const CLAP_SWEEP_BLOCKS = 512;
