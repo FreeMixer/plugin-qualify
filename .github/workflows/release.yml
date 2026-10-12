@@ -5,7 +5,7 @@ name: release
 # repository and attaches them to the GitHub release, beside the `pnpm pack` tarball
 # openmixer-plugin-qualify-<version>.tgz (dist/ built in). Anything else builds unsigned trees and packs
 # and checks the tarball, and publishes nothing. The RPM and DEB builds are in FreeMixer/.github; the
-# secrets are the organisation's. The npm registry has its own workflow, publish-npm.yml.
+# secrets are the organisation's. The npm registry has its own workflow, publish.yml.
 
 on:
   push:

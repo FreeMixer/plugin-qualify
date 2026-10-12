@@ -57,7 +57,6 @@ The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.git
 release. Pull requests build both package kinds and pack the tarball as a dry run and publish nothing;
 `node packaging/check-tarball.mjs <tarball>` checks it carries every `exports` target.
 
-The npm package is not published yet. `.github/workflows/publish-npm.yml` publishes it by npm trusted
-publishing (no token) when run by hand; npm accepts a trusted publisher only for a name that already
-exists, so the owner publishes a placeholder and sets the trusted publisher on npmjs.com first, then
-the workflow can be moved back to the tag.
+A version tag also publishes the npm package: `.github/workflows/publish.yml` publishes it by npm
+trusted publishing (no token), with provenance; npmjs.com names this repository and that workflow file as
+the package's trusted publisher. Run by hand, the workflow is a dry run unless asked otherwise.
