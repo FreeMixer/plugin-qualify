@@ -40,6 +40,7 @@
 
 #include <clap/clap.h>
 #include <plugin-hostd/pin.h>
+#include <plugin-hostd/protocol.h>
 
 #include "rt-interpose.h"
 
@@ -453,6 +454,70 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
   fprintf(g_out, "]}");
 }
 
+/* ---- the pin (plugin-qualify spec §11) ---- */
+
+/*
+ * The integrity block: the SHA-256 of the one file the host loads, the `.clap`, by its path relative to
+ * its directory, and the plugin's parameter layout in plugin-hostd's omx-layout/1, filled from every
+ * parameter params.count()/get_info() give (hidden, read-only and bypass included) after init and
+ * before activate, as omx-clap-host recomputes it on `add`. pin.h serialises and hashes; nothing here
+ * does. A file name a pin cannot hold, or a layout that cannot be read, is no pin and says why.
+ */
+struct integrity {
+  const char *reason; /* NULL when the pin was taken */
+  const char *detail;
+  char layout[PHD_SHA256_HEX_LEN + 1];
+};
+
+static void integrity_layout(const clap_plugin_t *p, struct integrity *pin) {
+  const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
+  const uint32_t count = params ? params->count(p) : 0;
+  if (count > MAX_PARAMS) {
+    pin->reason = "probe-error", pin->detail = "more parameters than the prober reads";
+    return;
+  }
+  clap_param_info_t *infos = calloc(count ? count : 1, sizeof *infos);
+  phd_layout_clap_param_t *records = calloc(count ? count : 1, sizeof *records);
+  pin->reason = "probe-error", pin->detail = "a parameter's get_info failed";
+  for (uint32_t i = 0; infos && records && i < count; i++) {
+    if (!params->get_info(p, i, &infos[i])) goto out;
+    infos[i].name[sizeof infos[i].name - 1] = '\0';
+    records[i] = (phd_layout_clap_param_t){ infos[i].id, infos[i].name, infos[i].min_value, infos[i].max_value,
+                                            infos[i].default_value, infos[i].flags };
+  }
+  if (infos && records && phd_layout_clap_digest(records, count, pin->layout) == 0) pin->reason = pin->detail = NULL;
+out:
+  free(records);
+  free(infos);
+}
+
+static void put_integrity(const char *path, const char *version, const char *sha256, const struct integrity *pin) {
+  const char *base = strrchr(path, '/');
+  base = base ? base + 1 : path;
+  fprintf(g_out, ",\"integrity\":{");
+  if (version && *version) {
+    fprintf(g_out, "\"version\":");
+    put_string(version);
+    fputc_out(',');
+  }
+  if (strpbrk(base, PHD_PIN_PATH_EXCLUDED)) {
+    fprintf(g_out, "\"unmeasuredReason\":\"unpinnable\",\"unmeasuredDetail\":");
+    put_string("the file name holds a separator of pin_set or whitespace");
+  } else if (pin->reason) {
+    fprintf(g_out, "\"unmeasuredReason\":");
+    put_string(pin->reason);
+    fprintf(g_out, ",\"unmeasuredDetail\":");
+    put_string(pin->detail);
+  } else {
+    fprintf(g_out, "\"files\":[{\"path\":");
+    put_string(base);
+    fprintf(g_out, ",\"sha256\":");
+    put_string(sha256);
+    fprintf(g_out, "}],\"layout\":{\"scheme\":\"%s\",\"sha256\":\"%s\"}", PHD_PIN_LAYOUT_SCHEME, pin->layout);
+  }
+  fputc_out('}');
+}
+
 /* ---- the scan ---- */
 
 /*
@@ -817,15 +882,18 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   for (const char *const *ft = d->features; ft && *ft; ft++)
     if (!strcmp(*ft, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT)) f.is_audio_effect = 1;
 
+  struct integrity pin = { "refused-instantiation", "create_plugin or init failed", "" };
   const clap_plugin_t *p = factory->create_plugin(factory, &g_clap_host, d->id);
   if (!p || !p->init(p)) {
     if (p) p->destroy(p);
     put_head(d->id, path, sha256);
     put_facts(d, &f, o->frames);
+    put_integrity(path, d->version, sha256, &pin);
     fprintf(g_out, "}\n");
     return 2;
   }
   f.headless_ok = 1;
+  integrity_layout(p, &pin);
   const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
   f.note_inputs = notes ? notes->count(p, true) : 0;
   const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
@@ -853,6 +921,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
+  put_integrity(path, d->version, sha256, &pin);
   fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;
 }

@@ -38,11 +38,19 @@
  *
  * An UNKNOWN reason code from a third-party document resolves to `probe-failed`: a word we
  * cannot interpret must never be allowed to delete a real measurement.
+ *
+ * ## The pin binds the figures to the bytes (plugin-qualify spec §11.5)
+ *
+ * The `integrity` block resolves by the same precedence. Where the effective block is a pin, a
+ * dimension resolved from a document whose `integrity` for that plugin differs or is absent does
+ * not apply: a figure measured on another binary is not a figure about this one, so the dimension
+ * is dropped and reads unknown. With no effective pin, nothing is bound.
  */
 
 import type {
   CostMeasurement,
   FeaturesMeasurement,
+  IntegrityMeasurement,
   LatencyMeasurement,
   MeasurementDocument,
   MeasuredPlugin,
@@ -50,6 +58,7 @@ import type {
   RtSafetyMeasurement,
   StabilityMeasurement,
 } from "./format.js";
+import { sameIntegrity } from "./format.js";
 import { type MeasurementDimension, MEASUREMENT_DIMENSIONS, unmeasuredKind } from "./vocabulary.js";
 
 /** Where a figure came from. Two words, because the operator only ever has two questions. */
@@ -81,6 +90,8 @@ export interface MergedPluginMeasurement {
   readonly stability?: ResolvedFigure<StabilityMeasurement>;
   readonly rtSafety?: ResolvedFigure<RtSafetyMeasurement>;
   readonly features?: ResolvedFigure<FeaturesMeasurement>;
+  /** The effective pin (§3c), resolved like a dimension; it binds the dimensions above to its bytes. */
+  readonly integrity?: ResolvedFigure<IntegrityMeasurement>;
   /**
    * Dimensions where the LOCAL run tried and failed (crashed, timed out, refused), keyed
    * by dimension with the reason code. The shipped figure is still in use for these —
@@ -110,7 +121,8 @@ type AnyMeasurement =
   | CostMeasurement
   | StabilityMeasurement
   | RtSafetyMeasurement
-  | FeaturesMeasurement;
+  | FeaturesMeasurement
+  | IntegrityMeasurement;
 
 /** Each dimension's block type, so a resolved figure keeps the type of the block it holds. */
 interface MeasurementOf {
@@ -264,6 +276,28 @@ function resolveDimension<T extends AnyMeasurement>(
   return shippedFigure === undefined ? {} : { resolved: shippedFigure };
 }
 
+/** A pin, as opposed to a block that only says why there is none. */
+function isPin(integrity: IntegrityMeasurement | undefined): boolean {
+  return integrity?.files !== undefined && integrity.layout !== undefined;
+}
+
+/**
+ * The effective `integrity` of one plugin, by the precedence every dimension takes: a local pin
+ * wins; a local `nothing-to-measure` (an unpinnable plugin) overrides with no pin; a local probe
+ * failure or absence leaves the shipped pin.
+ */
+function resolveIntegrity(
+  local: { readonly run: MeasurementRun; readonly integrity: IntegrityMeasurement | undefined } | undefined,
+  shipped: { readonly run: MeasurementRun; readonly integrity: IntegrityMeasurement | undefined } | undefined,
+): ResolvedFigure<IntegrityMeasurement> | undefined {
+  const shippedFigure = shipped !== undefined && isPin(shipped.integrity) ? figure("shipped", shipped.run, shipped.integrity!) : undefined;
+  if (local?.integrity === undefined) return shippedFigure;
+  if (isPin(local.integrity) || unmeasuredKind(local.integrity.unmeasuredReason) === "nothing-to-measure") {
+    return figure("local", local.run, local.integrity);
+  }
+  return shippedFigure;
+}
+
 /**
  * The merged view an installation reads: shipped defaults with local measurements laid over
  * them, every figure still knowing where it came from.
@@ -311,15 +345,27 @@ export class MergedMeasurements {
         const failure = outcomes[dimension].localFailure;
         if (failure !== undefined) failures[dimension] = failure;
       }
+      const integrity = resolveIntegrity(
+        local !== undefined && localPlugin !== undefined ? { run: local.run, integrity: localPlugin.integrity } : undefined,
+        shipped !== undefined && shippedPlugin !== undefined ? { run: shipped.run, integrity: shippedPlugin.integrity } : undefined,
+      );
+      // §11.5: with an effective pin, a figure from a document whose pin for this plugin differs or
+      // is absent is about other bytes, and does not apply.
+      const pinOf = (source: FigureSource) => (source === "local" ? localPlugin : shippedPlugin)?.integrity;
+      const bound = <T>(resolved: ResolvedFigure<T> | undefined): ResolvedFigure<T> | undefined =>
+        resolved === undefined || integrity === undefined || !isPin(integrity.value) || sameIntegrity(pinOf(resolved.source), integrity.value)
+          ? resolved
+          : undefined;
 
       merged.set(uri, {
         uri,
         plugin: identity,
-        ...optionalFigure("latency", latency.resolved),
-        ...optionalFigure("cost", cost.resolved),
-        ...optionalFigure("stability", stability.resolved),
-        ...optionalFigure("rtSafety", rtSafety.resolved),
-        ...optionalFigure("features", features.resolved),
+        ...optionalFigure("latency", bound(latency.resolved)),
+        ...optionalFigure("cost", bound(cost.resolved)),
+        ...optionalFigure("stability", bound(stability.resolved)),
+        ...optionalFigure("rtSafety", bound(rtSafety.resolved)),
+        ...optionalFigure("features", bound(features.resolved)),
+        ...(integrity === undefined ? {} : { integrity }),
         ...(Object.keys(failures).length > 0 ? { localProbeFailed: failures } : {}),
         ...(shippedPlugin === undefined ? { localOnly: true } : {}),
       });

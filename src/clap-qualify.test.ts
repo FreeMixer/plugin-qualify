@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -36,6 +36,7 @@ const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = join(PKG, "native", "build", "fixtures");
 const SAFE = join(FIXTURES, "rt-safe.clap");
 const UNSAFE = join(FIXTURES, "rt-unsafe.clap");
+const CONTROLS = join(FIXTURES, "controls.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
 const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE].every((p) => existsSync(p));
@@ -57,7 +58,7 @@ function live(name: string, body: () => void): void {
 const sha256 = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 /** A prober line as the tool prints it, with `patch` merged over the facts. */
-function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string[] } = {}): string {
+function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string[]; integrity?: object | null } = {}): string {
   return JSON.stringify({
     uri: `urn:clap:${SAFE_ID}`,
     format: "clap",
@@ -90,6 +91,15 @@ function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string
       events: [],
       ...patch.rtSafety,
     },
+    ...(patch.integrity === null
+      ? {}
+      : {
+          integrity: patch.integrity ?? {
+            version: "1",
+            files: [{ path: "rt-safe.clap", sha256: "a".repeat(64) }],
+            layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) },
+          },
+        }),
   });
 }
 
@@ -116,6 +126,19 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     // one malloc and one free per swept block, at every rate
     expect(doc.measured.rtSafety.allocationsInRun).toBe(2 * CLAP_SWEEP_BLOCKS * QUALIFY_RATES.length);
     expect(doc.measured.rtSafety.events).toContain("malloc");
+  });
+
+  live("the pin: the .clap's digest by its name is sha256sum's, and the layout is an omx-layout/1 fingerprint", () => {
+    const [safe] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+    const [again] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+    const [controls] = qualifyClap(CONTROLS, undefined, { rates: [QUALIFY_RATES[0]!] });
+    expect(safe!.integrity.files).toEqual([{ path: basename(SAFE), sha256: sha256(SAFE) }]);
+    expect(safe!.integrity.layout?.scheme).toBe("omx-layout/1");
+    expect(safe!.integrity.layout?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(again!.integrity).toEqual(safe!.integrity);
+    // another parameter layout, another fingerprint
+    expect(controls!.integrity.layout?.sha256).not.toBe(safe!.integrity.layout?.sha256);
+    expect(rtSafetyDocument(safe!).measured.integrity).toEqual(safe!.integrity);
   });
 
   live("the prober offers exactly the console's CLAP host extensions", () => {
@@ -176,6 +199,22 @@ describe("parseClapQualifyLine — the prober's line, refused when it is not one
     expect(() => parseClapQualifyLine(line({ rtSafety: { allocationsInRun: -1 } }))).toThrow(/allocationsInRun/);
     expect(() => parseClapQualifyLine(line({ clap: { headlessOk: "yes" } }))).toThrow(/headlessOk/);
     expect(() => parseClapQualifyLine(line().replace(`"uri":"urn:clap:${SAFE_ID}"`, '"uri":"urn:clap:other"'))).toThrow(/uri/);
+    expect(() => parseClapQualifyLine(line({ integrity: null }))).toThrow(/integrity/);
+  });
+
+  it("keeps a pin whole or not at all: a file that does not read leaves only a reason", () => {
+    expect(parseClapQualifyLine(line()).integrity).toEqual({
+      version: "1",
+      files: [{ path: "rt-safe.clap", sha256: "a".repeat(64) }],
+      layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) },
+    });
+    const partial = parseClapQualifyLine(
+      line({ integrity: { files: [{ path: "a,b.clap", sha256: "a".repeat(64) }], layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) } } }),
+    );
+    expect(partial.integrity.files).toBeUndefined();
+    expect(partial.integrity.unmeasuredReason).toBe("probe-error");
+    const unpinnable = parseClapQualifyLine(line({ integrity: { unmeasuredReason: "unpinnable", unmeasuredDetail: "x" } }));
+    expect(unpinnable.integrity).toEqual({ unmeasuredReason: "unpinnable", unmeasuredDetail: "x" });
   });
 });
 
