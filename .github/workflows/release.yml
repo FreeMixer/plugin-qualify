@@ -49,9 +49,10 @@ jobs:
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
-      dependencies: ''
+      # the CLAP headers from the pin, plugin-hostd-dev (pin.h) from the channel: the CLAP prober's build
+      dependencies: 'clap-headers'
       requires: ''
-      channel-deps: false
+      channel-deps: true
       arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["amd64"]' || '["amd64", "arm64"]' }}
     secrets: inherit
 
