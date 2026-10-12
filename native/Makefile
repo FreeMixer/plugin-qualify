@@ -14,7 +14,7 @@ PKG_CONFIG ?= pkg-config
 BUILD ?= build
 
 CLAP_REF := 1.2.6
-PLUGIN_HOSTD_REF := v0.1.3
+PLUGIN_HOSTD_REF := v0.1.4
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)

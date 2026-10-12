@@ -106,7 +106,7 @@ describe("the hosting dimensions through the format and the merge", () => {
 
   it("a v1.1 document round-trips its three blocks through the reader", () => {
     const written = doc("shipped", swept);
-    expect(written.formatVersion).toBe("1.2");
+    expect(written.formatVersion).toBe("1.3");
     const read = readMeasurementDocument(JSON.parse(serialiseMeasurementDocument(written)));
     expect(read.ok).toBe(true);
     if (!read.ok) return;
@@ -142,5 +142,37 @@ describe("the hosting dimensions through the format and the merge", () => {
     const merged = mergeMeasurements(doc("shipped", swept), doc("local", failed));
     expect(merged.sourceOf("urn:swept", "stability")).toBe("shipped");
     expect(merged.get("urn:swept")?.localProbeFailed).toEqual({ stability: "probe-crashed" });
+  });
+});
+
+describe("the pin lv2-measure printed travels with the plugin (spec §11.3)", () => {
+  const integrity = {
+    version: "1.2",
+    files: [
+      { path: "swept.so", sha256: "a".repeat(64) },
+      { path: "manifest.ttl", sha256: "b".repeat(64) },
+    ],
+    layout: { scheme: "omx-layout/1", sha256: "c".repeat(64) },
+  };
+
+  it("is carried as the prober printed it, its files sorted by path, and survives the reader", () => {
+    const [plugin] = measuredPluginsFromSweep({ measurements: [{ ...QUICK, version: "1.2", integrity }] });
+    expect(plugin?.version).toBe("1.2");
+    expect(plugin?.integrity?.files?.map((f) => f.path)).toEqual(["manifest.ttl", "swept.so"]);
+    const run = buildRun({
+      id: "r",
+      measuredAt: "2026-10-12T00:00:00Z",
+      dimensions: ["stability"],
+      rates: [192000],
+      tool: { name: "lv2-measure", version: "1" },
+      host: { hostname: "h", realtimePriority: false, memoryLocked: false },
+    });
+    const read = readMeasurementDocument(JSON.parse(serialiseMeasurementDocument(buildMeasurementDocument(run, [plugin!]))));
+    expect(read.ok && read.document.plugins[0]?.integrity).toEqual(plugin?.integrity);
+  });
+
+  it("a line with no pin carries none", () => {
+    const [plugin] = measuredPluginsFromSweep({ measurements: [QUICK] });
+    expect(plugin?.integrity).toBeUndefined();
   });
 });

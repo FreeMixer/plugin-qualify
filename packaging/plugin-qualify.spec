@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.4.1
+Version: 0.5.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -49,6 +49,10 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_prefix}/lib/node_modules/@openmixer/
 
 %changelog
+* Mon Oct 12 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.0-1
+- The CLAP prober and the measurement interchange (v1.3) carry each plugin's
+  integrity pin: the SHA-256 of the files the host loads and the omx-layout/1
+  fingerprint, computed through plugin-hostd 0.1.4's pin.h.
 * Mon Oct 12 2026 Pau Aliagas <linuxnow@gmail.com> - 0.4.1-1
 - The npm release builds the native tools before it tests, so this version
   reaches npm; 0.4.0 carries the same code and was never published there.

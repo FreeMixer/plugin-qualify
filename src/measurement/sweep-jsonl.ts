@@ -29,7 +29,7 @@ import type {
   SoakReading,
   StabilityMeasurement,
 } from "./format.js";
-import { readLifecycle, readSoakAtRate, readThreads } from "./format.js";
+import { readIntegrity, readLifecycle, readSoakAtRate, readThreads } from "./format.js";
 import { booleanValue, finiteNumber, isRecord, mapArray, nonEmptyString, optional, positiveNumber } from "./guards.js";
 
 /** The sweep's three passes, each a list of parsed JSONL lines. Only `measurements` is required. */
@@ -150,6 +150,7 @@ export function measuredPluginsFromSweep(passes: SweepPasses): MeasuredPlugin[] 
     if (uri === undefined || audioInputs === undefined || audioOutputs === undefined) continue;
     out.push({
       uri,
+      ...optional("version", nonEmptyString(row.version)),
       topology: {
         audioInputs,
         audioOutputs,
@@ -158,6 +159,7 @@ export function measuredPluginsFromSweep(passes: SweepPasses): MeasuredPlugin[] 
       stability: stabilityOf(row, deep.get(uri), soak.get(uri)),
       rtSafety: rtSafetyOf(row),
       features: featuresOf(row),
+      ...optional("integrity", readIntegrity(row.integrity)),
     });
   }
   return out;

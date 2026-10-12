@@ -73,8 +73,9 @@ export const MEASUREMENT_FORMAT_MAJOR = 1;
 
 /** The minor this build writes. Additive-only within {@link MEASUREMENT_FORMAT_MAJOR}.
  *  `1.1` added the three hosting dimensions — {@link StabilityMeasurement},
- *  {@link RtSafetyMeasurement}, {@link FeaturesMeasurement} — which a 1.0 reader skips. */
-export const MEASUREMENT_FORMAT_MINOR = 2;
+ *  {@link RtSafetyMeasurement}, {@link FeaturesMeasurement} — which a 1.0 reader skips.
+ *  `1.2` added the verdicts per host profile; `1.3` the {@link IntegrityMeasurement} block. */
+export const MEASUREMENT_FORMAT_MINOR = 3;
 
 /** The version string this build writes, e.g. `"1.0"`. */
 export const MEASUREMENT_FORMAT_VERSION = `${MEASUREMENT_FORMAT_MAJOR}.${MEASUREMENT_FORMAT_MINOR}`;
@@ -398,6 +399,34 @@ export interface FeaturesMeasurement {
   readonly unmeasuredDetail?: string;
 }
 
+/** One file of a pin: its path relative to the bundle root (the `.clap`'s directory) and its SHA-256. */
+export interface PinnedFile {
+  readonly path: string;
+  readonly sha256: string;
+}
+
+/** The parameter-layout fingerprint, with the scheme it was serialised in (`omx-layout/1`). */
+export interface LayoutPin {
+  readonly scheme: string;
+  readonly sha256: string;
+}
+
+/**
+ * v1.3 (§3c; plugin-qualify spec §11): what the prober that LOADED the plugin recorded so a vetted
+ * plugin cannot be swapped — the SHA-256 of every file the host loads for it and the fingerprint of
+ * its parameter layout, as the C prober computed them through plugin-hostd's `pin.h`. RAW hex, never
+ * computed here. A block with no `files` and `layout` carries an `unmeasuredReason` and is no pin.
+ */
+export interface IntegrityMeasurement {
+  /** The entry's version the pin was taken at. */
+  readonly version?: string;
+  /** Sorted by path. */
+  readonly files?: readonly PinnedFile[];
+  readonly layout?: LayoutPin;
+  readonly unmeasuredReason?: string;
+  readonly unmeasuredDetail?: string;
+}
+
 /** One plugin as one run saw it. */
 export interface MeasuredPlugin {
   readonly uri: string;
@@ -418,6 +447,8 @@ export interface MeasuredPlugin {
   readonly stability?: StabilityMeasurement;
   readonly rtSafety?: RtSafetyMeasurement;
   readonly features?: FeaturesMeasurement;
+  /** v1.3: the pin, when the run loaded the plugin (§3c). */
+  readonly integrity?: IntegrityMeasurement;
 }
 
 /** What a host spends on one plugin instance: the P95 core-fraction ceiling, at its rate and quantum. */
@@ -918,6 +949,68 @@ function readFeatures(value: unknown): FeaturesMeasurement | undefined {
   };
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** A pinned path: relative, inside the bundle, and none of `pin_set`'s separators or whitespace. */
+function pinnedPath(value: unknown): string | undefined {
+  const path = nonEmptyString(value);
+  if (path === undefined || path.startsWith("/") || /[,=\s]/.test(path)) return undefined;
+  return path.split("/").every((part) => part !== "" && part !== "." && part !== "..") ? path : undefined;
+}
+
+function readPinnedFile(value: unknown): PinnedFile | undefined {
+  if (!isRecord(value)) return undefined;
+  const path = pinnedPath(value.path);
+  const sha256 = nonEmptyString(value.sha256);
+  return path === undefined || sha256 === undefined || !SHA256_HEX.test(sha256) ? undefined : { path, sha256 };
+}
+
+/**
+ * The `integrity` block, or `undefined` when it is not one. A pin is whole or absent: a file entry
+ * that does not read, a path named twice, an empty list or a malformed layout drops the pin and
+ * keeps only a reason, never a partial pin.
+ */
+export function readIntegrity(value: unknown): IntegrityMeasurement | undefined {
+  if (!isRecord(value)) return undefined;
+  const version = nonEmptyString(value.version);
+  const rawFiles = Array.isArray(value.files) ? value.files : undefined;
+  const files = rawFiles?.map(readPinnedFile);
+  const layout = isRecord(value.layout)
+    ? { scheme: nonEmptyString(value.layout.scheme), sha256: nonEmptyString(value.layout.sha256) }
+    : undefined;
+  const whole =
+    files !== undefined &&
+    files.length > 0 &&
+    files.every((f) => f !== undefined) &&
+    new Set(files.map((f) => f!.path)).size === files.length &&
+    layout?.scheme !== undefined &&
+    layout.sha256 !== undefined &&
+    SHA256_HEX.test(layout.sha256);
+  if (whole) {
+    return {
+      ...optional("version", version),
+      files: (files as PinnedFile[]).slice().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+      layout: { scheme: layout!.scheme!, sha256: layout!.sha256! },
+    };
+  }
+  const reason = reasonOf(value);
+  if (rawFiles === undefined && value.layout === undefined && reason.unmeasuredReason !== undefined) {
+    return { ...optional("version", version), ...reason };
+  }
+  return { ...optional("version", version), unmeasuredReason: "probe-error", unmeasuredDetail: "the integrity block is not a whole pin" };
+}
+
+/** Whether two pins name the same files with the same digests and the same layout. */
+export function sameIntegrity(a: IntegrityMeasurement | undefined, b: IntegrityMeasurement | undefined): boolean {
+  if (a?.files === undefined || b?.files === undefined || a.layout === undefined || b.layout === undefined) return false;
+  return (
+    a.layout.scheme === b.layout.scheme &&
+    a.layout.sha256 === b.layout.sha256 &&
+    a.files.length === b.files.length &&
+    a.files.every((f, i) => f.path === b.files![i]!.path && f.sha256 === b.files![i]!.sha256)
+  );
+}
+
 function readPlugin(value: unknown): MeasuredPlugin | undefined {
   if (!isRecord(value)) return undefined;
   const uri = nonEmptyString(value.uri);
@@ -935,6 +1028,7 @@ function readPlugin(value: unknown): MeasuredPlugin | undefined {
     ...optional("stability", readStability(value.stability)),
     ...optional("rtSafety", readRtSafety(value.rtSafety)),
     ...optional("features", readFeatures(value.features)),
+    ...optional("integrity", readIntegrity(value.integrity)),
   };
 }
 
