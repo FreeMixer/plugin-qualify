@@ -68,6 +68,9 @@ jobs:
       contents: read
     container:
       image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
