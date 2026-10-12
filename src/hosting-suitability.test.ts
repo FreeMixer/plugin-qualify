@@ -12,6 +12,8 @@
 import { describe, it, expect } from "vitest";
 import type { QualifiedPlugin as PluginDescriptor } from "./hosting-suitability.js";
 import {
+  CLAP_CORE_REFUSALS,
+  CLAP_CORE_REFUSAL_DESCRIPTIONS,
   CLAP_FEATURE_AUDIO_EFFECT,
   DEFAULT_HOSTING_POLICY,
   HOSTING_CODE,
@@ -870,5 +872,28 @@ describe("host profiles — the CLAP arm", () => {
     const v = classify(synth, { profile: host });
     expect(v.rating).toBe("suitable");
     expect(v.reasons.map((r) => r.code)).toContain(HOSTING_CODE.topologyInstrument);
+  });
+});
+
+describe("each core refusal declares its one-line description beside it", () => {
+  it("describes only declared refusals, each in one plain line", () => {
+    for (const [name, line] of Object.entries(CLAP_CORE_REFUSAL_DESCRIPTIONS)) {
+      expect(Object.keys(CLAP_CORE_REFUSALS)).toContain(name);
+      expect(line).toMatch(/^[^\n*/]+$/);
+    }
+  });
+
+  it("carries the lines the header renders, by value", () => {
+    expect(CLAP_CORE_REFUSAL_DESCRIPTIONS).toEqual({
+      notAudioEffect: "the plugin is not an audio effect",
+      noteInput: "the plugin declares a note input the configuration refuses",
+      noAudioInput: "the plugin has no audio input",
+      noAudioOutput: "the plugin has no audio output",
+      widerThanStrip: "the plugin is wider than the strip",
+      extraInputs: "the plugin has extra inputs, fed silence",
+      crashedLive: "the plugin crashed live on this rig",
+      outputNonFinite: "the plugin produced non-finite output",
+    });
+    expect(CLAP_CORE_REFUSAL_DESCRIPTIONS).not.toHaveProperty("headlessFailed");
   });
 });
