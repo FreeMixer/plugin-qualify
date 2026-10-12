@@ -56,6 +56,68 @@ jobs:
       arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["amd64"]' || '["amd64", "arm64"]' }}
     secrets: inherit
 
+  # the built package, installed in its own distribution, qualifies the fixture plugins with no
+  # OMX_* setting: the prober and the interposer are found where the package put them
+  installed:
+    name: Install and qualify (${{ matrix.image }})
+    needs: [rpm, deb]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: 'fedora:44', artifact: plugin-qualify-rpms-x86_64 }
+          - { image: 'debian:bookworm', artifact: plugin-qualify-debs-bookworm-amd64 }
+          - { image: 'debian:trixie', artifact: plugin-qualify-debs-trixie-amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: pkgs
+
+      # the FreeMixer channel serves omx-clap-host, which the package Recommends for omx-clap-scan, and
+      # the CLAP headers the fixtures build against on Debian
+      - name: Install the package (Fedora)
+        if: startsWith(matrix.image, 'fedora')
+        run: |
+          set -euo pipefail
+          echo 'retries=10' >> /etc/dnf/dnf.conf
+          dnf install -y --setopt=install_weak_deps=False dnf5-plugins gcc make pkgconf-pkg-config clap-devel
+          dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
+          dnf install -y ./pkgs/plugin-qualify-[0-9]*.x86_64.rpm
+          rpm -q omx-clap-host
+
+      - name: Install the package (Debian)
+        if: startsWith(matrix.image, 'debian')
+        run: |
+          set -euo pipefail
+          suite=${IMAGE#debian:}
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make pkgconf
+          install -d /etc/apt/keyrings
+          curl -fsSL --retry 5 --retry-all-errors -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
+          echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/$suite ./" > /etc/apt/sources.list.d/freemixer.list
+          apt-get update -qq
+          apt-get install -y --no-install-recommends clap-headers
+          apt-get install -y ./pkgs/"$suite"/plugin-qualify_*.deb
+          dpkg -s omx-clap-host >/dev/null
+        env:
+          IMAGE: ${{ matrix.image }}
+
+      - name: Build the fixture plugins
+        run: make -C native BUILD="$RUNNER_TEMP/fixture" "$RUNNER_TEMP/fixture/fixtures/rt-safe.clap" "$RUNNER_TEMP/fixture/fixtures/rt-unsafe.clap"
+
+      - name: Qualify them with nothing set
+        run: packaging/check-installed.sh "$RUNNER_TEMP/fixture/fixtures/rt-safe.clap" "$RUNNER_TEMP/fixture/fixtures/rt-unsafe.clap"
+
   pack:
     name: pnpm pack
     runs-on: ubuntu-latest
