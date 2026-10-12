@@ -1,3 +1,11 @@
+plugin-qualify (0.4.1) unstable; urgency=medium
+
+  * The npm release builds the native tools before it tests, so this
+    version reaches npm; 0.4.0 carries the same code and was never
+    published there.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Mon, 12 Oct 2026 18:30:00 +0000
+
 plugin-qualify (0.4.0) unstable; urgency=medium
 
   * Each refusal the CLAP host core can answer with now carries a one-line
