@@ -55,6 +55,7 @@ jobs:
       - name: Build and test
         run: |
           pnpm install --frozen-lockfile
+          make -C native deps all
           pnpm lint
           pnpm test
 
