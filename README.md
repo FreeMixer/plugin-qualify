@@ -62,7 +62,7 @@ Exit code: `0` every plugin qualified, `1` some did not, `2` something could not
 
 A `.clap` file, or a directory holding one, is scanned by `omx-clap-scan` (from omx-clap-core; set
 `OMX_CLAP_SCAN` to its path when it is not on `PATH`) and each plugin in it is then qualified by the
-CLAP prober built from `native/` (`make -C native deps all`, see `BUILDING.md`):
+CLAP prober the package installs (from a checkout, the one built from `native/`, see `BUILDING.md`):
 
 ```
 plugin-qualify ./my-fx.clap                   # every plugin in the file
@@ -79,7 +79,7 @@ verdict never outlives the bytes it was measured on. Each line also carries the 
 `integrity` block: the `.clap`'s SHA-256 by its file name and the parameter-layout fingerprint
 `omx-layout/1:<sha256>`, both computed through plugin-hostd's `pin.h`, which is what a console
 hands plugin-hostd as `pin_set` before it adds the plugin. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
-name the prober and the interposer when they are not the checkout's own build.
+name the prober and the interposer when they are not the installed ones or the checkout's own build.
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
