@@ -5,6 +5,7 @@
 #
 #   make -C native           build/clap-qualify, build/rt_interpose.so, build/fixtures/{rt-safe,rt-unsafe,controls}.clap
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
+#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober and the interposer, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
 # header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd.
@@ -27,6 +28,8 @@ else
 PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
 endif
 
+LIBEXECDIR ?= /usr/libexec/plugin-qualify
+
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
@@ -38,24 +41,30 @@ $(BUILD) $(BUILD)/fixtures:
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
 $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
-	$(CC) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) -o $@ $< -ldl -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
 
 $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
-	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
-	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
-	$(CC) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
 
+# the fixtures are the tests' own, never installed
+install: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so
+	install -d $(DESTDIR)$(LIBEXECDIR)
+	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
+	install -m 0644 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
+
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all deps clean
+.PHONY: all deps install clean
