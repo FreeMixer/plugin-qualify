@@ -150,6 +150,22 @@ export const CLAP_CORE_REFUSALS = {
   outputNonFinite: "outputNonFinite",
 } as const satisfies Record<string, keyof typeof HOSTING_CODE>;
 
+/**
+ * One line per refusal, rendered as the `///<` comment on its `CLAP_HOST_CODE_<NAME>` define in
+ * omx-clap-host's `clap_host_limits.h` (spec mod-host-clap-backend §10.4), declared here beside the
+ * refusal so the renderer holds no prose. A refusal without a line renders bare.
+ */
+export const CLAP_CORE_REFUSAL_DESCRIPTIONS: { readonly [K in keyof typeof CLAP_CORE_REFUSALS]?: string } = {
+  notAudioEffect: "the plugin is not an audio effect",
+  noteInput: "the plugin declares a note input the configuration refuses",
+  noAudioInput: "the plugin has no audio input",
+  noAudioOutput: "the plugin has no audio output",
+  widerThanStrip: "the plugin is wider than the strip",
+  extraInputs: "the plugin has extra inputs, fed silence",
+  crashedLive: "the plugin crashed live on this rig",
+  outputNonFinite: "the plugin produced non-finite output",
+};
+
 /** One dimension's answer for one plugin. */
 export interface HostingReason {
   readonly dimension: HostingDimension;
