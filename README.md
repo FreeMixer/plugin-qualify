@@ -75,7 +75,10 @@ the file's SHA-256 beside what it measured. The verdict is the real-time-safety 
 only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
 `process()` or `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. `--out` writes one
 document per plugin binary and host profile, named `<sha256>.<profile>.rt-safety.json`, so a
-verdict never outlives the bytes it was measured on. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
+verdict never outlives the bytes it was measured on. Each line also carries the plugin's pin, an
+`integrity` block: the `.clap`'s SHA-256 by its file name and the parameter-layout fingerprint
+`omx-layout/1:<sha256>`, both computed through plugin-hostd's `pin.h`, which is what a console
+hands plugin-hostd as `pin_set` before it adds the plugin. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
 name the prober and the interposer when they are not the checkout's own build.
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan

@@ -55,6 +55,10 @@ export const HOSTING_CODE = {
   clapFormatNotHosted: 'hosting.clap.format-not-hosted',
   clapExtensionsNotCovered: 'hosting.clap.extensions-not-covered',
   outputNonFinite: 'hosting.output.non-finite',
+  // The pin (spec §11; one-contract §10.3): a host's refusal at add, by the daemon's code.
+  integrityUnpinned: 'hosting.integrity.unpinned',
+  integrityBinaryMismatch: 'hosting.integrity.binary-mismatch',
+  integrityLayoutMismatch: 'hosting.integrity.layout-mismatch',
   overrideIsolated: 'hosting.override.curator-isolated',
   hostProvenanceDiffers: 'hosting.provenance.host-differs',
   sweepControlDidNotFire: 'hosting.provenance.sweep-control-did-not-fire',

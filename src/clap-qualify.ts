@@ -34,6 +34,7 @@ import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
+import { readIntegrity, type IntegrityMeasurement } from "./measurement/format.js";
 
 export class ClapQualifyError extends Error {
   constructor(message: string) {
@@ -64,6 +65,11 @@ export interface ClapQualifyLine {
   readonly hostExtensions: readonly string[];
   readonly clap: ClapProbedFacts;
   readonly rtSafety: ClapRtSafetyReading;
+  /**
+   * The pin (spec §11): the `.clap`'s digest by its name in its directory and the layout fingerprint
+   * the prober computed through plugin-hostd's `pin.h`, or the reason it took none.
+   */
+  readonly integrity: IntegrityMeasurement;
 }
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -161,6 +167,7 @@ export function parseClapQualifyLine(text: string): ClapQualifyLine {
     hostExtensions: strings(v, "hostExtensions", "the line"),
     clap: readClap(v["clap"]),
     rtSafety: readRtSafety(v["rtSafety"]),
+    integrity: readIntegrity(v["integrity"]) ?? bad("no integrity"),
   };
 }
 
@@ -200,6 +207,7 @@ export interface RtSafetyDocument {
     readonly hostExtensions: readonly string[];
     readonly clap: ClapProbedFacts;
     readonly rtSafety: ClapRtSafetyReading;
+    readonly integrity: IntegrityMeasurement;
   };
 }
 
@@ -236,7 +244,7 @@ export function rtSafetyDocument(line: ClapQualifyLine, profile: HostProfile = O
     plugin: { uri: line.uri, format: "clap", binary: line.binary },
     console: profile.id,
     verdict: { rating, rtSafe: rating === "suitable", ...(rating === "suitable" || deciding === undefined ? {} : { deciding }), reasons },
-    measured: { hostExtensions: line.hostExtensions, clap: line.clap, rtSafety: line.rtSafety },
+    measured: { hostExtensions: line.hostExtensions, clap: line.clap, rtSafety: line.rtSafety, integrity: line.integrity },
   };
 }
 
