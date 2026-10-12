@@ -2,12 +2,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
 %:
 	dh $@
 
+# the CLAP prober and its interposer; the headers come from clap-headers and plugin-hostd-dev
 override_dh_auto_build:
+	$(MAKE) -C native
 
+# policy keeps a package's private programs in /usr/lib/<package>
 override_dh_auto_install:
 	packaging/build.sh $(CURDIR)/debian/plugin-qualify /usr/lib
+	$(MAKE) -C native install DESTDIR=$(CURDIR)/debian/plugin-qualify LIBEXECDIR=/usr/lib/plugin-qualify
+
+override_dh_auto_clean:
+	$(MAKE) -C native clean
 
 override_dh_auto_test:
