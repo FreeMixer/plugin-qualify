@@ -1088,13 +1088,66 @@ PARAMS = "http://lv2plug.in/ns/ext/parameters#"
 WORKER = "http://lv2plug.in/ns/ext/worker#"
 
 
+LV2_WORKER_SUCCESS = 0
+LV2_WORKER_ERR_NO_SPACE = 3
+
+
+class WorkerQueue:
+    """The host half of `worker:schedule`: jobs are QUEUED, and run between blocks, off `run()`.
+
+    Spec 2a (`2026-09-25-plugin-qualify.md`): a schedule that accepts a job and
+    drops it measures an UNBUILT plugin — the Hex Chain amp read 0.9 us/sample that way against 5.4
+    built. After every block the host calls `pump(interface)`: the plugin's `work()` for each
+    queued job, then `work_response()` with whatever it answered, then `end_run()` once every answer
+    is delivered (the LV2 worker's order), all before the next block. Pure Python on purpose: the ctypes glue in `_Host` only adapts to it.
+    """
+
+    def __init__(self):
+        self.jobs = []
+        self.reset()
+
+    def reset(self):
+        self.jobs = []
+        self._jobs_run = 0
+        self._responses = 0
+        self._dropped = 0
+
+    def schedule(self, data):
+        self.jobs.append(bytes(data))
+        return LV2_WORKER_SUCCESS
+
+    def pump(self, interface):
+        """Drive one between-blocks turn. `interface` is None when the plugin exports no
+        LV2_Worker_Interface: its jobs are then DROPPED and counted as dropped, never as done."""
+        if interface is None:
+            self._dropped += len(self.jobs)
+            self.jobs = []
+            return
+        jobs, self.jobs = self.jobs, []
+        answers = []
+
+        def respond(data):
+            answers.append(bytes(data))
+            return LV2_WORKER_SUCCESS
+
+        for data in jobs:
+            interface.work(data, respond)
+            self._jobs_run += 1
+        for data in answers:
+            interface.work_response(data)
+            self._responses += 1
+        interface.end_run()
+
+    def stats(self):
+        return {"jobs": self._jobs_run, "responses": self._responses, "dropped": self._dropped}
+
+
 class _Host:
     """The minimal offline LV2 host the probe needs: a urid map, host options
     (sample rate + block sizes — DPF-based plugins refuse to instantiate without
-    them), block-length guarantees, and a stub worker schedule that accepts jobs
-    but never runs them (enough to satisfy `worker:schedule` as a required
-    feature; a plugin whose latency depends on completed worker jobs simply
-    reports its resting value). All ctypes callbacks/structs are kept as
+    them), block-length guarantees, and a REAL worker (`WorkerQueue`: the host runs the
+    plugin's work() between blocks and delivers its answers — call `pump` after every
+    block). All ctypes callbacks/structs are kept as
     attributes so nothing is garbage-collected while plugins hold pointers.
     """
 
@@ -1113,7 +1166,9 @@ class _Host:
 
         self._map_cb = map_fn(lambda _h, uri: self.map_uri(uri))
         self._unmap_cb = unmap_fn(lambda _h, urid: self._unmap(urid))
-        self._sched_cb = sched_fn(lambda _h, _size, _data: 0)  # LV2_WORKER_SUCCESS
+        self.worker = WorkerQueue()
+        self._sched_cb = sched_fn(
+            lambda _h, size, data: self.worker.schedule(ctypes.string_at(data, size) if size else b""))
 
         class UridMap(ctypes.Structure):
             _fields_ = [("handle", ctypes.c_void_p), ("map", map_fn)]
@@ -1183,6 +1238,56 @@ class _Host:
         self.block = block
         self.seq_urid = self.map_uri(f"{ATOM}Sequence")
 
+    def worker_interface(self, instance):
+        """The plugin's LV2_Worker_Interface as an object `WorkerQueue.pump` drives, or None when
+        it exports none (its jobs are then counted dropped). The ctypes layout is
+        LV2_Worker_Interface {work, work_response, end_run}."""
+        import ctypes
+
+        respond_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+        work_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, respond_fn, ctypes.c_void_p,
+                                   ctypes.c_uint32, ctypes.c_void_p)
+        response_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+        end_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+
+        class Interface(ctypes.Structure):
+            _fields_ = [("work", work_fn), ("work_response", response_fn), ("end_run", end_fn)]
+
+        try:
+            ext = instance.get_extension_data(self.world.new_uri(f"{WORKER}interface"))
+            if not ext:
+                return None
+            iface = ctypes.cast(ext, ctypes.POINTER(Interface)).contents
+            handle = ctypes.c_void_p(instance.get_handle())
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+        def keep(buf):
+            return ctypes.create_string_buffer(bytes(buf), len(buf))
+
+        class Adapter:
+            def work(self_, data, respond):
+                def cb(_h, size, ptr):
+                    return respond(ctypes.string_at(ptr, size) if size else b"")
+
+                cfn = respond_fn(cb)
+                buf = keep(data)
+                iface.work(handle, cfn, None, len(data), ctypes.cast(buf, ctypes.c_void_p))
+
+            def work_response(self_, data):
+                buf = keep(data)
+                iface.work_response(handle, len(data), ctypes.cast(buf, ctypes.c_void_p))
+
+            def end_run(self_):
+                if iface.end_run:
+                    iface.end_run(handle)
+
+        return Adapter()
+
+    def pump(self, instance_interface):
+        """After a block, between blocks: run the plugin's worker (see WorkerQueue.pump)."""
+        self.worker.pump(instance_interface)
+
     def map_uri(self, uri):
         u = uri.decode() if isinstance(uri, bytes) else str(uri)
         if u not in self.urids:
@@ -1211,6 +1316,7 @@ def probe_one(host, uri, symbol, cycles=DEFAULT_RUN_CYCLES):
     plugin = host.world.get_all_plugins().get_by_uri(host.world.new_uri(uri))
     if plugin is None:
         return None, "not installed"
+    host.worker.reset()
     instance = lilv.Instance(plugin, float(host.rate), host.features)
     if not instance.instance:
         # a required feature we don't provide, or the plugin vetoed the rate.
@@ -1243,9 +1349,11 @@ def probe_one(host, uri, symbol, cycles=DEFAULT_RUN_CYCLES):
         instance.connect_port(i, buf)
     if latency_buf is None:
         return None, f"latency port {symbol!r} not found"
+    iface = host.worker_interface(instance)
     instance.activate()
     for _ in range(cycles):
         instance.run(host.block)
+        host.pump(iface)
     instance.deactivate()
     return float(latency_buf[0]), None
 
@@ -1279,6 +1387,7 @@ def instantiate_connected(host, plugin, overrides=None):
 
     import lilv
 
+    host.worker.reset()
     instance = lilv.Instance(plugin, float(host.rate), host.features)
     if not instance.instance:
         del instance.instance  # avoid lilv.py's NULL deref in __del__
@@ -1346,6 +1455,7 @@ def render(host, plugin, n_blocks, impulse=True, overrides=None, preroll_blocks=
     out_buf = buffers[audio_out[0]]
     captured = np.empty(n_blocks * block, dtype=np.float32)
 
+    iface = host.worker_interface(instance)
     instance.activate()
     if preroll_blocks:
         phase = 2.0 * np.pi * PREROLL_TONE_HZ / float(host.rate)
@@ -1354,12 +1464,14 @@ def render(host, plugin, n_blocks, impulse=True, overrides=None, preroll_blocks=
             in_buf[:] = PREROLL_TONE_AMP * np.sin(
                 phase * np.arange(start, start + block, dtype=np.float32))
             instance.run(block)  # output discarded: this only opens the plugin up
+            host.pump(iface)
     in_buf[:] = 0.0
     if impulse:
         in_buf[0] = 1.0  # 1.0 at frame 0 of the first block only
     for blk in range(n_blocks):
         instance.run(block)
         captured[blk * block:(blk + 1) * block] = out_buf
+        host.pump(iface)
         in_buf[:] = 0.0  # every subsequent block is silence
     instance.deactivate()
     return captured, None
@@ -1518,6 +1630,7 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
             buf[:] = sig
 
     times = []
+    iface = host.worker_interface(instance)
     instance.activate()
     gc_was_on = gc.isenabled()
     gc.disable()
@@ -1528,6 +1641,7 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
             t0 = clock()
             run(block)
             times.append(clock() - t0)
+            host.pump(iface)  # the plugin's worker runs between blocks, off the timed run()
             blk += 1
         spent = 0
         budget = int(target_seconds * 1e9)
@@ -1537,6 +1651,7 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
             t0 = clock()
             run(block)
             dt = clock() - t0
+            host.pump(iface)
             times.append(dt)
             spent += dt
             timed += 1
@@ -1553,7 +1668,8 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     if not np.all(np.isfinite(out_buf)):
         return {"error": "non-finite output"}
     return {"blockTimesNs": times,
-            "silentOutput": bool(np.max(np.abs(out_buf)) == 0.0)}
+            "silentOutput": bool(np.max(np.abs(out_buf)) == 0.0),
+            "worker": host.worker.stats()}
 
 
 def control_ranges(host, plugin, symbols):
@@ -1668,6 +1784,10 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
                     continue
                 if res.get("silentOutput"):
                     record["silentOutput"] = True
+                # what the host did with the plugin's worker, so a cost read can be told apart
+                # from an unbuilt plugin's (jobs and dropped are counts, never a verdict).
+                if "worker" in res:
+                    record["worker"] = res["worker"]
                 print(json.dumps({"uri": uri,
                                   "nsPerSample": record["nsPerSampleMedian"],
                                   "cost": record}), flush=True)

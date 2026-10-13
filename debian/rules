@@ -7,7 +7,8 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 %:
 	dh $@
 
-# the CLAP prober and its interposer; the headers come from clap-headers and plugin-hostd-dev
+# the CLAP prober, the LV2 measurer and their interposer; the headers come from clap-headers,
+# plugin-hostd-dev, liblilv-dev and lv2-dev
 override_dh_auto_build:
 	$(MAKE) -C native
 

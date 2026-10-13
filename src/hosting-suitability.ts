@@ -306,6 +306,7 @@ export type PluginLv2Features = Omit<FeaturesMeasurement, "unmeasuredReason" | "
 
 export { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
 import { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
+import { costFieldsMissing } from "./cost-fields.js";
 
 /** One declared rate's latency reading from the CLAP qualifier (CLAP spec §3, latency). */
 export interface ClapLatencyAtRate {
@@ -404,12 +405,25 @@ export function deadAgainstBest(levelDbfs: number, bestDbfs: number, policy: Hos
   return bestDbfs > -Infinity && levelDbfs < bestDbfs - policy.soakDeadDropDb;
 }
 
+/** The classes of soak failure, as the strings `failures` is built from. */
+export type SoakFailureKind = "died" | "non-finite" | "dead" | "mostly-silent" | "startup-blast" | "timed-out";
+
+export interface SoakFailure {
+  readonly rate: number;
+  readonly kind: SoakFailureKind;
+  /** Extra words for the string form, e.g. `20dBFS`. */
+  readonly detail?: string;
+}
+
 /** A soak's reading: what voided it, if anything, and what it proved when nothing did. */
 export interface SoakFindings {
   /** The SHORTEST rate's seconds — a soak proves no more than its weakest rate ran. */
   readonly seconds: number;
-  /** Every rate that voids the soak, as `<why>@<rate>` — `died@`, `non-finite@`, `dead@`, `mostly-silent@`, `startup-blast@`. */
+  /** Every rate that voids the soak, as `<why>@<rate>` — `died@`, `non-finite@`, `dead@`, `mostly-silent@`, `startup-blast@`, `timed-out@`. */
   readonly failures: readonly string[];
+  /** The same failures, structured — what the per-rate verdict reads. `timed-out` is the supervisor's
+   *  cut, a fact about the harness: it voids the soak but is never a failure of the plugin. */
+  readonly failed: readonly SoakFailure[];
   readonly ratesTested: number;
   /** The largest RSS growth across rates, for the record; not judged. */
   readonly rssGrowthKb: number;
@@ -432,35 +446,43 @@ export function soakFindings(soak: SoakReading | undefined, policy: HostingPolic
   if (soak === undefined) return undefined;
   const rates = Object.entries(soak.perRate);
   if (rates.length === 0) return undefined;
-  const gone = (v: SoakAtRate): boolean => v.died === true || v.instantiated === false;
+  const gone = (v: SoakAtRate): boolean => v.timedOut !== true && (v.died === true || v.instantiated === false);
+  const cut = (v: SoakAtRate): boolean => v.timedOut === true;
   const settled = rates.map(([, v]) =>
-    gone(v) || (v.lastRmsDbfs ?? -Infinity) > BLAST_DBFS ? -Infinity : v.lastRmsDbfs ?? -Infinity,
+    gone(v) || cut(v) || (v.lastRmsDbfs ?? -Infinity) > BLAST_DBFS ? -Infinity : v.lastRmsDbfs ?? -Infinity,
   );
   const best = Math.max(...settled);
-  const failures: string[] = [];
-  for (const [rate, v] of rates) {
+  const failed: SoakFailure[] = [];
+  for (const [key, v] of rates) {
+    const rate = Number(key);
+    if (cut(v)) {
+      failed.push({ rate, kind: "timed-out" });
+      continue;
+    }
     if (gone(v)) {
-      failures.push(`died@${rate}`);
+      failed.push({ rate, kind: "died" });
       continue;
     }
     if ((v.nonFiniteWindows ?? 0) > 0) {
-      failures.push(`non-finite@${rate}`);
+      failed.push({ rate, kind: "non-finite" });
       continue;
     }
     if (deadAgainstBest(v.lastRmsDbfs ?? -Infinity, best, policy)) {
-      failures.push(`dead@${rate}`);
+      failed.push({ rate, kind: "dead" });
       continue;
     }
     if ((v.silentWindows ?? 0) > (v.windows ?? 1) * 0.5) {
-      failures.push(`mostly-silent@${rate}`);
+      failed.push({ rate, kind: "mostly-silent" });
       continue;
     }
     const first = v.firstRmsDbfs ?? -99;
-    if (first > BLAST_DBFS) failures.push(`startup-blast@${rate}(${first.toFixed(0)}dBFS)`);
+    if (first > BLAST_DBFS) failed.push({ rate, kind: "startup-blast", detail: `${first.toFixed(0)}dBFS` });
   }
+  const failures = failed.map((f) => `${f.kind}@${f.rate}${f.detail === undefined ? "" : `(${f.detail})`}`);
   return {
     seconds: Math.min(...rates.map(([, v]) => v.seconds ?? 0)),
     failures,
+    failed,
     ratesTested: rates.length,
     rssGrowthKb: Math.max(...rates.map(([, v]) => v.rssGrowthKb ?? 0)),
   };
@@ -480,6 +502,8 @@ export function stabilityReasons(
   /** Whether the plugin shares its process with others (profile isolation, §3a): threads it
    *  spawns and a GUI toolkit it links are cautions only there. */
   sharesProcess = true,
+  /** The console's rate: a soak failure measured at it is the plugin's verdict there. */
+  rate?: number,
 ): readonly HostingReason[] {
   const out: HostingReason[] = [];
   if (m === undefined || m.lifecycle === undefined) {
@@ -516,6 +540,18 @@ export function stabilityReasons(
         soakSeconds: soaked,
         required: policy.soakSeconds,
         ...(soak !== undefined && soak.failures.length > 0 ? { failures: soak.failures.join(" ") } : {}),
+      }),
+    );
+  }
+  // A failure MEASURED at the rate being judged is that plugin's verdict at that rate: unsuitable.
+  // At any other rate it only means the soak did not hold everywhere (unsoaked, above). A
+  // supervisor timeout is the harness's fact, never the plugin's.
+  for (const f of soak?.failed ?? []) {
+    if (f.kind === "timed-out" || rate === undefined || f.rate !== rate) continue;
+    out.push(
+      reason("stability", "objective", "unsuitable", HOSTING_CODE.stabilitySoakFailedAtRate, {
+        failure: f.kind,
+        rate: f.rate,
       }),
     );
   }
@@ -648,6 +684,16 @@ export function hostingCostReasons(
       reason("cost", "objective", "unknown", HOSTING_CODE.costUnmeasured, {
         rate: options.rate,
         quantum: options.quantum ?? 0,
+      }),
+    ];
+  }
+  // Refuse before comparing: `undefined > ceiling` is false, which is how a gate passes by absence.
+  const missing = costFieldsMissing(perRate);
+  if (missing.length > 0) {
+    return [
+      reason("cost", "objective", "unknown", HOSTING_CODE.costFieldsMissing, {
+        rate: options.rate,
+        missing: missing.join(","),
       }),
     ];
   }
@@ -864,7 +910,7 @@ export function classifyPluginHosting(
   // the interposer's counts and the cost are format-blind and read unchanged.
   const reasons: HostingReason[] = descriptor.format === "clap"
     ? [
-        ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess),
+        ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess, options.rate),
         ...rtSafetyReasons(descriptor.rtSafety),
         ...clapRtReasons(descriptor.clap),
         ...clapFeatureReasons(descriptor.clap, profile, descriptor.hasMidiIn),
@@ -873,7 +919,7 @@ export function classifyPluginHosting(
         ...clapTopologyReasons(descriptor.clap, profile.instruments),
       ]
     : [
-        ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess),
+        ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess, options.rate),
         ...rtSafetyReasons(descriptor.rtSafety),
         ...featureReasons(descriptor.lv2Features, descriptor, profile.lv2Features, options.quantum !== undefined, profile.instruments),
         ...hostingCostReasons(descriptor, options, policy),

@@ -86,6 +86,23 @@ keeps what a console needs to draw a third-party plugin's controls: an enum para
 the plugin's `value_to_text` renders them), each parameter's module, and the plugin's
 remote-control pages.
 
+## LV2 plugins: the hosting measurement
+
+`tools/lv2-measure.mjs` measures the hosting dimensions (`stability`, `rtSafety`, `features`) through
+the LV2 measurer the package installs, `lv2_measure`: each plugin is loaded through lilv in its own
+process, instantiated and destroyed 30 times, and run under the interposer while every control is
+swept, at the highest `--rates` rate:
+
+```
+node tools/lv2-measure.mjs --rates 48000 --dimensions stability,rtSafety,features \
+  --plugins urn:my:plugin --out measurements.json --run
+```
+
+Without `--plugins` it measures every plugin the scan finds. Each plugin's entry carries its pin, an
+`integrity` block: the SHA-256 of the files the host loads and the parameter-layout fingerprint,
+through plugin-hostd's `pin.h`, as for CLAP. `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` name the
+measurer and the interposer when they are not the installed ones or the checkout's own build.
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own

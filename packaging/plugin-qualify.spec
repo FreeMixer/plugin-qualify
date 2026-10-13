@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.5.1
+Version: 0.6.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -11,11 +11,14 @@ Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires: nodejs >= 18
 BuildRequires: npm
-# the CLAP prober and its interposer: the CLAP headers from Fedora, pin.h from plugin-hostd-devel
+# the CLAP prober, the LV2 measurer and their interposer: the CLAP headers and lilv from Fedora,
+# pin.h from plugin-hostd-devel
 BuildRequires: gcc
 BuildRequires: make
 BuildRequires: pkgconfig
 BuildRequires: pkgconfig(clap)
+BuildRequires: pkgconfig(lilv-0)
+BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 
 Requires: nodejs >= 18
@@ -59,6 +62,31 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
+- The package carries the LV2 measurer taken in from openmixer, lv2_measure,
+  in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what
+  openmixer's copy prints, the plugin's integrity pin included, plus what
+  its host now does.
+- The measuring host is faithful: it runs a plugin's worker between blocks,
+  sends patch:Set to patch:writable parameters, bounds the soak's control
+  sweep (OMX_SWEEP_DB, OMX_SWEEP_RATIO), keeps a plugin's stdout out of its
+  record, and says what it did in a "host" object.
+- benchmark.py runs the plugin's worker between blocks instead of dropping
+  its jobs; the cost record carries the worker's counts.
+- extractJsonRecord, soakTimeoutSeconds and the soak sweep declarations are
+  exported.
+- A soak failure measured at the console's rate rates the plugin unsuitable
+  at that rate (hosting.stability.soak-failed-at-rate). A rate the supervisor
+  cut short reads timedOut, never died.
+- The cost gate refuses a reading missing a field it judges
+  (hosting.cost.fields-missing); COST_FIELDS, coreFraction and
+  classifierCostFromDocument are exported.
+- lv2-measure.mjs measures the hosting dimensions (stability, rtSafety,
+  features) through it, one process per plugin under the interposer;
+  --plugins names the plugins without a scan.
+- The command looks for the measurer by its setting (OMX_LV2_MEASURE), then
+  where the package installs it, then in the checkout's native/build.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.1-1
 - The package carries the CLAP prober and its interposer, in
   /usr/libexec/plugin-qualify, so an installed plugin-qualify qualifies CLAP

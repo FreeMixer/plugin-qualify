@@ -1,0 +1,7 @@
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<urn:plugin-qualify:fixture:needs-options> a lv2:Plugin ; lv2:binary <host-faithfulness.so> ; rdfs:seeAlso <host-faithfulness.ttl> .
+<urn:plugin-qualify:fixture:worker-engine> a lv2:Plugin ; lv2:binary <host-faithfulness.so> ; rdfs:seeAlso <host-faithfulness.ttl> .
+<urn:plugin-qualify:fixture:patch-gain> a lv2:Plugin ; lv2:binary <host-faithfulness.so> ; rdfs:seeAlso <host-faithfulness.ttl> .
+<urn:plugin-qualify:fixture:wide-gain> a lv2:Plugin ; lv2:binary <host-faithfulness.so> ; rdfs:seeAlso <host-faithfulness.ttl> .
+<urn:plugin-qualify:fixture:banner> a lv2:Plugin ; lv2:binary <host-faithfulness.so> ; rdfs:seeAlso <host-faithfulness.ttl> .
