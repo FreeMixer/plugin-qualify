@@ -1,3 +1,14 @@
+plugin-qualify (0.9.0) unstable; urgency=medium
+
+  * lv2_measure frees its host, and the plugin's features, URI node and
+    LV2 world, on every way out: the soak, a soak that cannot
+    instantiate and a plugin that never instantiates, not only a full
+    measurement.
+  * make -C native asan builds the measurer under AddressSanitizer for
+    the tests' leak check; it is not part of the package build.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 13 Oct 2026 19:00:00 +0000
+
 plugin-qualify (0.6.0) unstable; urgency=medium
 
   * The package carries the LV2 measurer taken in from openmixer,
