@@ -27,8 +27,15 @@ sudo apt update
 sudo apt install plugin-qualify
 ```
 
-There is no npm package on the registry yet; the GitHub release carries the packed one,
-`openmixer-plugin-qualify-<version>.tgz`, which `pnpm add` takes by its download URL. To run from a
+From the npm registry:
+
+```
+pnpm add @openmixer/plugin-qualify
+# or, for the command only:
+npm install -g @openmixer/plugin-qualify
+```
+
+The GitHub release also carries the packed tarball, `openmixer-plugin-qualify-<version>.tgz`. To run from a
 checkout instead (Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
 
 ```
