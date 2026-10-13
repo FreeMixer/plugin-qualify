@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.5.0
+Version: 0.5.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -59,6 +59,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.1-1
+- The package carries the CLAP prober and its interposer, in
+  /usr/libexec/plugin-qualify, so an installed plugin-qualify qualifies CLAP
+  plugins and prints their integrity pin with nothing set. The package is now
+  built per architecture.
+- The command looks for the prober by its setting, then where the package
+  installs it, then in the checkout's native/build.
+- omx-clap-host, which brings omx-clap-scan, is recommended.
+
 * Mon Oct 12 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.0-1
 - The CLAP prober and the measurement interchange (v1.3) carry each plugin's
   integrity pin: the SHA-256 of the files the host loads and the omx-layout/1
