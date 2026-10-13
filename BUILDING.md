@@ -31,6 +31,11 @@ make -C native deps all   # native/build/clap-qualify, rt_interpose.so, fixtures
 
 The CLAP tests run the build; without it they skip, except on CI, where a missing build fails.
 
+`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober and the interposer (not the
+fixtures). The command looks for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_RT_INTERPOSE`), then in
+the directories the packages install into (`NATIVE_TOOL_DIRS` in `src/qualify-declarations.ts`), then in
+`native/build/`.
+
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
 AddressSanitizer build of mod-host:
 
@@ -49,12 +54,19 @@ rpmbuild -ba packaging/plugin-qualify.spec        # needs the source tarball in 
 dpkg-buildpackage -b -uc -us                      # the DEB
 ```
 
+Both are built per architecture: they carry the CLAP prober and its interposer, in
+`/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers come
+from packages, never from `make deps`: `clap-devel` and `plugin-hostd-devel` on Fedora, `clap-headers`
+and `plugin-hostd-dev` on Debian (the last two from the FreeMixer channel). An installed package is
+checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap>`, run with nothing set.
+
 There is no changelog file: git history is the changelog. `debian/changelog` and the spec's `%changelog`
 are packaging metadata. Bump `version` in `package.json` and `Version:` in the spec together.
 
 The tag publishes the RPM and DEB through the shared workflows of FreeMixer/.github and attaches the
 `pnpm pack` tarball, `openmixer-plugin-qualify-<version>.tgz` with `dist/` built in, to the GitHub
-release. Pull requests build both package kinds and pack the tarball as a dry run and publish nothing;
+release. Pull requests build both package kinds, install each in its distribution's container and run
+`packaging/check-installed.sh` there, and pack the tarball, as a dry run that publishes nothing;
 `node packaging/check-tarball.mjs <tarball>` checks it carries every `exports` target.
 
 A version tag also publishes the npm package: `.github/workflows/publish.yml` publishes it by npm
