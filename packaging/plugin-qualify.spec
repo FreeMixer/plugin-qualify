@@ -65,7 +65,16 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
 - The package carries the LV2 measurer taken in from openmixer, lv2_measure,
   in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what
-  openmixer's copy prints, the plugin's integrity pin included.
+  openmixer's copy prints, the plugin's integrity pin included, plus what
+  its host now does.
+- The measuring host is faithful: it runs a plugin's worker between blocks,
+  sends patch:Set to patch:writable parameters, bounds the soak's control
+  sweep (OMX_SWEEP_DB, OMX_SWEEP_RATIO), keeps a plugin's stdout out of its
+  record, and says what it did in a "host" object.
+- benchmark.py runs the plugin's worker between blocks instead of dropping
+  its jobs; the cost record carries the worker's counts.
+- extractJsonRecord, soakTimeoutSeconds and the soak sweep declarations are
+  exported.
 - lv2-measure.mjs measures the hosting dimensions (stability, rtSafety,
   features) through it, one process per plugin under the interposer;
   --plugins names the plugins without a scan.
