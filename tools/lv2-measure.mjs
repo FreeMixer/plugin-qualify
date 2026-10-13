@@ -60,7 +60,7 @@ import {
   urisFromScan,
 } from "../dist/measurement/index.js";
 import { LV2_HOSTING_TIMEOUT_S, LV2_MEASURE_TOOL_NAME, RT_INTERPOSE_NAME } from "../dist/qualify-declarations.js";
-import { locateNativeTool } from "../dist/tool-paths.js";
+import { halfPopulatedRefusal, locateNativeTools } from "../dist/tool-paths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -96,16 +96,20 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-/** The native measurer and its interposer, located; absent, the run is refused naming where it looked. */
+/**
+ * The native measurer and its interposer, located together (`locateNativeTools`): absent, or half there
+ * in the one place they come from, the run is refused naming where it looked.
+ */
 function hostingTools() {
-  const at = (name) => {
-    const found = locateNativeTool(name, process.env, existsSync);
+  const { tools, halfPopulated } = locateNativeTools([LV2_MEASURE_TOOL_NAME, RT_INTERPOSE_NAME], process.env, existsSync);
+  if (halfPopulated !== undefined) fail(`no measurer and interposer pair: ${halfPopulatedRefusal(halfPopulated)}`);
+  const [tool, interposer] = tools.map((found) => {
     if (found.path === undefined) {
-      fail(`no ${name} at ${found.looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${found.setting}`);
+      fail(`no ${found.name} at ${found.looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${found.setting}`);
     }
     return found.path;
-  };
-  return { tool: at(LV2_MEASURE_TOOL_NAME), interposer: at(RT_INTERPOSE_NAME) };
+  });
+  return { tool, interposer };
 }
 
 /** The hosting pass: the measurer once per plugin, each in its own process, its lines written as JSONL. */

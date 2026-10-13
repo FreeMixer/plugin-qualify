@@ -33,7 +33,7 @@ import { OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js"
 import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
-import { locateNativeTool } from "./tool-paths.js";
+import { halfPopulatedRefusal, locateNativeTools } from "./tool-paths.js";
 import { readIntegrity, type IntegrityMeasurement } from "./measurement/format.js";
 
 export class ClapQualifyError extends Error {
@@ -305,32 +305,25 @@ export interface ClapQualifyOptions {
   readonly exists?: (path: string) => boolean;
 }
 
-/** One native tool, located (`locateNativeTool`). Absent, it throws, naming where it looked. */
-function locate(
-  env: Readonly<Record<string, string | undefined>>,
-  what: string,
-  file: string,
-  exists: (path: string) => boolean,
-): string {
-  const { path, looked, setting } = locateNativeTool(file, env, exists);
-  if (path === undefined) {
-    throw new ClapQualifyError(`no CLAP ${what} at ${looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${setting}`);
-  }
-  return path;
-}
-
 /**
- * The prober and the interposer this run uses: each its setting, else the package's own build, else
- * the first of the installed directories (`NATIVE_TOOL_DIRS`) that holds it.
+ * The prober and the interposer this run uses: each its setting, else both from one place, the
+ * package's own build or else the first installed directory (`NATIVE_TOOL_DIRS`) holding them
+ * (`locateNativeTools`). Absent, or half there, it throws, naming where it looked.
  */
 export function clapQualifyTools(
   env: Readonly<Record<string, string | undefined>>,
   exists: (path: string) => boolean = existsSync,
 ): { tool: string; interposer: string } {
-  return {
-    tool: locate(env, "prober", CLAP_QUALIFY_TOOL_NAME, exists),
-    interposer: locate(env, "interposer", RT_INTERPOSE_NAME, exists),
-  };
+  const { tools, halfPopulated } = locateNativeTools([CLAP_QUALIFY_TOOL_NAME, RT_INTERPOSE_NAME], env, exists);
+  if (halfPopulated !== undefined) throw new ClapQualifyError(`no CLAP prober and interposer pair: ${halfPopulatedRefusal(halfPopulated)}`);
+  const [tool, interposer] = tools.map(({ path, looked, setting }, i) => {
+    if (path === undefined) {
+      const what = i === 0 ? "prober" : "interposer";
+      throw new ClapQualifyError(`no CLAP ${what} at ${looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${setting}`);
+    }
+    return path;
+  });
+  return { tool: tool!, interposer: interposer! };
 }
 
 /**
