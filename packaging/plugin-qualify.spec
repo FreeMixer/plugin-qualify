@@ -11,11 +11,14 @@ Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires: nodejs >= 18
 BuildRequires: npm
-# the CLAP prober and its interposer: the CLAP headers from Fedora, pin.h from plugin-hostd-devel
+# the CLAP prober, the LV2 measurer and their interposer: the CLAP headers and lilv from Fedora,
+# pin.h from plugin-hostd-devel
 BuildRequires: gcc
 BuildRequires: make
 BuildRequires: pkgconfig
 BuildRequires: pkgconfig(clap)
+BuildRequires: pkgconfig(lilv-0)
+BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 
 Requires: nodejs >= 18
