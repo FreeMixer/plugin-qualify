@@ -25,6 +25,13 @@
  * without the sweep is reported as unswept and the classifier treats it as
  * unmeasured.
  *
+ * THE HOST IS THE HOST THAT WILL RUN THE PLUGIN (plugin-qualify spec §2a): the options table
+ * (sample rate, block lengths), a REAL worker (work() between blocks, answers
+ * through work_response(), end_run()), patch:Set for patch:writable parameters (JUCE 8's only
+ * parameters), a soak sweep bounded to sane ranges, and the record written to a private dup of
+ * stdout so a plugin's own banner cannot tear it. The "host" object in the record says what the
+ * host did, so a test can prove each injection landed.
+ *
  * WHAT IT DOES NOT DO. It does not soak — the spec's stability dimension also wants a
  * continuous run at least as long as the operator's longest show, which is hours and
  * belongs in a scheduled sweep rather than here. A plugin passing this program still
@@ -67,50 +74,448 @@
  * perfectly good plugin fails to instantiate and reads as broken. So the providers
  * are lv2-measure-features.h's, built on the kinds the LV2 adapter the engine hosts
  * through provides (host-backend-one-contract §3) — one URI table, the options at the
- * measured rate and block, a silent log. The worker's schedule is this program's own
+ * measured rate and block, a silent log. The worker's schedule is each instance's own
  * (below). Instantiating with NULL
  * features, which is what this program did first, made every LSP plugin segfault:
  * they require urid:map, and a host that does not map URIs is not a host.
  */
 /*
- * The worker. A real host runs work() off the audio thread; scheduling from run()
- * must not block. Jobs are queued here and drained by the main thread between
- * blocks, which is a genuine non-RT execution rather than an inline call — a plugin
- * that deadlocks or misbehaves when work() does not run inline is exactly what this
- * catches, and calling work() inline would hide it.
+ * THE MEASURING HOST IS THE HOST THAT WILL RUN THE PLUGIN
+ * (`2026-09-25-plugin-qualify.md` §2a). A figure is only as true as the host is faithful, so
+ * this offers a plugin what a real host does:
  *
- * FINDING (2026-10-01, lane lv2-host-features-one-home, not fixed there): nothing in this
- * program drains job_queue and `worker_respond` is never handed to a work() call — the
- * build warns it is unused, which is why build:lv2-measure carries no -Werror. A plugin's
- * scheduled work is queued and dropped, so the paragraph above describes the intent, not
- * the measurement; the worker's non-RT execution is unmeasured until a drain lands.
+ *   options   lv2-measure-features.h's table at the rate and block of each instance. An EMPTY
+ *             table makes every JUCE-built LV2 refuse to instantiate.
+ *   worker    worker:schedule QUEUES a job; the host runs the plugin's work() between blocks,
+ *             off run(), delivers the answer through work_response() before the next block and
+ *             calls end_run(). A schedule that accepts and drops measures an UNBUILT plugin
+ *             (Hex Chain amp: 0.9 us/sample stubbed, 5.4 built).
+ *   patch     patch:writable parameters are sent as patch:Set on the plugin's atom input and
+ *             swept like control ports (JUCE 8 exposes parameters only this way).
+ *
+ * Everything below is allocated when an instance is opened; nothing allocates in the blocks
+ * the interposer counts.
  */
+#include <lv2/atom/forge.h>
+#include <lv2/parameters/parameters.h>
+#include <lv2/patch/patch.h>
+#include <lv2/units/units.h>
+#include <math.h>
+
+/* The soak's control sweep is bounded to musically sane ranges. These defaults EQUAL
+ * SOAK_SWEEP_DB / SOAK_SWEEP_RATIO in src/qualify-declarations.ts (a conformance test reads
+ * both); the qualify tool passes the declared values in the environment (OMX_SWEEP_DB /
+ * OMX_SWEEP_RATIO) so a moved declaration moves this. */
+#define SWEEP_DB_DEFAULT 12
+#define SWEEP_RATIO_DEFAULT 4
+
+#define MAX_PARAMS 1024
+#define ATOM_CAP 8192
+#define PATCH_CAP 65536
+#define PATCH_SETS_PER_BLOCK 256
 #define MAX_JOBS 64
-static struct {
+#define MAX_JOB_BYTES 8192
+
+enum { PK_NONE, PK_AUDIO, PK_CONTROL_IN, PK_CONTROL_OUT, PK_ATOM_IN, PK_ATOM_OUT };
+
+struct param {
+  LV2_URID key, type;
+  double lo, hi, def;
+};
+
+struct host {
+  LilvWorld *world;
+  const LilvPlugin *plugin;
+  uint32_t n_ports, n_audio_in, n_audio_out, n_cv, n_control_in;
+  uint8_t *pk;   /* PK_* per port */
+  uint8_t *is_db; /* units:db per port */
+  uint8_t *is_in; /* input port, per port */
+  float *mins, *maxes, *defs;
+  struct param params[MAX_PARAMS];
+  int n_params;
+  int patch_port; /* the atom input that takes patch:Set, or -1 */
+  LV2_URID_Map map; /* lv2-measure-features.h's one URI table, for the forge */
+  LV2_URID u_float, u_int, u_bool, u_long, u_double;
+  LV2_URID u_chunk, u_sequence, u_patch_set, u_patch_prop, u_patch_val;
+  double sweep_db, sweep_ratio;
+  LV2_Atom_Forge forge;
+  /* What the host did, reported so a measurement can prove the injection landed. */
+  long worker_jobs, worker_responses, worker_dropped, patch_sets;
+  int worker_interface;
+};
+
+struct job {
   uint32_t size;
-  uint8_t data[8192];
-} job_queue[MAX_JOBS];
-static int job_head, job_tail;
+  uint8_t data[MAX_JOB_BYTES];
+};
 
-static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle h, uint32_t size,
-                                       const void *data) {
-  (void)h;
-  int next = (job_tail + 1) % MAX_JOBS;
-  if (next == job_head || size > sizeof job_queue[0].data) return LV2_WORKER_ERR_NO_SPACE;
-  job_queue[job_tail].size = size;
-  memcpy(job_queue[job_tail].data, data, size);
-  job_tail = next;
+struct rig {
+  struct host *h;
+  LilvInstance *inst;
+  uint32_t block;
+  size_t audio_slots;
+  float *audio, *controls;
+  uint8_t **atoms;
+  struct omx_lv2_options options;
+  LV2_Worker_Schedule sched;
+  struct omx_lv2_feature_block feature_block;
+  const LV2_Worker_Interface *wk;
+  LV2_Handle handle;
+  struct job jobs[MAX_JOBS], resp[MAX_JOBS];
+  int jh, jt, rh, rt;
+  double pvals[MAX_PARAMS];
+  int patch_live, pcursor;
+};
+
+static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle handle, uint32_t size, const void *data) {
+  struct rig *r = handle;
+  int next = (r->jt + 1) % MAX_JOBS;
+  if (next == r->jh || size > MAX_JOB_BYTES) return LV2_WORKER_ERR_NO_SPACE;
+  r->jobs[r->jt].size = size;
+  memcpy(r->jobs[r->jt].data, data, size);
+  r->jt = next;
   return LV2_WORKER_SUCCESS;
 }
 
-static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle h, uint32_t size,
-                                        const void *data) {
-  (void)h;
-  (void)size;
-  (void)data;
+static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle handle, uint32_t size, const void *data) {
+  struct rig *r = handle;
+  int next = (r->rt + 1) % MAX_JOBS;
+  if (next == r->rh || size > MAX_JOB_BYTES) return LV2_WORKER_ERR_NO_SPACE;
+  r->resp[r->rt].size = size;
+  memcpy(r->resp[r->rt].data, data, size);
+  r->rt = next;
   return LV2_WORKER_SUCCESS;
 }
 
+static double env_or(const char *name, double fallback) {
+  const char *v = getenv(name);
+  const double x = v ? atof(v) : 0.0;
+  return x > 0.0 ? x : fallback;
+}
+
+static LV2_URID host_map(LV2_URID_Map_Handle handle, const char *uri) {
+  (void)handle;
+  return omx_lv2_urid_map(uri);
+}
+
+static LV2_URID map_node(struct host *h, const LilvNode *n) {
+  return n && lilv_node_is_uri(n) ? h->map.map(NULL, lilv_node_as_uri(n)) : 0;
+}
+
+/* Everything about the plugin that does not depend on an instance: port kinds, ranges, units
+ * and the patch:writable parameters. */
+static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin) {
+  memset(h, 0, sizeof *h);
+  h->world = world;
+  h->plugin = plugin;
+  h->map = (LV2_URID_Map){NULL, host_map};
+  h->u_float = omx_lv2_urid_map(LV2_ATOM__Float);
+  h->u_int = omx_lv2_urid_map(LV2_ATOM__Int);
+  h->u_bool = omx_lv2_urid_map(LV2_ATOM__Bool);
+  h->u_long = omx_lv2_urid_map(LV2_ATOM__Long);
+  h->u_double = omx_lv2_urid_map(LV2_ATOM__Double);
+  h->u_chunk = omx_lv2_urid_map(LV2_ATOM__Chunk);
+  h->u_sequence = omx_lv2_urid_map(LV2_ATOM__Sequence);
+  h->u_patch_set = omx_lv2_urid_map(LV2_PATCH__Set);
+  h->u_patch_prop = omx_lv2_urid_map(LV2_PATCH__property);
+  h->u_patch_val = omx_lv2_urid_map(LV2_PATCH__value);
+  h->sweep_db = env_or("OMX_SWEEP_DB", SWEEP_DB_DEFAULT);
+  h->sweep_ratio = env_or("OMX_SWEEP_RATIO", SWEEP_RATIO_DEFAULT);
+  h->patch_port = -1;
+  lv2_atom_forge_init(&h->forge, &h->map);
+
+  LilvNode *audio_class = lilv_new_uri(world, LV2_CORE__AudioPort);
+  LilvNode *control_class = lilv_new_uri(world, LV2_CORE__ControlPort);
+  LilvNode *input_class = lilv_new_uri(world, LV2_CORE__InputPort);
+  LilvNode *output_class = lilv_new_uri(world, LV2_CORE__OutputPort);
+  LilvNode *cv_class = lilv_new_uri(world, LV2_CORE__CVPort);
+  LilvNode *atom_class = lilv_new_uri(world, LV2_ATOM__AtomPort);
+  LilvNode *unit_pred = lilv_new_uri(world, LV2_UNITS__unit);
+  LilvNode *db_unit = lilv_new_uri(world, LV2_UNITS__db);
+  LilvNode *patch_msg = lilv_new_uri(world, LV2_PATCH__Message);
+
+  h->n_ports = lilv_plugin_get_num_ports(plugin);
+  h->pk = calloc(h->n_ports, 1);
+  h->is_db = calloc(h->n_ports, 1);
+  h->is_in = calloc(h->n_ports, 1);
+  h->mins = calloc(h->n_ports, sizeof(float));
+  h->maxes = calloc(h->n_ports, sizeof(float));
+  h->defs = calloc(h->n_ports, sizeof(float));
+  lilv_plugin_get_port_ranges_float(plugin, h->mins, h->maxes, h->defs);
+  for (uint32_t i = 0; i < h->n_ports; i++) {
+    const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
+    const int in = lilv_port_is_a(plugin, port, input_class);
+    const int out = lilv_port_is_a(plugin, port, output_class);
+    h->is_in[i] = (uint8_t)in;
+    if (lilv_port_is_a(plugin, port, cv_class)) {
+      h->n_cv++;
+      h->pk[i] = PK_AUDIO;
+    } else if (lilv_port_is_a(plugin, port, audio_class)) {
+      if (in) h->n_audio_in++;
+      else if (out) h->n_audio_out++;
+      h->pk[i] = PK_AUDIO;
+    } else if (lilv_port_is_a(plugin, port, control_class)) {
+      h->pk[i] = in ? PK_CONTROL_IN : PK_CONTROL_OUT;
+      if (in) h->n_control_in++;
+      LilvNodes *u = lilv_port_get_value(plugin, port, unit_pred);
+      if (u) {
+        LILV_FOREACH (nodes, ui, u)
+          if (lilv_node_equals(lilv_nodes_get(u, ui), db_unit)) h->is_db[i] = 1;
+        lilv_nodes_free(u);
+      }
+    } else {
+      h->pk[i] = in ? PK_ATOM_IN : PK_ATOM_OUT;
+      if (in && h->patch_port < 0 && lilv_port_is_a(plugin, port, atom_class) &&
+          lilv_port_supports_event(plugin, port, patch_msg))
+        h->patch_port = (int)i;
+    }
+  }
+
+  /* patch:writable parameters: JUCE 8 declares them ONLY here. */
+  LilvNode *writable = lilv_new_uri(world, LV2_PATCH__writable);
+  LilvNode *range_p = lilv_new_uri(world, "http://www.w3.org/2000/01/rdf-schema#range");
+  LilvNode *min_p = lilv_new_uri(world, LV2_CORE__minimum);
+  LilvNode *max_p = lilv_new_uri(world, LV2_CORE__maximum);
+  LilvNode *def_p = lilv_new_uri(world, LV2_CORE__default);
+  LilvNodes *ws = lilv_plugin_get_value(plugin, writable);
+  if (ws) {
+    LILV_FOREACH (nodes, wi, ws) {
+      const LilvNode *prop = lilv_nodes_get(ws, wi);
+      if (!lilv_node_is_uri(prop) || h->n_params >= MAX_PARAMS) continue;
+      LilvNode *range = lilv_world_get(world, prop, range_p, NULL);
+      const LV2_URID type = map_node(h, range);
+      lilv_node_free(range);
+      if (type != h->u_float && type != h->u_int && type != h->u_bool && type != h->u_long &&
+          type != h->u_double)
+        continue; /* strings and paths cannot be swept */
+      LilvNode *mn = lilv_world_get(world, prop, min_p, NULL);
+      LilvNode *mx = lilv_world_get(world, prop, max_p, NULL);
+      LilvNode *df = lilv_world_get(world, prop, def_p, NULL);
+      struct param *p = &h->params[h->n_params];
+      p->key = map_node(h, prop);
+      p->type = type;
+      p->lo = type == h->u_bool ? 0.0 : (mn ? (double)lilv_node_as_float(mn) : 0.0);
+      p->hi = type == h->u_bool ? 1.0 : (mx ? (double)lilv_node_as_float(mx) : 0.0);
+      p->def = df ? (double)lilv_node_as_float(df) : p->lo;
+      if (type == h->u_bool || (mn && mx)) h->n_params++;
+      lilv_node_free(mn);
+      lilv_node_free(mx);
+      lilv_node_free(df);
+    }
+    lilv_nodes_free(ws);
+  }
+  lilv_node_free(writable);
+  lilv_node_free(range_p);
+  lilv_node_free(min_p);
+  lilv_node_free(max_p);
+  lilv_node_free(def_p);
+  lilv_node_free(patch_msg);
+  lilv_node_free(db_unit);
+  lilv_node_free(unit_pred);
+  lilv_node_free(atom_class);
+  lilv_node_free(cv_class);
+  lilv_node_free(output_class);
+  lilv_node_free(input_class);
+  lilv_node_free(control_class);
+  lilv_node_free(audio_class);
+  return 0;
+}
+
+static void host_close(struct host *h) {
+  free(h->pk);
+  free(h->is_db);
+  free(h->is_in);
+  free(h->mins);
+  free(h->maxes);
+  free(h->defs);
+}
+
+static uint32_t atom_cap(const struct host *h, uint32_t port) {
+  return (int)port == h->patch_port ? PATCH_CAP : ATOM_CAP;
+}
+
+static void atom_reset(const struct host *h, uint8_t *buf, uint32_t port) {
+  LV2_Atom_Sequence *s = (LV2_Atom_Sequence *)buf;
+  if (h->pk[port] == PK_ATOM_IN) {
+    s->atom.size = (uint32_t)sizeof(LV2_Atom_Sequence_Body);
+    s->atom.type = h->u_sequence;
+    s->body.unit = 0;
+    s->body.pad = 0;
+  } else {
+    /* An output sequence advertises its capacity as a chunk, afresh every block. */
+    s->atom.size = atom_cap(h, port) - (uint32_t)sizeof(LV2_Atom);
+    s->atom.type = h->u_chunk;
+  }
+}
+
+/* Open one instance the way a real host does: lv2-measure-features.h's block, with this
+ * instance's options and its own worker schedule.
+ * `bind` also connects every port to a buffer of the type it expects. */
+static struct rig *rig_open(struct host *h, double rate, uint32_t block, int bind) {
+  struct rig *r = calloc(1, sizeof *r);
+  if (r == NULL) return NULL;
+  r->h = h;
+  r->block = block;
+  omx_lv2_options_build(&r->options, rate, block);
+  r->sched = (LV2_Worker_Schedule){r, schedule_work};
+  const LV2_Feature *const *features =
+      omx_lv2_features_build(&r->feature_block, OMX_LV2_LILV_HOST_FEATURES, &r->options, &r->sched);
+  r->inst = lilv_plugin_instantiate(h->plugin, rate, features);
+  if (r->inst == NULL) {
+    free(r);
+    return NULL;
+  }
+  r->handle = lilv_instance_get_handle(r->inst);
+  r->wk = lilv_instance_get_extension_data(r->inst, LV2_WORKER__interface);
+  if (r->wk != NULL) h->worker_interface = 1;
+  for (int i = 0; i < h->n_params; i++) r->pvals[i] = h->params[i].def;
+  if (!bind) return r;
+
+  r->audio_slots = (size_t)h->n_audio_in + h->n_audio_out + h->n_cv + 2;
+  r->audio = calloc(r->audio_slots * block, sizeof(float));
+  r->controls = calloc(h->n_ports, sizeof(float));
+  r->atoms = calloc(h->n_ports, sizeof(void *));
+  uint32_t ai = 0, ao = 0;
+  for (uint32_t i = 0; i < h->n_ports; i++) {
+    if (h->pk[i] == PK_AUDIO) {
+      const int is_in = h->is_in[i];
+      size_t slot = is_in ? ai++ : (h->n_audio_in + h->n_cv + ao++);
+      if (slot >= r->audio_slots) slot = r->audio_slots - 1;
+      lilv_instance_connect_port(r->inst, i, r->audio + slot * block);
+    } else if (h->pk[i] == PK_CONTROL_IN || h->pk[i] == PK_CONTROL_OUT) {
+      r->controls[i] = isnan(h->defs[i]) ? 0.0f : h->defs[i];
+      lilv_instance_connect_port(r->inst, i, r->controls + i);
+    } else {
+      r->atoms[i] = calloc(1, atom_cap(h, i));
+      atom_reset(h, r->atoms[i], i);
+      lilv_instance_connect_port(r->inst, i, r->atoms[i]);
+    }
+  }
+  return r;
+}
+
+static void rig_close(struct rig *r) {
+  if (r == NULL) return;
+  if (r->atoms) for (uint32_t i = 0; i < r->h->n_ports; i++) free(r->atoms[i]);
+  free(r->atoms);
+  free(r->audio);
+  free(r->controls);
+  free(r);
+}
+
+static float *rig_in(struct rig *r, uint32_t k) { return r->audio + (size_t)k * r->block; }
+static const float *rig_out(struct rig *r) {
+  return r->audio + (size_t)(r->h->n_audio_in + r->h->n_cv) * r->block;
+}
+
+/* The range a sweep covers for one control. `bounded` clamps it to musically sane limits: a
+ * `units:db` control to +-sweep_db of its default, a strictly-positive default with a
+ * non-negative range to default/ratio .. default*ratio. Anything else keeps its whole range. */
+static int sweep_range(const struct host *h, double mn, double mx, double def, int is_db, int bounded,
+                       double *lo, double *hi) {
+  if (isnan(mn) || isnan(mx) || mx <= mn) return 0;
+  *lo = mn;
+  *hi = mx;
+  if (bounded && !isnan(def)) {
+    if (is_db) {
+      *lo = fmax(mn, def - h->sweep_db);
+      *hi = fmin(mx, def + h->sweep_db);
+    } else if (def > 0.0 && mn >= 0.0) {
+      *lo = fmax(mn, def / h->sweep_ratio);
+      *hi = fmin(mx, def * h->sweep_ratio);
+    }
+  }
+  return *hi > *lo;
+}
+
+/* Move every control input, and every patch:writable parameter, to position t (0..1) of its
+ * range. Returns how many it moved. */
+static int rig_sweep(struct rig *r, float t, int bounded) {
+  struct host *h = r->h;
+  int moved = 0;
+  double lo, hi;
+  for (uint32_t i = 0; i < h->n_ports; i++) {
+    if (h->pk[i] != PK_CONTROL_IN) continue;
+    if (!sweep_range(h, h->mins[i], h->maxes[i], h->defs[i], h->is_db[i], bounded, &lo, &hi)) continue;
+    r->controls[i] = (float)(lo + (hi - lo) * t);
+    moved++;
+  }
+  for (int k = 0; k < h->n_params; k++) {
+    const struct param *p = &h->params[k];
+    if (!sweep_range(h, p->lo, p->hi, p->def, 0, bounded, &lo, &hi)) continue;
+    double v = lo + (hi - lo) * t;
+    if (p->type == h->u_int || p->type == h->u_long) v = floor(v + 0.5);
+    if (p->type == h->u_bool) v = t > 0.5 ? 1.0 : 0.0;
+    r->pvals[k] = v;
+    r->patch_live = 1;
+    moved++;
+  }
+  return moved;
+}
+
+static void rig_send_patch(struct rig *r) {
+  struct host *h = r->h;
+  if (!r->patch_live || h->patch_port < 0 || h->n_params == 0) return;
+  LV2_Atom_Forge *f = &h->forge;
+  lv2_atom_forge_set_buffer(f, r->atoms[h->patch_port], PATCH_CAP);
+  LV2_Atom_Forge_Frame seq;
+  lv2_atom_forge_sequence_head(f, &seq, 0);
+  const int n = h->n_params;
+  const int count = n < PATCH_SETS_PER_BLOCK ? n : PATCH_SETS_PER_BLOCK;
+  for (int k = 0; k < count; k++) {
+    const int i = (r->pcursor + k) % n;
+    const struct param *p = &h->params[i];
+    LV2_Atom_Forge_Frame of;
+    lv2_atom_forge_frame_time(f, 0);
+    lv2_atom_forge_object(f, &of, 0, h->u_patch_set);
+    lv2_atom_forge_key(f, h->u_patch_prop);
+    lv2_atom_forge_urid(f, p->key);
+    lv2_atom_forge_key(f, h->u_patch_val);
+    if (p->type == h->u_float) lv2_atom_forge_float(f, (float)r->pvals[i]);
+    else if (p->type == h->u_int) lv2_atom_forge_int(f, (int32_t)r->pvals[i]);
+    else if (p->type == h->u_bool) lv2_atom_forge_bool(f, r->pvals[i] > 0.5);
+    else if (p->type == h->u_long) lv2_atom_forge_long(f, (int64_t)r->pvals[i]);
+    else lv2_atom_forge_double(f, r->pvals[i]);
+    lv2_atom_forge_pop(f, &of);
+    h->patch_sets++;
+  }
+  r->pcursor = (r->pcursor + count) % n;
+  lv2_atom_forge_pop(f, &seq);
+}
+
+/* Before a block: every atom port is a fresh, valid sequence; patch:Set goes in. */
+static void rig_prepare(struct rig *r) {
+  struct host *h = r->h;
+  for (uint32_t i = 0; i < h->n_ports; i++)
+    if (r->atoms[i] != NULL) atom_reset(h, r->atoms[i], i);
+  rig_send_patch(r);
+}
+
+/* After a block, between blocks and OFF run(): the plugin's work(), then its answers through
+ * work_response(), then end_run() — the cycle is complete once every answer is delivered (the
+ * LV2 worker's order). All before the next block. */
+static void rig_after(struct rig *r) {
+  struct host *h = r->h;
+  while (r->jh != r->jt) {
+    const struct job *j = &r->jobs[r->jh];
+    r->jh = (r->jh + 1) % MAX_JOBS;
+    if (r->wk != NULL && r->wk->work != NULL) {
+      r->wk->work(r->handle, worker_respond, r, j->size, j->data);
+      h->worker_jobs++;
+    } else {
+      h->worker_dropped++;
+    }
+  }
+  while (r->rh != r->rt) {
+    const struct job *j = &r->resp[r->rh];
+    r->rh = (r->rh + 1) % MAX_JOBS;
+    if (r->wk != NULL && r->wk->work_response != NULL) {
+      r->wk->work_response(r->handle, j->size, j->data);
+      h->worker_responses++;
+    }
+  }
+  if (r->wk != NULL && r->wk->end_run != NULL) r->wk->end_run(r->handle);
+}
 /* LV2_CORE__CVPort comes from lv2/core/lv2.h via lilv.h. */
 
 /* The interposer's control surface, resolved at start-up. All NULL when the library
@@ -212,11 +617,47 @@ static int pin_only(const char *uri) {
   return plugin ? 0 : 3;
 }
 
+/* Where the JSON goes. A plugin may print on stdout while it instantiates (Guitarix:
+ * "using block size: 0", "convolver disabled"); with the same buffer that tore this program's
+ * own JSON line in two. fd 1 is therefore moved to stderr and the record goes to a private
+ * dup of the original stdout. */
+static FILE *jout;
+
+/* The facts about what the host did, so a measurement can prove the injection landed. */
+static void emit_host_facts(const struct host *h) {
+  fprintf(jout, ",\"host\":{\"options\":true,\"workerInterface\":%s,\"workerJobs\":%ld,"
+                "\"workerResponses\":%ld,\"workerDropped\":%ld,\"patchParams\":%d,"
+                "\"patchPort\":%s,\"patchSets\":%ld,\"sweepDb\":%g,\"sweepRatio\":%g}",
+          h->worker_interface ? "true" : "false", h->worker_jobs, h->worker_responses,
+          h->worker_dropped, h->n_params, h->patch_port >= 0 ? "true" : "false", h->patch_sets,
+          h->sweep_db, h->sweep_ratio);
+}
+
+static void fill_input(struct rig *r, unsigned *rng, int noise, uint32_t block, double rate, long frame0) {
+  for (uint32_t i = 0; i < r->h->n_audio_in; i++) {
+    float *in = rig_in(r, i);
+    for (uint32_t f = 0; f < block; f++) {
+      if (noise) {
+        *rng = *rng * 1103515245u + 12345u;
+        in[f] = 0.1f * ((float)((*rng >> 16) & 0x7fff) / 16384.0f - 1.0f);
+      } else {
+        in[f] = 0.1f * sinf(2.0f * (float)M_PI * 1000.0f * (float)(frame0 + f) / (float)rate);
+      }
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc == 3 && !strcmp(argv[1], "--pin")) return pin_only(argv[2]);
   if (argc < 2) {
     fprintf(stderr, "usage: %s <plugin-uri> [rate] [block] [cycles] | %s --pin <plugin-uri>\n", argv[0], argv[0]);
     return 1;
+  }
+  fflush(stdout);
+  {
+    const int fd = dup(1);
+    if (fd >= 0 && dup2(2, 1) >= 0) jout = fdopen(fd, "w");
+    if (jout == NULL) jout = stdout;
   }
   const char *uri = argv[1];
   const double rate = argc > 2 ? atof(argv[2]) : 192000.0;
@@ -244,9 +685,9 @@ int main(int argc, char **argv) {
   const LilvPlugin *plugin = lilv_plugins_get_by_uri(plugins, uri_node);
   if (plugin == NULL) {
     fprintf(stderr, "lv2-measure: no such plugin: %s\n", uri);
-    printf("{\"uri\":");
-    json_str(stdout, uri);
-    printf(",\"found\":false}\n");
+    fprintf(jout, "{\"uri\":");
+    json_str(jout, uri);
+    fprintf(jout, ",\"found\":false}\n");
     lilv_node_free(uri_node);
     lilv_world_free(world);
     return 3;
@@ -256,42 +697,12 @@ int main(int argc, char **argv) {
   LilvNodes *required = lilv_plugin_get_required_features(plugin);
   LilvNodes *optional = lilv_plugin_get_optional_features(plugin);
 
-  /* ---- ports: classify, and find the control ports the sweep will drive ---- */
-  const uint32_t n_ports = lilv_plugin_get_num_ports(plugin);
-  LilvNode *audio_class = lilv_new_uri(world, LV2_CORE__AudioPort);
-  LilvNode *control_class = lilv_new_uri(world, LV2_CORE__ControlPort);
-  LilvNode *input_class = lilv_new_uri(world, LV2_CORE__InputPort);
-  LilvNode *output_class = lilv_new_uri(world, LV2_CORE__OutputPort);
-  LilvNode *cv_class = lilv_new_uri(world, LV2_CORE__CVPort);
-
-  float *mins = calloc(n_ports, sizeof(float));
-  float *maxes = calloc(n_ports, sizeof(float));
-  float *defs = calloc(n_ports, sizeof(float));
-  lilv_plugin_get_port_ranges_float(plugin, mins, maxes, defs);
-
-  uint32_t n_audio_in = 0, n_audio_out = 0, n_cv = 0, n_control_in = 0;
-  for (uint32_t i = 0; i < n_ports; i++) {
-    const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-    if (lilv_port_is_a(plugin, port, cv_class)) n_cv++;
-    else if (lilv_port_is_a(plugin, port, audio_class)) {
-      if (lilv_port_is_a(plugin, port, input_class)) n_audio_in++;
-      else if (lilv_port_is_a(plugin, port, output_class)) n_audio_out++;
-    } else if (lilv_port_is_a(plugin, port, control_class) &&
-               lilv_port_is_a(plugin, port, input_class)) {
-      n_control_in++;
-    }
-  }
-
-
-  /* The host's feature block (lv2-measure-features.h), built once and used for every
-   * instantiate below; the rate probe rebuilds the options in place for each rate. */
-  LV2_Worker_Schedule schedule = {NULL, schedule_work};
-  static struct omx_lv2_options options;
-  omx_lv2_options_build(&options, rate, block);
-  struct omx_lv2_feature_block feature_block;
-  const LV2_Feature *const *features =
-      omx_lv2_features_build(&feature_block, OMX_LV2_LILV_HOST_FEATURES, &options, &schedule);
-
+  /* ---- ports and parameters: classify, and find what the sweep will drive ---- */
+  struct host *hp = calloc(1, sizeof *hp);
+  host_open(hp, world, plugin);
+  struct host *H = hp;
+  const uint32_t n_ports = H->n_ports, n_audio_in = H->n_audio_in, n_audio_out = H->n_audio_out;
+  const uint32_t n_cv = H->n_cv, n_control_in = H->n_control_in;
 
   /* ---- SOAK MODE ----------------------------------------------------------
    * The stability dimension's real question is not "does it start" but "does it
@@ -301,45 +712,23 @@ int main(int argc, char **argv) {
    * things per one-second window: the output stays finite, it does not fall away
    * from the level it started at, and the process does not grow.
    *
+   * The sweep is BOUNDED to musically sane ranges (sweep_range): a startup blast the
+   * sweep itself drives is not the plugin's.
+   *
    * It short-circuits the rest of the program: a soak is a long measurement of one
    * thing, not an addendum to the quick ones.
    */
   const char *soak_env = getenv("OMX_SOAK_SECONDS");
   if (soak_env != NULL && atoi(soak_env) > 0) {
     const double soak_s = atof(soak_env);
-    LilvInstance *si = lilv_plugin_instantiate(plugin, rate, features);
+    struct rig *si = rig_open(H, rate, block, 1);
     if (si == NULL) {
-      printf("{\"uri\":");
-      json_str(stdout, uri);
-      printf(",\"soak\":{\"instantiated\":false}}\n");
+      fprintf(jout, "{\"uri\":");
+      json_str(jout, uri);
+      fprintf(jout, ",\"soak\":{\"instantiated\":false}}\n");
       return 2;
     }
-    const size_t slots = (size_t)n_audio_in + n_audio_out + n_cv + 2;
-    float *ab = calloc(slots * block, sizeof(float));
-    float *cb = calloc(n_ports, sizeof(float));
-    void **atb = calloc(n_ports, sizeof(void *));
-    uint32_t sai = 0, sao = 0;
-    for (uint32_t i = 0; i < n_ports; i++) {
-      const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-      const int is_in = lilv_port_is_a(plugin, port, input_class);
-      if (lilv_port_is_a(plugin, port, audio_class) || lilv_port_is_a(plugin, port, cv_class)) {
-        size_t slot = is_in ? sai++ : (n_audio_in + n_cv + sao++);
-        if (slot >= slots) slot = slots - 1;
-        lilv_instance_connect_port(si, i, ab + slot * block);
-      } else if (lilv_port_is_a(plugin, port, control_class)) {
-        cb[i] = isnan(defs[i]) ? 0.0f : defs[i];
-        lilv_instance_connect_port(si, i, cb + i);
-      } else {
-        const size_t cap = 8192;
-        uint8_t *b = calloc(1, cap);
-        atb[i] = b;
-        LV2_Atom_Sequence *sq = (LV2_Atom_Sequence *)b;
-        sq->atom.size = is_in ? (uint32_t)sizeof(LV2_Atom_Sequence_Body)
-                              : (uint32_t)(cap - sizeof(LV2_Atom));
-        lilv_instance_connect_port(si, i, b);
-      }
-    }
-    lilv_instance_activate(si);
+    lilv_instance_activate(si->inst);
 
     const long total_blocks = (long)(soak_s * rate / block);
     const long win_blocks = (long)(rate / block); /* ~1 s */
@@ -350,22 +739,13 @@ int main(int argc, char **argv) {
     long win_n = 0;
     for (b = 0; b < total_blocks; b++) {
       const float t = (float)(b % 4096) / 4096.0f; /* slow, repeating parameter sweep */
-      for (uint32_t i = 0; i < n_ports; i++) {
-        const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-        if (!lilv_port_is_a(plugin, port, control_class)) continue;
-        if (!lilv_port_is_a(plugin, port, input_class)) continue;
-        if (isnan(mins[i]) || isnan(maxes[i]) || maxes[i] <= mins[i]) continue;
-        cb[i] = mins[i] + (maxes[i] - mins[i]) * t;
-      }
-      for (uint32_t i = 0; i < n_audio_in; i++) {
-        for (uint32_t f = 0; f < block; f++) {
-          rng = rng * 1103515245u + 12345u;
-          ab[i * block + f] = 0.1f * ((float)((rng >> 16) & 0x7fff) / 16384.0f - 1.0f);
-        }
-      }
-      lilv_instance_run(si, block);
+      rig_sweep(si, t, 1);
+      fill_input(si, &rng, 1, block, rate, 0);
+      rig_prepare(si);
+      lilv_instance_run(si->inst, block);
+      rig_after(si);
       if (n_audio_out > 0) {
-        const float *o = ab + (size_t)(n_audio_in + n_cv) * block;
+        const float *o = rig_out(si);
         int win_nonfinite = 0;
         for (uint32_t f = 0; f < block; f++) {
           const float v = o[f];
@@ -391,23 +771,23 @@ int main(int argc, char **argv) {
         win_n = 0;
       }
     }
-    lilv_instance_deactivate(si);
-    lilv_instance_free(si);
-    printf("{\"uri\":");
-    json_str(stdout, uri);
-    printf(",\"soak\":{\"instantiated\":true,\"seconds\":%.0f,\"rate\":%.0f,\"block\":%u"
+    lilv_instance_deactivate(si->inst);
+    lilv_instance_free(si->inst);
+    fprintf(jout, "{\"uri\":");
+    json_str(jout, uri);
+    fprintf(jout, ",\"soak\":{\"instantiated\":true,\"seconds\":%.0f,\"rate\":%.0f,\"block\":%u"
            ",\"windows\":%ld,\"nonFiniteWindows\":%ld,\"silentWindows\":%ld"
-           ",\"firstRmsDbfs\":%.2f,\"lastRmsDbfs\":%.2f,\"minRmsDbfs\":%.2f"
-           ",\"rssStartKb\":%ld,\"rssMaxKb\":%ld,\"rssGrowthKb\":%ld}}\n",
+           ",\"firstRmsDbfs\":%.2f,\"lastRmsDbfs\":%.2f,\"minRmsDbfs\":%.2f,\"maxRmsDbfs\":%.2f"
+           ",\"rssStartKb\":%ld,\"rssMaxKb\":%ld,\"rssGrowthKb\":%ld}",
            soak_s, rate, block, windows, nonfinite_windows, silent_windows,
            first_rms > 0 ? 20.0 * log10(first_rms) : -999.0,
            last_rms > 0 ? 20.0 * log10(last_rms) : -999.0,
            min_rms < 1e29 && min_rms > 0 ? 20.0 * log10(min_rms) : -999.0,
+           max_rms > 0 ? 20.0 * log10(max_rms) : -999.0,
            rss_start, rss_max, rss_max - rss_start);
-    free(ab);
-    free(cb);
-    for (uint32_t i = 0; i < n_ports; i++) free(atb[i]);
-    free(atb);
+    emit_host_facts(H);
+    fprintf(jout, "}\n");
+    rig_close(si);
     return 0;
   }
 
@@ -416,23 +796,24 @@ int main(int argc, char **argv) {
   int instantiated = 0, failed = 0;
   int threads_after_first = -1;
   for (int c = 0; c < cycles; c++) {
-    LilvInstance *inst = lilv_plugin_instantiate(plugin, rate, features);
-    if (inst == NULL) {
+    struct rig *ci = rig_open(H, rate, block, 0);
+    if (ci == NULL) {
       failed++;
       continue;
     }
-    lilv_instance_activate(inst);
+    lilv_instance_activate(ci->inst);
     if (c == 0) threads_after_first = count_threads();
-    lilv_instance_deactivate(inst);
-    lilv_instance_free(inst);
+    lilv_instance_deactivate(ci->inst);
+    lilv_instance_free(ci->inst);
+    rig_close(ci);
     instantiated++;
   }
   const int threads_after = count_threads();
 
   if (instantiated == 0) {
-    printf("{\"uri\":");
-    json_str(stdout, uri);
-    printf(",\"found\":true,\"instantiated\":false,\"cyclesAttempted\":%d}\n", cycles);
+    fprintf(jout, "{\"uri\":");
+    json_str(jout, uri);
+    fprintf(jout, ",\"found\":true,\"instantiated\":false,\"cyclesAttempted\":%d}\n", cycles);
     return 2;
   }
 
@@ -443,85 +824,43 @@ int main(int argc, char **argv) {
   struct omx_rt_event seen[OMX_RT_EV_MAX];
   int n_seen = 0;
   for (int rep = 0; rep < repeats; rep++) {
-  LilvInstance *inst = lilv_plugin_instantiate(plugin, rate, features);
+  struct rig *inst = rig_open(H, rate, block, 1);
   uint64_t r_allocs = 0, r_locks = 0, r_syscalls = 0;
   if (inst != NULL) {
-    /* Every port gets the buffer type it actually expects. An atom port handed a
+    /* Every port gets the buffer type it actually expects (rig_open). An atom port handed a
      * float* is a segfault, not a measurement — LSP's equalisers carry two of them
      * beside 196 control ports, which is how this was found. */
-    const size_t audio_slots = (size_t)n_audio_in + n_audio_out + n_cv + 2;
-    float *audio = calloc(audio_slots * block, sizeof(float));
-    float *controls = calloc(n_ports, sizeof(float));
-    void **atom_bufs = calloc(n_ports, sizeof(void *));
-    uint32_t ai = 0, ao = 0;
-    for (uint32_t i = 0; i < n_ports; i++) {
-      const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-      const int is_in = lilv_port_is_a(plugin, port, input_class);
-      if (lilv_port_is_a(plugin, port, audio_class) || lilv_port_is_a(plugin, port, cv_class)) {
-        size_t slot = is_in ? ai++ : (n_audio_in + n_cv + ao++);
-        if (slot >= audio_slots) slot = audio_slots - 1;
-        lilv_instance_connect_port(inst, i, audio + slot * block);
-      } else if (lilv_port_is_a(plugin, port, control_class)) {
-        controls[i] = isnan(defs[i]) ? 0.0f : defs[i];
-        lilv_instance_connect_port(inst, i, controls + i);
-      } else {
-        /* Anything else — atom, event, MIDI — gets a real, correctly headed buffer.
-         * An input sequence is empty but VALID (v1 feeds no events); an output
-         * sequence advertises its capacity so the plugin can write into it. */
-        const size_t cap = 8192;
-        uint8_t *buf = calloc(1, cap);
-        atom_bufs[i] = buf;
-        LV2_Atom_Sequence *seq = (LV2_Atom_Sequence *)buf;
-        seq->atom.size = is_in ? (uint32_t)sizeof(LV2_Atom_Sequence_Body)
-                               : (uint32_t)(cap - sizeof(LV2_Atom));
-        seq->atom.type = 0; /* no URID map here: an unmapped type is inert, not a lie */
-        seq->body.unit = 0;
-        seq->body.pad = 0;
-        lilv_instance_connect_port(inst, i, buf);
-      }
-    }
+
     /* A -20 dBFS tone, so the plugin has real signal rather than silence: a gate or
      * an expander given silence never leaves its quiet branch and would measure as
      * RT-clean while its loud path allocates. */
-    for (uint32_t i = 0; i < n_audio_in; i++) {
-      for (uint32_t f = 0; f < block; f++) {
-        if (use_noise) {
-          rng = rng * 1103515245u + 12345u;
-          audio[i * block + f] = 0.1f * ((float)((rng >> 16) & 0x7fff) / 16384.0f - 1.0f);
-        } else {
-          audio[i * block + f] = 0.1f * sinf(2.0f * (float)M_PI * 1000.0f * (float)f / (float)rate);
-        }
-      }
-    }
+    fill_input(inst, &rng, use_noise, block, rate, 0);
 
-    lilv_instance_activate(inst);
-    for (int b = 0; b < warmup_blocks; b++) lilv_instance_run(inst, block);
+    lilv_instance_activate(inst->inst);
+    for (int b = 0; b < warmup_blocks; b++) {
+      rig_prepare(inst);
+      lilv_instance_run(inst->inst, block);
+      rig_after(inst);
+    }
 
     if (rt_reset) rt_reset();
     for (int b = 0; b < measured_blocks; b++) {
-      /* Sweep every control input across its declared range as the blocks go by, so
-       * the counted window covers the settings an operator will actually reach. */
+      /* Sweep every control input, and every patch:writable parameter, across its FULL
+       * declared range as the blocks go by: this judges what allocates when a control
+       * crosses a threshold, not level, so it is not bounded like the soak. */
       const float t = (float)b / (float)measured_blocks;
-      for (uint32_t i = 0; i < n_ports; i++) {
-        const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-        if (!lilv_port_is_a(plugin, port, control_class)) continue;
-        if (!lilv_port_is_a(plugin, port, input_class)) continue;
-        if (isnan(mins[i]) || isnan(maxes[i]) || maxes[i] <= mins[i]) continue;
-        controls[i] = mins[i] + (maxes[i] - mins[i]) * t;
-        swept = 1;
-      }
+      if (rig_sweep(inst, t, 0) > 0) swept = 1;
+      rig_prepare(inst);
       if (rt_begin) rt_begin();
-      lilv_instance_run(inst, block);
+      lilv_instance_run(inst->inst, block);
       if (rt_end) rt_end();
+      rig_after(inst);
     }
     if (rt_counts) rt_counts(&r_allocs, &r_locks, &r_syscalls);
     if (rt_events && n_seen == 0) n_seen = rt_events(seen, OMX_RT_EV_MAX);
-    lilv_instance_deactivate(inst);
-    lilv_instance_free(inst);
-    free(audio);
-    free(controls);
-    for (uint32_t i = 0; i < n_ports; i++) free(atom_bufs[i]);
-    free(atom_bufs);
+    lilv_instance_deactivate(inst->inst);
+    lilv_instance_free(inst->inst);
+    rig_close(inst);
   }
   if (r_allocs > allocs) allocs = r_allocs;
   if (r_locks > locks) locks = r_locks;
@@ -536,41 +875,41 @@ int main(int argc, char **argv) {
 
   /* A plugin with no sweepable control was still measured; saying it was swept would
    * be a lie the classifier would act on. Report what happened. */
-  const int sweep_applicable = n_control_in > 0;
+  const int sweep_applicable = n_control_in > 0 || H->n_params > 0;
 
-  printf("{\"uri\":");
-  json_str(stdout, uri);
-  printf(",\"found\":true,\"instantiated\":true");
-  printf(",\"rate\":%.0f,\"block\":%u", rate, block);
-  printf(",\"audioInputs\":%u,\"audioOutputs\":%u,\"cvPorts\":%u,\"controlInputs\":%u",
+  fprintf(jout, "{\"uri\":");
+  json_str(jout, uri);
+  fprintf(jout, ",\"found\":true,\"instantiated\":true");
+  fprintf(jout, ",\"rate\":%.0f,\"block\":%u", rate, block);
+  fprintf(jout, ",\"audioInputs\":%u,\"audioOutputs\":%u,\"cvPorts\":%u,\"controlInputs\":%u",
          n_audio_in, n_audio_out, n_cv, n_control_in);
   /* the pin (plugin-qualify spec §11): the files this world loaded the plugin from, and its layout */
-  omx_lv2_pin_print(stdout, world, plugin);
+  omx_lv2_pin_print(jout, world, plugin);
 
-  printf(",\"requiredFeatures\":[");
+  fprintf(jout, ",\"requiredFeatures\":[");
   int first = 1;
   LILV_FOREACH (nodes, i, required) {
     const LilvNode *n = lilv_nodes_get(required, i);
-    if (!first) printf(",");
-    json_str(stdout, lilv_node_as_string(n));
+    if (!first) fprintf(jout, ",");
+    json_str(jout, lilv_node_as_string(n));
     first = 0;
   }
-  printf("],\"optionalFeatures\":[");
+  fprintf(jout, "],\"optionalFeatures\":[");
   first = 1;
   LILV_FOREACH (nodes, i, optional) {
     const LilvNode *n = lilv_nodes_get(optional, i);
-    if (!first) printf(",");
-    json_str(stdout, lilv_node_as_string(n));
+    if (!first) fprintf(jout, ",");
+    json_str(jout, lilv_node_as_string(n));
     first = 0;
   }
-  printf("]");
+  fprintf(jout, "]");
 
-  printf(",\"lifecycle\":{\"cycles\":%d,\"instantiated\":%d,\"failed\":%d}",
+  fprintf(jout, ",\"lifecycle\":{\"cycles\":%d,\"instantiated\":%d,\"failed\":%d}",
          cycles, instantiated, failed);
-  printf(",\"threads\":{\"before\":%d,\"afterFirstInstantiate\":%d,\"afterAllFreed\":%d,\"leaked\":%d}",
+  fprintf(jout, ",\"threads\":{\"before\":%d,\"afterFirstInstantiate\":%d,\"afterAllFreed\":%d,\"leaked\":%d}",
          threads_before, threads_after_first, threads_after,
          threads_after > threads_before ? threads_after - threads_before : 0);
-  printf(",\"rtSafety\":{\"interposer\":%s,\"blocks\":%d,\"repeats\":%d,\"swept\":%s,"
+  fprintf(jout, ",\"rtSafety\":{\"interposer\":%s,\"blocks\":%d,\"repeats\":%d,\"swept\":%s,"
          "\"sweepApplicable\":%s,\"allocationsInRun\":%llu,\"allocationsMin\":%llu,"
          "\"variable\":%s,\"locksInRun\":%llu,\"locksMin\":%llu,"
          "\"syscallsInRun\":%llu,\"syscallsMin\":%llu,\"events\":[",
@@ -595,75 +934,43 @@ int main(int argc, char **argv) {
         if (!strcmp(dk[j], kind) && !strcmp(dm[j], mod) && !strcmp(ds[j], sym)) { dup = 1; break; }
       if (dup) continue;
       dk[nd] = kind; dm[nd] = mod; ds[nd] = sym;
-      printf("%s{\"kind\":\"%s\",\"module\":", nd ? "," : "", kind);
-      json_str(stdout, mod);
-      printf(",\"symbol\":");
-      json_str(stdout, sym);
-      printf("}");
+      fprintf(jout, "%s{\"kind\":\"%s\",\"module\":", nd ? "," : "", kind);
+      json_str(jout, mod);
+      fprintf(jout, ",\"symbol\":");
+      json_str(jout, sym);
+      fprintf(jout, "}");
       nd++;
     }
   }
-  printf("]}");
+  fprintf(jout, "]}");
 
   /* ---- rate support: instantiate and RUN at each rate the console can boot at ----
    * Instantiating is not enough. AmpVTS instantiates happily at 96 kHz and then
    * outputs digital silence, which is why this runs blocks and checks the output is
    * finite and non-silent for a plugin that was given signal. A plugin that dies or
    * goes quiet at a rate must not be offered at that rate. The rates are the declared ones
-   * (OMX_DECLARED_RATES, lv2-measure-rates.h: omx-contract's STANDARD_SAMPLE_RATES). */
-  printf(",\"rates\":{");
+   * (OMX_DECLARED_RATES, lv2-measure-rates.h: omx-contract's STANDARD_SAMPLE_RATES). The probe
+   * runs through the same host as everything else — options, worker — so a plugin whose sound
+   * depends on its worker is measured built. */
+  fprintf(jout, ",\"rates\":{");
   for (size_t ri = 0; ri < OMX_DECLARED_RATE_COUNT; ri++) {
     const double r = OMX_DECLARED_RATES[ri];
-    int ok = 0, silent = 0, nonfinite = 0;
+    int ok = 0, nonfinite = 0;
     double lat_frames = -1.0, rms_out = -1.0;
-    omx_lv2_options_build(&options, r, block); /* the options name the rate it is instantiated at */
-    LilvInstance *pi = lilv_plugin_instantiate(plugin, r, features);
-    if (pi != NULL) {
-      const size_t slots = (size_t)n_audio_in + n_audio_out + n_cv + 2;
-      float *ab = calloc(slots * block, sizeof(float));
-      float *cb = calloc(n_ports, sizeof(float));
-      void **atb = calloc(n_ports, sizeof(void *));
-      uint32_t pai = 0, pao = 0;
-      for (uint32_t i = 0; i < n_ports; i++) {
-        const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-        const int is_in = lilv_port_is_a(plugin, port, input_class);
-        if (lilv_port_is_a(plugin, port, audio_class) || lilv_port_is_a(plugin, port, cv_class)) {
-          size_t slot = is_in ? pai++ : (n_audio_in + n_cv + pao++);
-          if (slot >= slots) slot = slots - 1;
-          lilv_instance_connect_port(pi, i, ab + slot * block);
-        } else if (lilv_port_is_a(plugin, port, control_class)) {
-          cb[i] = isnan(defs[i]) ? 0.0f : defs[i];
-          lilv_instance_connect_port(pi, i, cb + i);
-        } else {
-          const size_t cap = 8192;
-          uint8_t *b = calloc(1, cap);
-          atb[i] = b;
-          LV2_Atom_Sequence *sq = (LV2_Atom_Sequence *)b;
-          sq->atom.size = is_in ? (uint32_t)sizeof(LV2_Atom_Sequence_Body)
-                                : (uint32_t)(cap - sizeof(LV2_Atom));
-          lilv_instance_connect_port(pi, i, b);
-        }
-      }
-      lilv_instance_activate(pi);
+    struct rig *pr = rig_open(H, r, block, 1);
+    if (pr != NULL) {
+      lilv_instance_activate(pr->inst);
       double sum = 0.0;
       const char *pb = getenv("OMX_PROBE_BLOCKS");
       const int probe_blocks = pb ? atoi(pb) : 96;
       const int probe_settle = probe_blocks / 3;
       for (int b2 = 0; b2 < probe_blocks; b2++) {
-        for (uint32_t i = 0; i < n_audio_in; i++) {
-          for (uint32_t f = 0; f < block; f++) {
-            if (use_noise) {
-              rng = rng * 1103515245u + 12345u;
-              ab[i * block + f] = 0.1f * ((float)((rng >> 16) & 0x7fff) / 16384.0f - 1.0f);
-            } else {
-              ab[i * block + f] =
-                  0.1f * sinf(2.0f * (float)M_PI * 1000.0f * (float)(b2 * block + f) / (float)r);
-            }
-          }
-        }
-        lilv_instance_run(pi, block);
+        fill_input(pr, &rng, use_noise, block, r, (long)b2 * block);
+        rig_prepare(pr);
+        lilv_instance_run(pr->inst, block);
+        rig_after(pr);
         if (b2 >= probe_settle && n_audio_out > 0) {
-          const float *o = ab + (size_t)(n_audio_in + n_cv) * block;
+          const float *o = rig_out(pr);
           for (uint32_t f = 0; f < block; f++) {
             const float v = o[f];
             if (!isfinite(v)) nonfinite = 1;
@@ -673,11 +980,10 @@ int main(int argc, char **argv) {
       }
       /* The plugin's own reported latency, if it publishes one. */
       for (uint32_t i = 0; i < n_ports; i++) {
+        if (H->pk[i] != PK_CONTROL_OUT) continue;
         const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-        if (!lilv_port_is_a(plugin, port, control_class)) continue;
-        if (!lilv_port_is_a(plugin, port, output_class)) continue;
         LilvNode *dn = lilv_port_get_name(plugin, port);
-        if (dn && strcasestr(lilv_node_as_string(dn), "latency")) lat_frames = cb[i];
+        if (dn && strcasestr(lilv_node_as_string(dn), "latency")) lat_frames = pr->controls[i];
         if (dn) lilv_node_free(dn);
       }
       rms_out = n_audio_out ? sqrt(sum / ((double)(probe_blocks - probe_settle) * block)) : -1.0;
@@ -685,36 +991,26 @@ int main(int argc, char **argv) {
        * quiet enough to be useless and loud enough to pass any fixed floor. The
        * verdict is a RATIO against the plugin's own best rate, computed by the
        * caller from the per-rate rms this emits. Reported here, judged there. */
-      silent = 0;
       ok = 1;
-      lilv_instance_deactivate(pi);
-      lilv_instance_free(pi);
-      free(ab);
-      free(cb);
-      for (uint32_t i = 0; i < n_ports; i++) free(atb[i]);
-      free(atb);
+      lilv_instance_deactivate(pr->inst);
+      lilv_instance_free(pr->inst);
+      rig_close(pr);
     }
-    printf("%s\"%.0f\":{\"instantiated\":%s,\"nonFinite\":%s,\"latencyFrames\":%.0f,"
+    fprintf(jout, "%s\"%.0f\":{\"instantiated\":%s,\"nonFinite\":%s,\"latencyFrames\":%.0f,"
            "\"rms\":%.9g,\"rmsDbfs\":%.2f}",
            ri ? "," : "", r, ok ? "true" : "false",
            nonfinite ? "true" : "false", lat_frames, rms_out,
            rms_out > 0 ? 20.0 * log10(rms_out) : -999.0);
-    (void)silent;
   }
-  printf("}");
+  fprintf(jout, "}");
+  emit_host_facts(H);
+  fprintf(jout, "}\n");
+  fflush(jout);
 
-  printf("}\n");
-
-  free(mins);
-  free(maxes);
-  free(defs);
+  host_close(H);
+  free(H);
   lilv_nodes_free(required);
   lilv_nodes_free(optional);
-  lilv_node_free(audio_class);
-  lilv_node_free(control_class);
-  lilv_node_free(input_class);
-  lilv_node_free(output_class);
-  lilv_node_free(cv_class);
   lilv_node_free(uri_node);
   lilv_world_free(world);
   return 0;
