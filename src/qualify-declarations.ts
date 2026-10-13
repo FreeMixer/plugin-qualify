@@ -42,6 +42,27 @@ export const BOOT_TIMEOUT_S = 120;
 export const COST_TIMEOUT_S = 60;
 
 /**
+ * The soak's control sweep is bounded to musically sane ranges (spec §2a.4): a `units:db` port
+ * is swept at most this many dB either side of its default, and a strictly-positive-default
+ * linear port at most this ratio either side. Calf's linear gains reach 64x (+36 dB); a startup
+ * blast the sweep itself drives is not the plugin's. The measuring host reads both from the
+ * environment this package sets (`soakSweepEnv`), so the C default and this value cannot differ.
+ */
+export const SOAK_SWEEP_DB = 12;
+export const SOAK_SWEEP_RATIO = 4;
+
+/**
+ * A soak's wall-clock limit is SIZED, never fixed (spec §2a): the calibration soak's wall seconds
+ * per audio second, times the soak length, times this margin, plus this floor in seconds.
+ * 2026-10-01: a fixed 900 s cut ZamGEQ31's 51-minute wall at 192 kHz and read as "died".
+ */
+export const SOAK_TIMEOUT_MARGIN = 2;
+export const SOAK_TIMEOUT_FLOOR_S = 60;
+
+/** Audio seconds the calibration soak renders to measure the host's speed on this plugin and rate. */
+export const SOAK_CALIBRATION_S = 30;
+
+/**
  * The ONE setting that locates the CLAP scanner (spec §7): the environment variable that names
  * the `omx-clap-scan` binary, and what is run when it is unset (looked up on `PATH`).
  */
