@@ -25,10 +25,10 @@ the fixture plugins their tests qualify (a known RT-safe and a known RT-unsafe g
 as an LV2 bundle) are C, built with make. The CLAP headers come from `pkg-config clap` (Fedora
 `clap-devel`), plugin-hostd's `pin.h` from `pkg-config plugin-hostd`, lilv and the LV2 headers from
 `pkg-config lilv-0` (`lilv-devel`, `liblilv-dev` and `lv2-dev`). Where the CLAP and plugin-hostd
-headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`;
-it also fetches openmixer's copy of the LV2 measurer, at the commit it was taken from, and the
-omx-contract header that copy reads, so the build carries `native/build/parity/lv2_measure` beside
-ours:
+headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`.
+It also fetches the omx-contract header that openmixer's copy of the LV2 measurer reads (kept in
+`native/parity/openmixer` as it was at the commit it was taken from, each file's blob id in `BLOBS`),
+so the build carries that copy, `native/build/parity/lv2_measure`, beside ours:
 
 ```
 make -C native deps all   # native/build/clap-qualify, lv2_measure, rt_interpose.so, fixtures/

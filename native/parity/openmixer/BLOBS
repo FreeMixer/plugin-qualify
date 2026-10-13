@@ -1,0 +1,8 @@
+# openmixer's LV2 measurer at 0c4febac5d9fed3d5f9897d60980232d74020213, packages/pipewire-native/tools/:
+# each file's git blob id there. src/lv2-measure-parity.test.ts holds the files here to them.
+8fb867132fc56e4e2b5e5f471cd5af29afce3e1c  lv2-measure-features.c
+f1d5a6ca99a1aaeb1a81d18479e35e55bbc9270c  lv2-measure-features.h
+e9fc290b6e22b0a9e64ba0933dfeaf1448d76e75  lv2-measure-pin.c
+0a78ca9c175a77932f4f49c54bc9af1f9b91e946  lv2-measure-pin.h
+74af949c74da0898b826112c58eca59f23b474ed  lv2-measure.c
+6c06e9a5564dd56619092ee89258d7c0c999853b  rt-interpose.h
