@@ -1160,5 +1160,73 @@ class Lv2benchCrossCheck(unittest.TestCase):
         self.assertEqual(by_uri["urn:z"]["reason"], "only in ours")
 
 
+class WorkerQueueTests(unittest.TestCase):
+    """Spec 2a: the measuring host runs the plugin's worker. 2026-10-01: a schedule that accepted
+    and dropped measured Hex Chain's amp unbuilt (0.9 us/sample against 5.4 built)."""
+
+    class Iface:
+        """A plugin's LV2_Worker_Interface as the host sees it: records the order it is driven in."""
+
+        def __init__(self, answers=True):
+            self.calls = []
+            self.answers = answers
+
+        def work(self, data, respond):
+            self.calls.append(("work", data))
+            if self.answers:
+                respond(b"built:" + data)
+
+        def work_response(self, data):
+            self.calls.append(("response", data))
+
+        def end_run(self):
+            self.calls.append(("end_run", None))
+
+    def test_schedule_queues_and_succeeds(self):
+        q = b.WorkerQueue()
+        self.assertEqual(q.schedule(b"load-model"), b.LV2_WORKER_SUCCESS)
+        self.assertEqual(q.jobs, [b"load-model"])
+
+    def test_pump_runs_the_job_off_run_and_delivers_the_answer(self):
+        q = b.WorkerQueue()
+        q.schedule(b"load-model")
+        iface = self.Iface()
+        q.pump(iface)
+        # work(), then work_response() with the answer, then end_run(): the cycle ends once every
+        # answer is delivered.
+        self.assertEqual(iface.calls, [("work", b"load-model"), ("response", b"built:load-model"),
+                                       ("end_run", None)])
+        self.assertEqual(q.stats(), {"jobs": 1, "responses": 1, "dropped": 0})
+        self.assertEqual(q.jobs, [])
+
+    def test_a_plugin_that_answers_nothing_gets_no_response(self):
+        q = b.WorkerQueue()
+        q.schedule(b"x")
+        iface = self.Iface(answers=False)
+        q.pump(iface)
+        self.assertEqual(q.stats(), {"jobs": 1, "responses": 0, "dropped": 0})
+
+    def test_no_interface_counts_the_jobs_as_dropped_never_as_done(self):
+        q = b.WorkerQueue()
+        q.schedule(b"a")
+        q.schedule(b"b")
+        q.pump(None)
+        self.assertEqual(q.stats(), {"jobs": 0, "responses": 0, "dropped": 2})
+        self.assertEqual(q.jobs, [])
+
+    def test_an_empty_queue_still_gets_end_run(self):
+        q = b.WorkerQueue()
+        iface = self.Iface()
+        q.pump(iface)
+        self.assertEqual(iface.calls, [("end_run", None)])
+
+    def test_reset_clears_a_previous_instances_work(self):
+        q = b.WorkerQueue()
+        q.schedule(b"a")
+        q.pump(None)
+        q.reset()
+        self.assertEqual(q.stats(), {"jobs": 0, "responses": 0, "dropped": 0})
+
+
 if __name__ == "__main__":
     unittest.main()
