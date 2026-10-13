@@ -1,3 +1,17 @@
+plugin-qualify (0.5.1) unstable; urgency=medium
+
+  * The package carries the CLAP prober and its interposer, in
+    /usr/lib/plugin-qualify, so an installed plugin-qualify qualifies CLAP
+    plugins and prints their integrity pin with nothing set. The package
+    is now built per architecture.
+  * The command looks for the prober by its setting, then where the
+    package installs it, then in the checkout's native/build.
+  * omx-clap-host, which brings omx-clap-scan, is recommended, and so is
+    python3-lilv, which bookworm does not carry, so the package installs on
+    bookworm.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 13 Oct 2026 00:15:00 +0000
+
 plugin-qualify (0.5.0) unstable; urgency=medium
 
   * The CLAP prober and the measurement interchange (v1.3) carry each
