@@ -8,8 +8,8 @@
  * Standalone by construction: it needs `python3` with the `lilv` bindings, the two probers
  * next to this file (`scan.py`, `benchmark.py`), and an LV2 world to look at; the hosting
  * dimensions need the package's native measurer and interposer (`lv2_measure`,
- * `rt_interpose.so`), each its setting (`OMX_LV2_MEASURE`, `OMX_RT_INTERPOSE`), else where the
- * package installs it, else `native/build` (`make -C native`). It does not
+ * `rt_interpose.so`), each its setting (`OMX_LV2_MEASURE`, `OMX_RT_INTERPOSE`), else
+ * `native/build` (`make -C native`), else where the package installs it. It does not
  * need the OpenMixer engine, its server, PipeWire, JACK, an audio interface, or root. Nothing
  * it writes is openmixer-shaped — the output is the interchange format described in
  * `src/measurement/format.ts`, which any LV2 host can read.

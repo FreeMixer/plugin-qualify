@@ -320,8 +320,8 @@ function locate(
 }
 
 /**
- * The prober and the interposer this run uses: each its setting, else the first of the installed
- * directories (`NATIVE_TOOL_DIRS`) that holds it, else the package's own build.
+ * The prober and the interposer this run uses: each its setting, else the package's own build, else
+ * the first of the installed directories (`NATIVE_TOOL_DIRS`) that holds it.
  */
 export function clapQualifyTools(
   env: Readonly<Record<string, string | undefined>>,
