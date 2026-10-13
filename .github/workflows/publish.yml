@@ -55,6 +55,8 @@ jobs:
       - name: Build and test
         run: |
           pnpm install --frozen-lockfile
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
           make -C native deps all
           pnpm lint
           pnpm test
