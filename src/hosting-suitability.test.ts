@@ -689,7 +689,7 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
     ["no main input", { mainInputChannels: 0 }, "unsuitable", HOSTING_CODE.topologyNoAudioInput, {}],
     ["no main output", { mainOutputChannels: 0 }, "unsuitable", HOSTING_CODE.topologyNoAudioOutput, {}],
     ["wider than a strip", { mainInputChannels: 6, mainOutputChannels: 6 }, "unsuitable", HOSTING_CODE.topologyWiderThanStrip, { ins: 6, outs: 6 }],
-    ["a sidechain input is fed silence", { sidechainInputs: 1 }, "conditional", HOSTING_CODE.topologyExtraInputs, { ins: 2, outs: 2, sidechains: 1 }],
+    ["an auxiliary (sidechain) input refuses the plugin", { sidechainInputs: 1 }, "unsuitable", HOSTING_CODE.topologyExtraInputs, { ins: 2, outs: 2, sidechains: 1 }],
     ["latency that lies at one rate", { latency: { ...cleanClap().latency, "96000": { declaredFrames: 64, measuredFrames: 71 } } }, "unsuitable", HOSTING_CODE.clapLatencyMismatch, { rate: 96000, declared: 64, measured: 71 }],
     ["not an audio effect", { features: ["instrument", "synthesizer"] }, "unsuitable", HOSTING_CODE.clapNotAudioEffect, { features: "instrument synthesizer" }],
     ["init or activate failed headless", { headlessOk: false }, "unsuitable", HOSTING_CODE.clapHeadlessFailed, {}],
