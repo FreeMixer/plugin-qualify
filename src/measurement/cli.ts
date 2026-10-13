@@ -23,6 +23,13 @@
  * mildly hazardous thing to start by accident — a plugin can and does crash its host — so it
  * is gated behind `--run` (or `LV2_MEASURE_RUN=1`), exactly as `benchmark.py` gates itself.
  * `--dry-run` prints the plan and probes nothing.
+ *
+ * ## The hosting pass
+ *
+ * `stability`, `rtSafety` and `features` are measured by the native measurer (`native/lv2-measure.c`,
+ * `lv2_measure`), run once per plugin under the interposer, in its own process so a crash is a
+ * reading and never the run's end. Its lines are the hosting sweep's, read by `sweep-jsonl.ts`.
+ * The plugins are the scan's, or exactly the `--plugins` named, which needs no scan.
  */
 
 import { join } from "node:path";
@@ -32,7 +39,10 @@ import { buildMeasurementDocument } from "./format.js";
 import { measuredPluginsFromProbeOutput } from "./probe-json.js";
 import { buildRun, costMethodFromProbeProvenance, hostFromProbeProvenance } from "./provenance.js";
 import type { MeasurementHost, LatencyMethod } from "./format.js";
-import { type MeasurementDimension, PROBED_DIMENSIONS } from "./vocabulary.js";
+import { measuredPluginsFromSweep } from "./sweep-jsonl.js";
+import { isRecord, nonEmptyString } from "./guards.js";
+import { HOSTING_PASS_DIMENSIONS, type MeasurementDimension, PROBED_DIMENSIONS } from "./vocabulary.js";
+import { LV2_HOSTING_BLOCK_FRAMES, LV2_HOSTING_LIFECYCLES, LV2_HOSTING_REPEATS } from "../qualify-declarations.js";
 
 /** Name and version this tool stamps into every document it writes. */
 export const TOOL_NAME = "lv2-measure";
@@ -52,6 +62,8 @@ export interface MeasureOptions {
   readonly dimensions: readonly MeasurementDimension[];
   /** An existing prober scan to reuse instead of scanning. */
   readonly scanPath?: string;
+  /** The plugins the hosting pass measures, instead of every plugin the scan finds. */
+  readonly plugins?: readonly string[];
   /** Where intermediates are written. */
   readonly workDir: string;
   /** Also sweep latency-bearing controls to find parameter-dependent latency. */
@@ -71,11 +83,15 @@ export interface MeasureOptions {
 
 /** One subprocess the pipeline runs, and what it leaves behind. */
 export interface PipelineStep {
-  /** Stable id: `scan` / `latency-declared` / `latency-measured` / `cost`. */
+  /** Stable id: `scan` / `latency-declared` / `latency-measured` / `cost` / `hosting`. */
   readonly id: string;
   readonly command: string;
   readonly args: readonly string[];
-  /** The catalog JSON this step writes — the next step's input. */
+  /** Run once per plugin, the plugin's URI before `args` (the hosting pass). */
+  readonly perPlugin?: boolean;
+  /** Set in the step's environment, over the caller's. */
+  readonly env?: Readonly<Record<string, string>>;
+  /** The catalog JSON this step writes — the next step's input; the hosting pass's JSONL. */
   readonly produces: string;
   /** The dimension this step measures, when it measures one. */
   readonly dimension?: MeasurementDimension;
@@ -84,8 +100,10 @@ export interface PipelineStep {
 /** The full plan: the steps, and where the run's artefacts land. */
 export interface Pipeline {
   readonly steps: readonly PipelineStep[];
-  /** The catalog JSON carrying every annotation once the last step has run. */
-  readonly finalCatalog: string;
+  /** The catalog JSON carrying every annotation once the last step has run; absent when nothing is scanned. */
+  readonly finalCatalog?: string;
+  /** The scan the hosting pass takes its plugins from, when `--plugins` does not name them. */
+  readonly hostingScan?: string;
   /** Where the cost pass writes its machine provenance, when cost is measured. */
   readonly costProvenance?: string;
 }
@@ -98,13 +116,16 @@ export interface Pipeline {
  * ends with one file carrying both — which is also why `finalCatalog` is a property of the
  * pipeline rather than a fixed name.
  */
-export function buildPipeline(options: MeasureOptions): Pipeline {
+export function buildPipeline(options: MeasureOptions, native?: HostingTools): Pipeline {
   const steps: PipelineStep[] = [];
   const benchmark = join(options.toolDir, "benchmark.py");
   const rates = [...options.rates].sort((a, b) => a - b).join(",");
+  const probed = options.dimensions.some((d) => (PROBED_DIMENSIONS as readonly string[]).includes(d));
+  const hosting = options.dimensions.some((d) => (HOSTING_PASS_DIMENSIONS as readonly string[]).includes(d));
+  if (hosting && native === undefined) throw new Error("the hosting pass needs the native measurer and the interposer");
 
   let current = options.scanPath;
-  if (current === undefined) {
+  if (current === undefined && (probed || options.plugins === undefined)) {
     current = join(options.workDir, "scan.json");
     steps.push({
       id: "scan",
@@ -114,7 +135,8 @@ export function buildPipeline(options: MeasureOptions): Pipeline {
     });
   }
 
-  if (options.dimensions.includes("latency")) {
+  // a prober dimension always has a scan: --plugins is refused beside one
+  if (options.dimensions.includes("latency") && current !== undefined) {
     // Declared first: the measured pass sizes its capture window from this figure and
     // computes declaredMismatch against it. Reversing the two silently degrades both.
     const declared = join(options.workDir, "latency-declared.json");
@@ -148,7 +170,7 @@ export function buildPipeline(options: MeasureOptions): Pipeline {
   }
 
   let costProvenance: string | undefined;
-  if (options.dimensions.includes("cost")) {
+  if (options.dimensions.includes("cost") && current !== undefined) {
     costProvenance = join(options.workDir, "cost-provenance.json");
     const cost = join(options.workDir, "cost.json");
     steps.push({
@@ -174,11 +196,75 @@ export function buildPipeline(options: MeasureOptions): Pipeline {
     current = cost;
   }
 
+  if (hosting && native !== undefined) {
+    steps.push({
+      id: "hosting",
+      command: native.tool,
+      args: [
+        String(Math.max(...options.rates)),
+        String(LV2_HOSTING_BLOCK_FRAMES),
+        String(LV2_HOSTING_LIFECYCLES),
+        String(LV2_HOSTING_REPEATS),
+      ],
+      perPlugin: true,
+      env: { LD_PRELOAD: native.interposer, OMX_STIM: "noise" },
+      produces: join(options.workDir, "hosting.jsonl"),
+    });
+  }
+
   return {
     steps,
-    finalCatalog: current,
+    ...(probed && current !== undefined ? { finalCatalog: current } : {}),
+    ...(hosting && options.plugins === undefined && current !== undefined ? { hostingScan: current } : {}),
     ...(costProvenance === undefined ? {} : { costProvenance }),
   };
+}
+
+/** The native measurer and the interposer it runs under, as located for this run. */
+export interface HostingTools {
+  readonly tool: string;
+  readonly interposer: string;
+}
+
+/** The plugin URIs of a scan (a flat array of descriptors), in its order, each once. */
+export function urisFromScan(scan: unknown): string[] {
+  if (!Array.isArray(scan)) return [];
+  const uris = scan.flatMap((entry) => {
+    const uri = isRecord(entry) ? nonEmptyString(entry.uri) : undefined;
+    return uri === undefined ? [] : [uri];
+  });
+  return [...new Set(uris)];
+}
+
+/** How one run of the native measurer ended. `signal` is a death, `timedOut` the run killed for its time. */
+export interface HostingRunResult {
+  readonly status: number | null;
+  readonly signalNumber?: number;
+  readonly timedOut?: boolean;
+  readonly stdout: string;
+}
+
+/**
+ * One plugin's run of the native measurer as the hosting sweep's JSONL line: the LAST line of its
+ * stdout that is a JSON object (a plugin may print its own banner first), with the exit status
+ * beside it, a death written as 128 + its signal and a timeout as 124. A run that printed no line
+ * is `crashed`, its exit kept: what that exit means is the reader's (`sweep-jsonl.ts`) to say.
+ */
+export function hostingLine(uri: string, run: HostingRunResult): Record<string, unknown> {
+  const exit = run.timedOut === true ? 124 : run.signalNumber !== undefined ? 128 + run.signalNumber : (run.status ?? 1);
+  const last = run.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .pop();
+  if (last !== undefined) {
+    try {
+      const row: unknown = JSON.parse(last);
+      if (isRecord(row)) return { ...row, exit };
+    } catch {
+      return { uri, exit, parseError: true };
+    }
+  }
+  return { uri, exit, crashed: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -198,9 +284,12 @@ function parseRates(text: string): number[] | undefined {
   return rates.length > 0 ? [...new Set(rates)].sort((a, b) => a - b) : undefined;
 }
 
+/** What `--dimensions` takes: the prober's, and the hosting pass's. */
+export const MEASURED_DIMENSIONS: readonly MeasurementDimension[] = [...PROBED_DIMENSIONS, ...HOSTING_PASS_DIMENSIONS];
+
 function parseDimensions(text: string): MeasurementDimension[] | undefined {
   const wanted = text.split(",").map((part) => part.trim());
-  const dimensions = PROBED_DIMENSIONS.filter((d) => wanted.includes(d));
+  const dimensions = MEASURED_DIMENSIONS.filter((d) => wanted.includes(d));
   return dimensions.length === wanted.filter((w) => w.length > 0).length && dimensions.length > 0
     ? [...dimensions]
     : undefined;
@@ -222,6 +311,7 @@ export function parseMeasureArgs(
   let rates: readonly number[] | undefined;
   let dimensions: readonly MeasurementDimension[] = PROBED_DIMENSIONS;
   let scanPath: string | undefined;
+  let plugins: readonly string[] | undefined;
   let workDir = defaults.workDir;
   let sweep = false;
   let costCpu: number | undefined;
@@ -255,7 +345,7 @@ export function parseMeasureArgs(
         const value = next();
         const parsed = value === undefined ? undefined : parseDimensions(value);
         if (parsed === undefined) {
-          return { ok: false, error: `--dimensions accepts ${PROBED_DIMENSIONS.join(",")}` };
+          return { ok: false, error: `--dimensions accepts ${MEASURED_DIMENSIONS.join(",")}` };
         }
         dimensions = parsed;
         break;
@@ -264,6 +354,13 @@ export function parseMeasureArgs(
         const value = next();
         if (value === undefined) return { ok: false, error: "--scan needs a path" };
         scanPath = value;
+        break;
+      }
+      case "--plugins": {
+        const value = next();
+        const uris = value === undefined ? [] : [...new Set(value.split(",").map((u) => u.trim()).filter((u) => u !== ""))];
+        if (uris.length === 0) return { ok: false, error: "--plugins needs a comma-separated list of plugin URIs" };
+        plugins = uris;
         break;
       }
       case "--work-dir": {
@@ -317,6 +414,12 @@ export function parseMeasureArgs(
       error: "--rates is required: a measurement with no stated rate is not a measurement",
     };
   }
+  if (plugins !== undefined && dimensions.some((d) => (PROBED_DIMENSIONS as readonly string[]).includes(d))) {
+    return {
+      ok: false,
+      error: `--plugins names the hosting pass's plugins; ${PROBED_DIMENSIONS.join(" and ")} measure every plugin the scan finds`,
+    };
+  }
   return {
     ok: true,
     options: {
@@ -330,6 +433,7 @@ export function parseMeasureArgs(
       dryRun,
       ...(outPath === undefined ? {} : { outPath }),
       ...(scanPath === undefined ? {} : { scanPath }),
+      ...(plugins === undefined ? {} : { plugins }),
       ...(costCpu === undefined ? {} : { costCpu }),
       ...(label === undefined ? {} : { label }),
     },
@@ -402,8 +506,10 @@ export function advanceProgress(state: ProgressState, event: ProbeProgress): Pro
 /** Everything {@link assembleDocument} needs beyond the probe output. */
 export interface AssemblyInput {
   readonly options: MeasureOptions;
-  /** The final catalog JSON, already parsed. */
-  readonly catalog: unknown;
+  /** The final catalog JSON, already parsed. Absent when the run measured no prober dimension. */
+  readonly catalog?: unknown;
+  /** The hosting pass's lines ({@link hostingLine}), one per plugin. Absent when it did not run. */
+  readonly hosting?: readonly unknown[];
   /** The cost pass's provenance JSON, already parsed. Absent on a latency-only run. */
   readonly costProvenance?: unknown;
   /** Host facts, for a run whose provenance the cost pass did not write. */
@@ -437,7 +543,10 @@ export const DEFAULT_LATENCY_BLOCK_FRAMES = 512;
  * no cost pass do the caller's collected facts stand in.
  */
 export function assembleDocument(input: AssemblyInput): MeasurementDocument {
-  const plugins: MeasuredPlugin[] = measuredPluginsFromProbeOutput(input.catalog, input.options.dimensions);
+  const probed = input.options.dimensions.filter((d) => (PROBED_DIMENSIONS as readonly string[]).includes(d));
+  const plugins: MeasuredPlugin[] =
+    probed.length > 0 && input.catalog !== undefined ? measuredPluginsFromProbeOutput(input.catalog, probed) : [];
+  if (input.hosting !== undefined) mergeHosting(plugins, measuredPluginsFromSweep({ measurements: input.hosting }), input.options.dimensions);
   const costMethod = costMethodFromProbeProvenance(input.costProvenance);
   const host = hostFromProbeProvenance(input.costProvenance) ?? input.host;
   const run: MeasurementRun = buildRun({
@@ -455,4 +564,26 @@ export function assembleDocument(input: AssemblyInput): MeasurementDocument {
     ...(input.options.label === undefined ? {} : { label: input.options.label }),
   });
   return buildMeasurementDocument(run, plugins);
+}
+
+/**
+ * The hosting pass's plugins folded into the prober's, by URI: each keeps the hosting dimensions the
+ * run asked for and the pin, and a plugin only the hosting pass measured joins with its own topology.
+ */
+function mergeHosting(plugins: MeasuredPlugin[], hosted: readonly MeasuredPlugin[], dimensions: readonly MeasurementDimension[]): void {
+  for (const h of hosted) {
+    const blocks = {
+      ...(dimensions.includes("stability") && h.stability !== undefined ? { stability: h.stability } : {}),
+      ...(dimensions.includes("rtSafety") && h.rtSafety !== undefined ? { rtSafety: h.rtSafety } : {}),
+      ...(dimensions.includes("features") && h.features !== undefined ? { features: h.features } : {}),
+      ...(h.integrity === undefined ? {} : { integrity: h.integrity }),
+    };
+    const at = plugins.findIndex((p) => p.uri === h.uri);
+    if (at < 0) {
+      plugins.push({ uri: h.uri, ...(h.version === undefined ? {} : { version: h.version }), topology: h.topology, ...blocks });
+    } else {
+      const p = plugins[at]!;
+      plugins[at] = { ...p, ...(p.version === undefined && h.version !== undefined ? { version: h.version } : {}), ...blocks };
+    }
+  }
 }

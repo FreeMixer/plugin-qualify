@@ -6,7 +6,10 @@
  * measurement document.
  *
  * Standalone by construction: it needs `python3` with the `lilv` bindings, the two probers
- * next to this file (`scan.py`, `benchmark.py`), and an LV2 world to look at. It does not
+ * next to this file (`scan.py`, `benchmark.py`), and an LV2 world to look at; the hosting
+ * dimensions need the package's native measurer and interposer (`lv2_measure`,
+ * `rt_interpose.so`), each its setting (`OMX_LV2_MEASURE`, `OMX_RT_INTERPOSE`), else where the
+ * package installs it, else `native/build` (`make -C native`). It does not
  * need the OpenMixer engine, its server, PipeWire, JACK, an audio interface, or root. Nothing
  * it writes is openmixer-shaped — the output is the interchange format described in
  * `src/measurement/format.ts`, which any LV2 host can read.
@@ -22,6 +25,7 @@
  * pnpm build                       # this shell reads the compiled dist/
  * node tools/lv2-measure.mjs --rates 48000,96000 --out measurements.json --run
  * node tools/lv2-measure.mjs --rates 48000 --dimensions latency --dry-run
+ * node tools/lv2-measure.mjs --rates 48000 --dimensions stability,rtSafety,features --plugins <uri> --run
  * ```
  *
  * `--run` (or `LV2_MEASURE_RUN=1`) is required to probe: the passes instantiate and execute
@@ -34,9 +38,9 @@
  * `@progress `. A supervising process (the OpenMixer console's Setup screen) parses those and
  * ignores everything else, so the human log stays readable.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { constants, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -45,13 +49,18 @@ import {
   assembleDocument,
   buildPipeline,
   collectHostFacts,
+  HOSTING_PASS_DIMENSIONS,
+  hostingLine,
   INITIAL_PROGRESS,
   parseMeasureArgs,
   parseProbeProgress,
   serialiseMeasurementDocument,
   TOOL_NAME,
   TOOL_VERSION,
+  urisFromScan,
 } from "../dist/measurement/index.js";
+import { LV2_HOSTING_TIMEOUT_S, LV2_MEASURE_TOOL_NAME, RT_INTERPOSE_NAME } from "../dist/qualify-declarations.js";
+import { locateNativeTool } from "../dist/tool-paths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -60,7 +69,10 @@ const HELP = `${TOOL_NAME} ${TOOL_VERSION} — measure LV2 plugin latency and CP
   --rates 48000,96000     REQUIRED. Sample rates to measure at. There is no default:
                           a figure without a stated rate is not a measurement.
   --dimensions latency,cost
-                          What to measure (default: both).
+                          What to measure (default: latency,cost); also any of
+                          stability,rtSafety,features, the hosting pass (the native lv2_measure
+                          under the interposer, one process per plugin).
+  --plugins URI,URI       The hosting pass measures only these, and needs no scan.
   --out PATH              Where the document goes (default: stdout).
   --scan PATH             Reuse an existing prober scan instead of scanning.
   --work-dir PATH         Where intermediates go (default: alongside --out, or a temp dir).
@@ -82,6 +94,45 @@ function fail(message, code = 2) {
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+/** The native measurer and its interposer, located; absent, the run is refused naming where it looked. */
+function hostingTools() {
+  const at = (name) => {
+    const found = locateNativeTool(name, process.env, existsSync);
+    if (found.path === undefined) {
+      fail(`no ${name} at ${found.looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${found.setting}`);
+    }
+    return found.path;
+  };
+  return { tool: at(LV2_MEASURE_TOOL_NAME), interposer: at(RT_INTERPOSE_NAME) };
+}
+
+/** The hosting pass: the measurer once per plugin, each in its own process, its lines written as JSONL. */
+function runHosting(step, uris, onProgress) {
+  const lines = [];
+  onProgress(step, { kind: "phase", plugins: uris.length, rate: Number(step.args[0]) });
+  for (const uri of uris) {
+    const r = spawnSync(step.command, [uri, ...step.args], {
+      encoding: "utf8",
+      env: { ...process.env, ...step.env },
+      stdio: ["ignore", "pipe", "inherit"],
+      timeout: LV2_HOSTING_TIMEOUT_S * 1000,
+      maxBuffer: 16 << 20,
+    });
+    if (r.error !== undefined && r.error.code !== "ETIMEDOUT") throw new Error(`hosting: cannot run ${step.command}: ${r.error.message}`);
+    const line = hostingLine(uri, {
+      status: r.status,
+      ...(r.signal ? { signalNumber: constants.signals[r.signal] } : {}),
+      ...(r.error?.code === "ETIMEDOUT" ? { timedOut: true } : {}),
+      stdout: r.stdout ?? "",
+    });
+    process.stderr.write(`  ${uri}: exit ${line.exit}\n`);
+    onProgress(step, { kind: "plugin" });
+    lines.push(line);
+  }
+  writeFileSync(step.produces, lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
+  return lines;
 }
 
 /** Run one pipeline step, forwarding its stderr and counting the plugins it reports. */
@@ -124,14 +175,17 @@ async function main() {
   if (!parsed.ok) fail(`${parsed.error}\n\n${HELP}`);
   const options = parsed.options;
 
-  const pipeline = buildPipeline(options);
+  const hosting = options.dimensions.some((d) => HOSTING_PASS_DIMENSIONS.includes(d));
+  const pipeline = buildPipeline(options, hosting ? hostingTools() : undefined);
 
   if (options.dryRun) {
     process.stderr.write(
       `${TOOL_NAME} would measure ${options.dimensions.join(" + ")} at ${options.rates.join(", ")} Hz\n`,
     );
     for (const step of pipeline.steps) {
-      process.stderr.write(`  ${step.id}: ${step.command} ${step.args.join(" ")}\n`);
+      const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v} `).join("");
+      const each = step.perPlugin ? `<each of ${options.plugins?.join(", ") ?? "the scan's plugins"}> ` : "";
+      process.stderr.write(`  ${step.id}: ${env}${step.command} ${each}${step.args.join(" ")}\n`);
     }
     return;
   }
@@ -162,15 +216,22 @@ async function main() {
   const startedAt = Date.now();
   const measuredAt = new Date().toISOString();
   emit({ step: "start", steps: pipeline.steps.map((s) => s.id) });
+  let hostingLines;
   for (const step of pipeline.steps) {
     process.stderr.write(`== ${step.id}\n`);
-    await runStep(step, onProgress);
+    if (step.perPlugin) {
+      const uris = options.plugins ?? urisFromScan(readJson(pipeline.hostingScan));
+      hostingLines = runHosting(step, uris, onProgress);
+    } else {
+      await runStep(step, onProgress);
+    }
   }
   const elapsedSeconds = (Date.now() - startedAt) / 1000;
 
   const document = assembleDocument({
     options,
-    catalog: readJson(pipeline.finalCatalog),
+    ...(pipeline.finalCatalog === undefined ? {} : { catalog: readJson(pipeline.finalCatalog) }),
+    ...(hostingLines === undefined ? {} : { hosting: hostingLines }),
     costProvenance:
       pipeline.costProvenance !== undefined && existsSync(pipeline.costProvenance)
         ? readJson(pipeline.costProvenance)
@@ -191,8 +252,14 @@ async function main() {
   if (options.outPath === undefined) process.stdout.write(serialised);
   else writeFileSync(resolve(options.outPath), serialised);
 
+  const hostingFigure = (block) => block !== undefined && block.unmeasuredReason === undefined;
   const measured = document.plugins.filter(
-    (p) => Object.keys(p.latency?.perRate ?? {}).length > 0 || Object.keys(p.cost?.perRate ?? {}).length > 0,
+    (p) =>
+      Object.keys(p.latency?.perRate ?? {}).length > 0 ||
+      Object.keys(p.cost?.perRate ?? {}).length > 0 ||
+      hostingFigure(p.stability) ||
+      hostingFigure(p.rtSafety) ||
+      hostingFigure(p.features),
   ).length;
   process.stderr.write(
     `${TOOL_NAME}: ${document.plugins.length} plugin(s), ${measured} with at least one figure, ` +

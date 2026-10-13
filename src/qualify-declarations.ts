@@ -89,6 +89,17 @@ export const CLAP_SWEEP_FRAMES = 512;
 /** Seconds one `.clap` may take to qualify at every rate before the prober is killed. */
 export const CLAP_QUALIFY_TIMEOUT_S = 120;
 
+/**
+ * The LV2 hosting pass (`lv2-measure.mjs`, the native `lv2_measure`): each plugin at the run's highest
+ * rate, in blocks of `LV2_HOSTING_BLOCK_FRAMES` frames, `LV2_HOSTING_LIFECYCLES` instantiate/destroy
+ * cycles and `LV2_HOSTING_REPEATS` swept RT-safety runs (the worst kept), under the noise stimulus:
+ * the figures openmixer's hosting sweep took. One plugin may take `LV2_HOSTING_TIMEOUT_S` seconds.
+ */
+export const LV2_HOSTING_BLOCK_FRAMES = 512;
+export const LV2_HOSTING_LIFECYCLES = 30;
+export const LV2_HOSTING_REPEATS = 3;
+export const LV2_HOSTING_TIMEOUT_S = 240;
+
 
 
 
