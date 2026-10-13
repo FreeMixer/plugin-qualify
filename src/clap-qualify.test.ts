@@ -169,6 +169,28 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     });
   });
 
+  live("a layout that cannot be read says which cause: get_info, or memory while reading or hashing it", () => {
+    const integrity = (path: string, env: Record<string, string> = {}) => {
+      const r = spawnSync(clapQualifyToolPath(), ["--rates", String(QUALIFY_RATES[0]), "--blocks", "4", path], {
+        encoding: "utf8",
+        env: { ...process.env, ...env },
+      });
+      return parseClapQualifyOutput(r.stdout)[0]!.integrity;
+    };
+    expect(integrity(join(FIXTURES, "info-fails.clap")).unmeasuredDetail).toBe("a parameter's get_info failed");
+    // params-2048: the layout is read into calloc(2048, ...) and sorted through a malloc of 2048 pointers
+    const wide = join(FIXTURES, "params-2048.clap");
+    const preload = { LD_PRELOAD: join(FIXTURES, "fail-alloc.so") };
+    expect(integrity(wide, { ...preload, FAIL_CALLOC_NMEMB: "2048" })).toMatchObject({
+      unmeasuredReason: "probe-error",
+      unmeasuredDetail: "out of memory reading the parameter layout",
+    });
+    expect(integrity(wide, { ...preload, FAIL_MALLOC_SIZE: String(2048 * 8) })).toMatchObject({
+      unmeasuredReason: "probe-error",
+      unmeasuredDetail: "out of memory hashing the parameter layout",
+    });
+  });
+
   live("the prober offers exactly the console's CLAP host extensions", () => {
     const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.hostExtensions).toEqual(OMX_CLAP_HOST_EXTENSIONS);

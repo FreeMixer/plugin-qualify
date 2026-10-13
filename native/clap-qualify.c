@@ -485,14 +485,25 @@ static void integrity_layout(const clap_plugin_t *p, struct integrity *pin) {
   }
   clap_param_info_t *infos = calloc(count ? count : 1, sizeof *infos);
   phd_layout_clap_param_t *records = calloc(count ? count : 1, sizeof *records);
-  pin->reason = "probe-error", pin->detail = "a parameter's get_info failed";
-  for (uint32_t i = 0; infos && records && i < count; i++) {
-    if (!params->get_info(p, i, &infos[i])) goto out;
+  pin->reason = "probe-error";
+  if (!infos || !records) {
+    pin->detail = "out of memory reading the parameter layout";
+    goto out;
+  }
+  for (uint32_t i = 0; i < count; i++) {
+    if (!params->get_info(p, i, &infos[i])) {
+      pin->detail = "a parameter's get_info failed";
+      goto out;
+    }
     infos[i].name[sizeof infos[i].name - 1] = '\0';
     records[i] = (phd_layout_clap_param_t){ infos[i].id, infos[i].name, infos[i].min_value, infos[i].max_value,
                                             infos[i].default_value, infos[i].flags };
   }
-  if (infos && records && phd_layout_clap_digest(records, count, pin->layout) == 0) pin->reason = pin->detail = NULL;
+  if (phd_layout_clap_digest(records, count, pin->layout) != 0) {
+    pin->detail = "out of memory hashing the parameter layout";
+    goto out;
+  }
+  pin->reason = pin->detail = NULL;
 out:
   free(records);
   free(infos);

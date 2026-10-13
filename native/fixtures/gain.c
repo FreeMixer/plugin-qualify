@@ -8,6 +8,8 @@
  *                   buffer every block: the known RT-unsafe plugin.
  *   params-<n>.clap built with -DFIXTURE_PARAMS=<n>, the rt-safe gain followed by n - 1 hidden
  *                   read-only parameters: the layout around the host's parameter cap.
+ *   info-fails.clap built with -DFIXTURE_INFO_FAILS, the rt-safe gain whose one parameter's get_info
+ *                   fails.
  *
  * Nothing else differs, so a verdict that tells them apart is the interposer's count and nothing else.
  */
@@ -20,7 +22,10 @@
 #define FIXTURE_STR_(x) #x
 #define FIXTURE_STR(x) FIXTURE_STR_(x)
 
-#ifdef FIXTURE_PARAMS
+#ifdef FIXTURE_INFO_FAILS
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.info-fails"
+#define FIXTURE_NAME "gain whose get_info fails"
+#elif defined FIXTURE_PARAMS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.params-" FIXTURE_STR(FIXTURE_PARAMS)
 #define FIXTURE_NAME "gain with " FIXTURE_STR(FIXTURE_PARAMS) " parameters"
 #elif defined FIXTURE_ALLOCATES
@@ -115,6 +120,10 @@ static const clap_plugin_audio_ports_t audio_ports = { ports_count, ports_get };
 static uint32_t params_count(const clap_plugin_t *p) { (void)p; return FIXTURE_PARAMS; }
 static bool params_info(const clap_plugin_t *p, uint32_t index, clap_param_info_t *info) {
   (void)p;
+#ifdef FIXTURE_INFO_FAILS
+  (void)index;
+  return false;
+#endif
   if (index >= FIXTURE_PARAMS) return false;
   memset(info, 0, sizeof *info);
   if (index > 0) {
