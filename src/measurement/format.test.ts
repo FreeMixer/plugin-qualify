@@ -202,6 +202,15 @@ describe("the unmeasured vocabulary", () => {
   });
 });
 
+describe("a soak rate the supervisor cut short reads as a timeout, never as a death", () => {
+  it("keeps timedOut and timeoutSeconds and does not invent died", async () => {
+    const { readSoakAtRate } = await import("./format.js");
+    const r = readSoakAtRate({ instantiated: true, timedOut: true, timeoutSeconds: 3600, seconds: 2000 });
+    expect(r).toMatchObject({ timedOut: true, timeoutSeconds: 3600 });
+    expect(r?.died).toBeUndefined();
+  });
+});
+
 describe("v1.2 — verdicts per host profile (§3b)", () => {
   const profile = {
     id: "jalv",
