@@ -15,11 +15,9 @@ import { existsSync } from "node:fs";
 
 import {
   CLAP_QUALIFY_TIMEOUT_S,
-  CLAP_QUALIFY_TOOL_ENV,
   CLAP_QUALIFY_TOOL_NAME,
   CLAP_SWEEP_BLOCKS,
   CLAP_SWEEP_FRAMES,
-  RT_INTERPOSE_ENV,
   RT_INTERPOSE_NAME,
 } from "./qualify-declarations.js";
 import {
@@ -35,7 +33,7 @@ import { OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js"
 import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
-import { nativeToolCandidates } from "./tool-paths.js";
+import { locateNativeTool } from "./tool-paths.js";
 import { readIntegrity, type IntegrityMeasurement } from "./measurement/format.js";
 
 export class ClapQualifyError extends Error {
@@ -307,19 +305,16 @@ export interface ClapQualifyOptions {
   readonly exists?: (path: string) => boolean;
 }
 
-/** One native tool: its setting when set, else the first candidate that exists. Absent, it throws, naming where it looked. */
+/** One native tool, located (`locateNativeTool`). Absent, it throws, naming where it looked. */
 function locate(
   env: Readonly<Record<string, string | undefined>>,
   what: string,
-  name: string,
   file: string,
   exists: (path: string) => boolean,
 ): string {
-  const v = env[name];
-  const looked = v === undefined || v === "" ? nativeToolCandidates(file) : [v];
-  const path = looked.find((p) => exists(p));
+  const { path, looked, setting } = locateNativeTool(file, env, exists);
   if (path === undefined) {
-    throw new ClapQualifyError(`no CLAP ${what} at ${looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${name}`);
+    throw new ClapQualifyError(`no CLAP ${what} at ${looked.join(", ")}: install the plugin-qualify package, build it with make -C native, or set ${setting}`);
   }
   return path;
 }
@@ -333,8 +328,8 @@ export function clapQualifyTools(
   exists: (path: string) => boolean = existsSync,
 ): { tool: string; interposer: string } {
   return {
-    tool: locate(env, "prober", CLAP_QUALIFY_TOOL_ENV, CLAP_QUALIFY_TOOL_NAME, exists),
-    interposer: locate(env, "interposer", RT_INTERPOSE_ENV, RT_INTERPOSE_NAME, exists),
+    tool: locate(env, "prober", CLAP_QUALIFY_TOOL_NAME, exists),
+    interposer: locate(env, "interposer", RT_INTERPOSE_NAME, exists),
   };
 }
 

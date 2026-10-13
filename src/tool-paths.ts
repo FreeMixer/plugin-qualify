@@ -8,7 +8,13 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CLAP_QUALIFY_TOOL_NAME, NATIVE_TOOL_DIRS, RT_INTERPOSE_NAME } from "./qualify-declarations.js";
+import {
+  CLAP_QUALIFY_TOOL_NAME,
+  LV2_MEASURE_TOOL_NAME,
+  NATIVE_TOOLS,
+  NATIVE_TOOL_DIRS,
+  RT_INTERPOSE_NAME,
+} from "./qualify-declarations.js";
 
 /**
  * `tools/` — `scan.py`, `benchmark.py`, `lv2-measure.mjs`, `hosting-sweep.mjs`. Resolved when a
@@ -39,7 +45,29 @@ export function rtInterposePath(): string {
   return join(nativeBuildDir(), RT_INTERPOSE_NAME);
 }
 
+/** The package's own build of the LV2 measurer (`make -C native`). */
+export function lv2MeasureNativePath(): string {
+  return join(nativeBuildDir(), LV2_MEASURE_TOOL_NAME);
+}
+
 /** Where a native tool is looked for when no setting names it, in order: the installed directories, then the own build. */
 export function nativeToolCandidates(name: string): string[] {
   return [...NATIVE_TOOL_DIRS, nativeBuildDir()].map((dir) => join(dir, name));
+}
+
+/**
+ * One of `NATIVE_TOOLS`: its setting when set (and only that), else the first candidate that exists.
+ * `path` is absent when none does; `looked` is every place tried, for the refusal to name.
+ */
+export function locateNativeTool(
+  name: string,
+  env: Readonly<Record<string, string | undefined>>,
+  exists: (path: string) => boolean,
+): { readonly path?: string; readonly looked: readonly string[]; readonly setting: string } {
+  const setting = NATIVE_TOOLS.find((t) => t.name === name)?.env;
+  if (setting === undefined) throw new Error(`${name} is not one of NATIVE_TOOLS`);
+  const v = env[setting];
+  const looked = v === undefined || v === "" ? nativeToolCandidates(name) : [v];
+  const path = looked.find((p) => exists(p));
+  return { ...(path === undefined ? {} : { path }), looked, setting };
 }

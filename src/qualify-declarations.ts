@@ -52,19 +52,31 @@ export const CLAP_SCAN_TOOL_DEFAULT = "omx-clap-scan";
 export const CLAP_SCAN_TIMEOUT_S = 300;
 
 /**
- * The CLAP prober (`native/clap-qualify.c`) and the interposer it runs under (`native/rt-interpose.c`):
- * each located by one environment variable, else the first of `NATIVE_TOOL_DIRS` that holds it, else
- * the package's own build in `native/build/`.
+ * The CLAP prober (`native/clap-qualify.c`), the LV2 measurer (`native/lv2-measure.c`) and the
+ * interposer both run under (`native/rt-interpose.c`): each located by one environment variable, else
+ * the first of `NATIVE_TOOL_DIRS` that holds it, else the package's own build in `native/build/`.
  */
 export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
+export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";
 export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
 
-/** The file names of the prober and the interposer, in every place they are looked for. */
+/** The file names of the native tools, in every place they are looked for. */
 export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
+export const LV2_MEASURE_TOOL_NAME = "lv2_measure";
 export const RT_INTERPOSE_NAME = "rt_interpose.so";
 
 /**
- * Where the RPM and the DEB install the prober and the interposer: the libexec directory on Fedora,
+ * The ONE list of the native tools the packages install, each with the setting that names it.
+ * `make -C native install` installs exactly these; a test holds the Makefile to the list.
+ */
+export const NATIVE_TOOLS: readonly { readonly name: string; readonly env: string }[] = [
+  { name: CLAP_QUALIFY_TOOL_NAME, env: CLAP_QUALIFY_TOOL_ENV },
+  { name: LV2_MEASURE_TOOL_NAME, env: LV2_MEASURE_TOOL_ENV },
+  { name: RT_INTERPOSE_NAME, env: RT_INTERPOSE_ENV },
+];
+
+/**
+ * Where the RPM and the DEB install the native tools: the libexec directory on Fedora,
  * `/usr/lib/<package>` on Debian (policy keeps a package's private programs there). The packaging
  * installs into exactly these; a test holds the spec and `debian/rules` to them.
  */
