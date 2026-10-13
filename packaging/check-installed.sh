@@ -2,19 +2,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 #
-# Check an installed plugin-qualify package qualifies CLAP plugins with nothing set: the prober and
-# the interposer are the package's own, found where it installed them, and the scanner is the one
-# its Recommends pulled in.
+# Check an installed plugin-qualify package qualifies CLAP and LV2 plugins with nothing set: the
+# prober, the measurer and the interposer are the package's own, found where it installed them, and
+# the scanner is the one its Recommends pulled in.
 #
-#   packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap>
+#   packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <dir holding rt-safe.lv2, rt-unsafe.lv2>
 #
 # Runs in the distribution's container after the package is installed, with an empty environment
-# (no OMX_* setting). The safe fixture must qualify (exit 0, suitable), the unsafe one must not
-# (exit 1, unsuitable), and the installed prober must print the fixture's integrity pin.
+# (no OMX_* setting, no LV2_PATH: the LV2 bundles go in ~/.lv2, where lilv looks). The safe CLAP
+# fixture must qualify (exit 0, suitable), the unsafe one must not (exit 1, unsuitable), and the
+# installed prober must print the fixture's integrity pin. The installed lv2-measure.mjs must measure
+# the LV2 fixtures' hosting dimensions through the installed measurer: no allocation in the safe
+# one's run(), some in the unsafe one's, each with its pin.
 set -euo pipefail
 
-safe=$(readlink -f "${1:?usage: check-installed.sh <rt-safe.clap> <rt-unsafe.clap>}")
-unsafe=$(readlink -f "${2:?usage: check-installed.sh <rt-safe.clap> <rt-unsafe.clap>}")
+usage="usage: check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>"
+safe=$(readlink -f "${1:?$usage}")
+unsafe=$(readlink -f "${2:?$usage}")
+lv2=$(readlink -f "${3:?$usage}")
 bare() { env -i PATH=/usr/bin:/bin HOME="$HOME" "$@"; }
 fail() { echo "check-installed: $*" >&2; exit 1; }
 out=$(mktemp -d)
@@ -43,3 +48,15 @@ bare LD_PRELOAD="$dir/rt_interpose.so" "$dir/clap-qualify" --rates 48000 --block
 grep -q '"integrity"' "$out/line.json" || fail "the prober printed no integrity block"
 grep -Eq '"layout":\{"scheme":"omx-layout/1","sha256":"[0-9a-f]{64}"' "$out/line.json" || fail "the prober printed no layout fingerprint"
 echo "check-installed: $dir qualifies CLAP plugins with no setting"
+
+# the LV2 fixtures, measured by the installed lv2-measure.mjs through the installed lv2_measure
+[ -x "$dir/lv2_measure" ] || fail "the package installs no lv2_measure"
+mkdir -p "$HOME/.lv2"
+cp -r "$lv2/rt-safe.lv2" "$lv2/rt-unsafe.lv2" "$HOME/.lv2/"
+measure=$( (dpkg -L plugin-qualify 2>/dev/null || rpm -ql plugin-qualify) | grep '/tools/lv2-measure\.mjs$' || true)
+[ -n "$measure" ] || fail "the package installs no lv2-measure.mjs"
+(cd "$out" && bare node "$measure" --rates 48000 --dimensions stability,rtSafety,features \
+  --plugins urn:plugin-qualify:fixture:lv2-rt-safe,urn:plugin-qualify:fixture:lv2-rt-unsafe --out "$out/lv2.json" --run) ||
+  fail "lv2-measure.mjs failed on the LV2 fixtures"
+bare node packaging/check-lv2-measurement.mjs "$out/lv2.json" || fail "the LV2 measurement is not the fixtures'"
+echo "check-installed: $dir measures LV2 plugins with no setting"
