@@ -17,3 +17,4 @@ export * from "./clap-loader.js";
 export * from "./clap-qualify.js";
 export * from "./qualify-options.js";
 export * from "./qualify-cli.js";
+export * from "./measure-host.js";
