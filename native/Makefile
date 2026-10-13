@@ -58,11 +58,11 @@ $(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
 deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
 
-# the fixtures are the tests' own, never installed
+# the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 install: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
-	install -m 0644 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
+	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
 
 clean:
 	rm -rf $(BUILD)
