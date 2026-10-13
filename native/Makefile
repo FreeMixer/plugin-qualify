@@ -6,6 +6,7 @@
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap, build/fixtures/lv2/{rt-safe,rt-unsafe}.lv2
+#   build/lv2_measure_features_test   the measurer's features oracle, run from native/
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober and the interposer, for a package
 #
@@ -40,7 +41,7 @@ LIBEXECDIR ?= /usr/libexec/plugin-qualify
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
-all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_features_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so
 
 $(BUILD) $(BUILD)/fixtures:
@@ -57,6 +58,12 @@ LV2_MEASURE_HDR := lv2-measure-features.h lv2-measure-pin.h lv2-measure-rates.h 
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) \
 		$(LILV_LIBS) -lpthread -lm -ldl
+
+# the features' oracle, never installed; it opens the fixtures by these paths, run from native/
+$(BUILD)/lv2_measure_features_test: lv2_measure_features.test.c lv2-measure-features.c lv2-measure-features.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LILV_CFLAGS) -I. '-DTEST_LV2_SO="$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so"' \
+		'-DTEST_LV2_URI="urn:plugin-qualify:fixture:lv2-rt-safe"' '-DTEST_CLAP="$(BUILD)/fixtures/rt-safe.clap"' \
+		$(LDFLAGS) -o $@ lv2_measure_features.test.c lv2-measure-features.c -ldl -lpthread
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
