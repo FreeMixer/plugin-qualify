@@ -22,7 +22,9 @@ node tools/gen-python-declarations.mjs --write
 
 The CLAP prober, the LV2 measurer (`lv2_measure`, taken in from openmixer), their interposer and
 the fixture plugins their tests qualify (a known RT-safe and a known RT-unsafe gain, as a `.clap` and
-as an LV2 bundle) are C, built with make. The CLAP headers come from `pkg-config clap` (Fedora
+as an LV2 bundle, and the LV2 bundle `host-faithfulness.lv2`, five plugins that each need one thing of
+the measuring host: options, a worker, patch:Set, a bounded sweep, a stdout of their own) are C, built
+with make. The CLAP headers come from `pkg-config clap` (Fedora
 `clap-devel`), plugin-hostd's `pin.h` from `pkg-config plugin-hostd`, lilv and the LV2 headers from
 `pkg-config lilv-0` (`lilv-devel`, `liblilv-dev` and `lv2-dev`). Where the CLAP and plugin-hostd
 headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`.
@@ -35,7 +37,9 @@ make -C native deps all   # native/build/clap-qualify, lv2_measure, rt_interpose
 ```
 
 The native tests run the build; without it they skip, except on CI, where a missing build fails. The
-parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each.
+parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each, once
+the two things only ours prints are taken out of its line: the `host` object and the soak's
+`maxRmsDbfs` (the soak case lifts the sweep's bound, so both sweep the same range).
 
 `make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
 interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command

@@ -5,7 +5,8 @@
 # qualify.
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
-#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap, build/fixtures/lv2/{rt-safe,rt-unsafe}.lv2
+#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap,
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness}.lv2
 #   build/lv2_measure_features_test   the measurer's features oracle, run from native/
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, and
 #                            the omx-contract header openmixer's LV2 measurer reads
@@ -48,7 +49,8 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 
 
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_features_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
-	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so
+	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
+	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so
 	@# asked when the recipe runs, so `make deps all` builds it from what deps just fetched
 	@if [ -f deps/omx-contract/include/omxcontract/omx_contract_limits.h ]; then $(MAKE) --no-print-directory $(BUILD)/parity/lv2_measure; fi
 
@@ -104,6 +106,14 @@ $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-uns
 	mkdir -p $(@D)
 	cp fixtures/rt-unsafe.lv2/manifest.ttl fixtures/rt-unsafe.lv2/gain.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# five plugins, each demanding one thing of the measuring host: options, a worker, patch:Set, a
+# bounded sweep, a stdout of its own
+$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-host-faithfulness.c \
+		fixtures/host-faithfulness.lv2/manifest.ttl fixtures/host-faithfulness.lv2/host-faithfulness.ttl
+	mkdir -p $(@D)
+	cp fixtures/host-faithfulness.lv2/manifest.ttl fixtures/host-faithfulness.lv2/host-faithfulness.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION)
