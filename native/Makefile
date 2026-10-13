@@ -5,7 +5,7 @@
 # qualify.
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
-#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap
+#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap, build/fixtures/lv2/{rt-safe,rt-unsafe}.lv2
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober and the interposer, for a package
 #
@@ -33,6 +33,7 @@ endif
 
 LILV_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags lilv-0)
 LILV_LIBS ?= $(shell $(PKG_CONFIG) --libs lilv-0)
+LV2_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags lv2 2>/dev/null)
 
 LIBEXECDIR ?= /usr/libexec/plugin-qualify
 
@@ -40,7 +41,7 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
-	$(BUILD)/fixtures/controls.clap
+	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -71,6 +72,17 @@ $(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
 
 $(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# an LV2 fixture is its bundle: the turtle copied beside the shared object it names
+$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-safe.lv2/manifest.ttl fixtures/rt-safe.lv2/gain.ttl
+	mkdir -p $(@D)
+	cp fixtures/rt-safe.lv2/manifest.ttl fixtures/rt-safe.lv2/gain.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+$(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-unsafe.lv2/manifest.ttl fixtures/rt-unsafe.lv2/gain.ttl
+	mkdir -p $(@D)
+	cp fixtures/rt-unsafe.lv2/manifest.ttl fixtures/rt-unsafe.lv2/gain.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
