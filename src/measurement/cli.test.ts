@@ -14,12 +14,15 @@ import {
   advanceProgress,
   assembleDocument,
   buildPipeline,
+  hostingLine,
   INITIAL_PROGRESS,
   parseMeasureArgs,
   parseProbeProgress,
   TOOL_NAME,
+  urisFromScan,
   type MeasureOptions,
 } from "./cli.js";
+import { LV2_HOSTING_BLOCK_FRAMES, LV2_HOSTING_LIFECYCLES, LV2_HOSTING_REPEATS } from "../qualify-declarations.js";
 import { FIXTURE_HOST } from "./fixtures.js";
 
 const DEFAULTS = { toolDir: "/opt/lv2-measure/tools", workDir: "/tmp/run" };
@@ -275,5 +278,116 @@ describe("assembling the document", () => {
     });
     expect(document.plugins[0]?.latency?.unmeasuredReason).toBe("not-attempted");
     expect(document.plugins[0]?.cost?.unmeasuredReason).toBe("not-attempted");
+  });
+});
+
+describe("the hosting pass (the native lv2_measure)", () => {
+  const NATIVE = { tool: "/x/lv2_measure", interposer: "/x/rt_interpose.so" };
+  const HOSTING = ["stability", "rtSafety", "features"] as const;
+
+  it("takes the hosting dimensions and --plugins, refusing --plugins beside a prober dimension", () => {
+    const r = parseMeasureArgs(["--rates", "48000", "--dimensions", "rtSafety,features", "--plugins", "urn:a, urn:b,urn:a"], {}, DEFAULTS);
+    expect(r.ok && r.options.dimensions).toEqual(["rtSafety", "features"]);
+    expect(r.ok && r.options.plugins).toEqual(["urn:a", "urn:b"]);
+    expect(parseMeasureArgs(["--rates", "48000", "--plugins", "urn:a"], {}, DEFAULTS).ok).toBe(false);
+    expect(parseMeasureArgs(["--rates", "48000", "--dimensions", "rtSafety", "--plugins", ","], {}, DEFAULTS).ok).toBe(false);
+  });
+
+  it("runs the measurer once per plugin under the interposer, at the highest rate asked", () => {
+    const { steps } = buildPipeline(options({ dimensions: [...HOSTING], plugins: ["urn:a"] }), NATIVE);
+    expect(steps).toEqual([
+      {
+        id: "hosting",
+        command: NATIVE.tool,
+        args: ["96000", String(LV2_HOSTING_BLOCK_FRAMES), String(LV2_HOSTING_LIFECYCLES), String(LV2_HOSTING_REPEATS)],
+        perPlugin: true,
+        env: { LD_PRELOAD: NATIVE.interposer, OMX_STIM: "noise" },
+        produces: "/tmp/run/hosting.jsonl",
+      },
+    ]);
+  });
+
+  it("scans for its plugins when none are named, and runs after the prober's passes", () => {
+    const alone = buildPipeline(options({ dimensions: ["stability"] }), NATIVE);
+    expect(alone.steps.map((s) => s.id)).toEqual(["scan", "hosting"]);
+    expect(alone.hostingScan).toBe("/tmp/run/scan.json");
+    expect(alone.finalCatalog).toBeUndefined();
+    const all = buildPipeline(options({ dimensions: ["latency", "cost", ...HOSTING] }), NATIVE);
+    expect(all.steps.map((s) => s.id)).toEqual(["scan", "latency-declared", "latency-measured", "cost", "hosting"]);
+    expect(all.finalCatalog).toBe("/tmp/run/cost.json");
+  });
+
+  it("refuses to plan the pass without the native tools", () => {
+    expect(() => buildPipeline(options({ dimensions: ["rtSafety"], plugins: ["urn:a"] }))).toThrow(/native measurer/);
+  });
+
+  it("lists a scan's plugins once each, skipping what has no URI", () => {
+    expect(urisFromScan([{ uri: "urn:a" }, { uri: "" }, {}, { uri: "urn:b" }, { uri: "urn:a" }])).toEqual(["urn:a", "urn:b"]);
+    expect(urisFromScan({ uri: "urn:a" })).toEqual([]);
+  });
+
+  it("keeps the last JSON line of a run with its exit, and writes a death as the sweep did", () => {
+    expect(hostingLine("urn:a", { status: 0, stdout: 'using block size: 0\n{"uri":"urn:a","found":true}\n' })).toEqual({ uri: "urn:a", found: true, exit: 0 });
+    expect(hostingLine("urn:a", { status: 3, stdout: '{"uri":"urn:a","found":false}\n' })).toEqual({ uri: "urn:a", found: false, exit: 3 });
+    expect(hostingLine("urn:a", { status: null, signalNumber: 11, stdout: "" })).toEqual({ uri: "urn:a", exit: 139, crashed: true });
+    expect(hostingLine("urn:a", { status: null, timedOut: true, stdout: "" })).toEqual({ uri: "urn:a", exit: 124, crashed: true });
+    expect(hostingLine("urn:a", { status: 0, stdout: "{not json\n" })).toEqual({ uri: "urn:a", exit: 0, parseError: true });
+  });
+
+  const line = {
+    uri: "urn:a",
+    found: true,
+    instantiated: true,
+    rate: 96000,
+    block: 512,
+    audioInputs: 2,
+    audioOutputs: 2,
+    controlInputs: 1,
+    version: "1.0",
+    integrity: { version: "1.0", files: [{ path: "a.so", sha256: "a".repeat(64) }], layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) } },
+    requiredFeatures: [],
+    optionalFeatures: [],
+    cvPorts: 0,
+    lifecycle: { cycles: 30, instantiated: 30, failed: 0 },
+    threads: { before: 1, afterFirstInstantiate: 1, afterAllFreed: 1, leaked: 0 },
+    rtSafety: { interposer: true, blocks: 512, repeats: 3, swept: true, sweepApplicable: true, allocationsInRun: 0, allocationsMin: 0, variable: false, locksInRun: 0, syscallsInRun: 0 },
+    exit: 0,
+  };
+
+  it("folds the pass into the prober's plugin, keeping only the dimensions asked and the pin", () => {
+    const document = assembleDocument({
+      options: options({ rates: [48000], dimensions: ["latency", "rtSafety"] }),
+      catalog: [{ uri: "urn:a", audioInputs: 2, audioOutputs: 2, hasMidiIn: false, params: [], latency: { perRate: { "48000": { frames: 0, ms: 0 } } } }],
+      hosting: [line, { uri: "urn:gone", exit: 139, crashed: true }],
+      host: FIXTURE_HOST,
+      runId: "run-4",
+      measuredAt: "2026-08-01T10:00:00+02:00",
+    });
+    expect(document.run.dimensions).toEqual(["latency", "rtSafety"]);
+    expect(document.plugins.map((p) => p.uri)).toEqual(["urn:a"]);
+    const [a] = document.plugins;
+    expect(a?.latency?.perRate?.["48000"]?.frames).toBe(0);
+    expect(a?.rtSafety).toMatchObject({ rate: 96000, interposer: true, allocationsInRun: 0 });
+    expect(a?.stability).toBeUndefined();
+    expect(a?.features).toBeUndefined();
+    expect(a?.integrity).toEqual(line.integrity);
+  });
+
+  it("writes a plugin only the pass measured with the topology the measurer read", () => {
+    const document = assembleDocument({
+      options: options({ rates: [96000], dimensions: [...HOSTING], plugins: ["urn:a"] }),
+      hosting: [line],
+      host: FIXTURE_HOST,
+      runId: "run-5",
+      measuredAt: "2026-08-01T10:00:00+02:00",
+    });
+    expect(document.plugins).toHaveLength(1);
+    expect(document.plugins[0]).toMatchObject({
+      uri: "urn:a",
+      version: "1.0",
+      topology: { audioInputs: 2, audioOutputs: 2, controlInputs: 1 },
+      stability: { lifecycle: { cycles: 30, instantiated: 30, failed: 0 }, crashes: [] },
+      features: { required: [], cvPorts: 0 },
+    });
   });
 });

@@ -273,10 +273,16 @@ export const MEASUREMENT_DIMENSIONS = ["latency", "cost", "stability", "rtSafety
 /**
  * The dimensions the standalone prober (`scan.py` + `benchmark.py`, driven by `lv2-measure.mjs`
  * and the console's Setup analysis) can measure. The three hosting dimensions come from a
- * different tool — the `lv2-measure.c` sweep, read by `sweep-jsonl.ts` — so a run asked of the
- * prober for `stability` would be asking it for something it cannot take.
+ * different tool — the native measurer `native/lv2-measure.c`, read by `sweep-jsonl.ts` — so a
+ * run asked of the prober for `stability` would be asking it for something it cannot take.
  */
 export const PROBED_DIMENSIONS = ["latency", "cost"] as const satisfies readonly (typeof MEASUREMENT_DIMENSIONS)[number][];
+
+/**
+ * The dimensions `lv2-measure.mjs`'s hosting pass measures: one run of the native measurer per
+ * plugin, under the interposer, writes all three.
+ */
+export const HOSTING_PASS_DIMENSIONS = ["stability", "rtSafety", "features"] as const satisfies readonly (typeof MEASUREMENT_DIMENSIONS)[number][];
 
 /** One measurable dimension. */
 export type MeasurementDimension = (typeof MEASUREMENT_DIMENSIONS)[number];
