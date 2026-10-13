@@ -2,20 +2,25 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * The LV2 measurer moved from openmixer unchanged in behaviour: this build (`native/build/lv2_measure`)
- * and openmixer's copy at the commit it was taken from (`native/build/parity/lv2_measure`, built with
- * the same flags from `make -C native deps`) print the same bytes and exit the same on the fixture
+ * and openmixer's copy at the commit it was taken from (`native/parity/openmixer`, each file held to its
+ * git blob id there; built with the same flags into `native/build/parity/lv2_measure` once
+ * `make -C native deps` has fetched the omx-contract header it reads) print the same bytes and exit
+ * the same on the fixture
  * bundles, in every mode: a measurement at its defaults and at a rate, block and count, the noise
  * stimulus, the pin alone, a plugin it cannot find, and the soak. The soak's three RSS figures are the
  * process's, not the code's — they move between two runs of one binary — so they alone are masked.
  * On CI a missing build is a failure; elsewhere the test skips, saying how to build.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const BUILD = join(dirname(fileURLToPath(import.meta.url)), "..", "native", "build");
+const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "..", "native");
+const BUILD = join(NATIVE, "build");
+const SNAPSHOT = join(NATIVE, "parity", "openmixer");
 const OURS = join(BUILD, "lv2_measure");
 const THEIRS = join(BUILD, "parity", "lv2_measure");
 const INTERPOSER = join(BUILD, "rt_interpose.so");
@@ -48,6 +53,21 @@ function run(tool: string, c: Case): { status: number | null; stdout: string } {
   });
   return { status: r.status, stdout: c.mask === undefined ? r.stdout : c.mask(r.stdout) };
 }
+
+describe("openmixer's copy is kept as it was there", () => {
+  it("every file is the blob BLOBS records, and BLOBS records every file", () => {
+    const blob = (path: string): string => {
+      const body = readFileSync(path);
+      return createHash("sha1").update(`blob ${body.length}\0`).update(body).digest("hex");
+    };
+    const recorded = readFileSync(join(SNAPSHOT, "BLOBS"), "utf8")
+      .split("\n")
+      .filter((l) => /^[0-9a-f]{40} {2}\S+$/.test(l))
+      .map((l) => [l.slice(42), l.slice(0, 40)] as const);
+    expect(recorded.map(([f]) => f).sort()).toEqual(readdirSync(SNAPSHOT).filter((f) => f !== "BLOBS").sort());
+    for (const [file, id] of recorded) expect(blob(join(SNAPSHOT, file)), file).toBe(id);
+  });
+});
 
 describe("lv2-measure prints what openmixer's copy prints, byte for byte", () => {
   for (const c of CASES) {
