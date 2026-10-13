@@ -44,8 +44,9 @@ the two things only ours prints are taken out of its line: the `host` object and
 `make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
 interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command
 and `tools/lv2-measure.mjs` look for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE`,
-`OMX_RT_INTERPOSE`), then in the directories the packages install into (`NATIVE_TOOL_DIRS`), then in
-`native/build/`.
+`OMX_RT_INTERPOSE`), then in `native/build/`, then in the directories the packages install into
+(`NATIVE_TOOL_DIRS`). An installed package has no `native/build/`; in a checkout, its own build wins
+over an installed one.
 
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
 AddressSanitizer build of mod-host:

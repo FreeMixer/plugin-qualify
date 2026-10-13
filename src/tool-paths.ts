@@ -50,9 +50,13 @@ export function lv2MeasureNativePath(): string {
   return join(nativeBuildDir(), LV2_MEASURE_TOOL_NAME);
 }
 
-/** Where a native tool is looked for when no setting names it, in order: the installed directories, then the own build. */
+/**
+ * Where a native tool is looked for when no setting names it, in order: the package's own build, then
+ * the installed directories. An installed package has no `native/build/`, so its own build first
+ * changes nothing there, and in a checkout `make -C native` is never shadowed by an older install.
+ */
 export function nativeToolCandidates(name: string): string[] {
-  return [...NATIVE_TOOL_DIRS, nativeBuildDir()].map((dir) => join(dir, name));
+  return [nativeBuildDir(), ...NATIVE_TOOL_DIRS].map((dir) => join(dir, name));
 }
 
 /**
