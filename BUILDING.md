@@ -46,7 +46,9 @@ interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declaratio
 and `tools/lv2-measure.mjs` look for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE`,
 `OMX_RT_INTERPOSE`), then in `native/build/`, then in the directories the packages install into
 (`NATIVE_TOOL_DIRS`). An installed package has no `native/build/`; in a checkout, its own build wins
-over an installed one.
+over an installed one. A tool and the interposer it runs under share `rt-interpose.h`, so the ones no
+setting names come from one place, the first of those that holds either; a place holding only one of
+them is refused rather than paired with the other from elsewhere.
 
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
 AddressSanitizer build of mod-host:
