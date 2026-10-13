@@ -33,9 +33,13 @@ jobs:
       - name: Install and build
         run: pnpm install --frozen-lockfile
 
-      # the CLAP prober, its interposer and the fixture plugins the CLAP tests qualify
+      # the CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify;
+      # deps/ also holds openmixer's copy of the measurer, which the parity test runs beside ours
       - name: Build the native tools
-        run: make -C native deps all
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
+          make -C native deps all
 
       - name: Type-check
         run: pnpm lint
