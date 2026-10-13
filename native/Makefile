@@ -7,7 +7,10 @@
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap, build/fixtures/lv2/{rt-safe,rt-unsafe}.lv2
 #   build/lv2_measure_features_test   the measurer's features oracle, run from native/
-#   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/
+#   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, and
+#                            openmixer's LV2 measurer with the omx-contract header it reads
+#   build/parity/lv2_measure openmixer's LV2 measurer, built with these flags when deps/ holds it: the
+#                            parity test runs it beside build/lv2_measure
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober and the interposer, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
@@ -20,6 +23,9 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.1.4
+# the openmixer commit the LV2 measurer was taken from, and the omx-contract it built against there
+OPENMIXER_REF := 0c4febac5d9fed3d5f9897d60980232d74020213
+OMX_CONTRACT_VERSION := 2.3.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
@@ -41,8 +47,12 @@ LIBEXECDIR ?= /usr/libexec/plugin-qualify
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
+OPENMIXER_NATIVE := deps/openmixer/packages/pipewire-native
+
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_features_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so
+	@# asked when the recipe runs, so `make deps all` builds it from what deps just fetched
+	@if [ -f $(OPENMIXER_NATIVE)/tools/lv2-measure.c ]; then $(MAKE) --no-print-directory $(BUILD)/parity/lv2_measure; fi
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -64,6 +74,12 @@ $(BUILD)/lv2_measure_features_test: lv2_measure_features.test.c lv2-measure-feat
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LILV_CFLAGS) -I. '-DTEST_LV2_SO="$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so"' \
 		'-DTEST_LV2_URI="urn:plugin-qualify:fixture:lv2-rt-safe"' '-DTEST_CLAP="$(BUILD)/fixtures/rt-safe.clap"' \
 		$(LDFLAGS) -o $@ lv2_measure_features.test.c lv2-measure-features.c -ldl -lpthread
+
+# named lv2_measure too: the measurer leaves frames of its own binary, by that name, out of an event's owner
+$(BUILD)/parity/lv2_measure: $(addprefix $(OPENMIXER_NATIVE)/tools/,$(LV2_MEASURE_SRC)) | $(BUILD)
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off -I$(OPENMIXER_NATIVE)/src -Ideps/omx-contract/include $(PLUGIN_HOSTD_CFLAGS) \
+		$(LILV_CFLAGS) $(LDFLAGS) -o $@ $(addprefix $(OPENMIXER_NATIVE)/tools/,$(LV2_MEASURE_SRC)) $(LILV_LIBS) -lpthread -lm -ldl
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
@@ -92,7 +108,7 @@ $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-uns
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
-	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF)
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OPENMIXER_REF) $(OMX_CONTRACT_VERSION)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 install: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so
