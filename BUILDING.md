@@ -20,20 +20,27 @@ declarations, regenerate it and commit both:
 node tools/gen-python-declarations.mjs --write
 ```
 
-The CLAP prober, its interposer and the two fixture plugins its tests qualify (a known RT-safe and
-a known RT-unsafe gain) are C, built with make. The CLAP headers come from `pkg-config clap`
-(Fedora `clap-devel`) and plugin-hostd's `pin.h` from `pkg-config plugin-hostd`; where those are
-not installed, `make deps` fetches both at their pinned release tags into `native/deps/`:
+The CLAP prober, the LV2 measurer (`lv2_measure`, taken in from openmixer), their interposer and
+the fixture plugins their tests qualify (a known RT-safe and a known RT-unsafe gain, as a `.clap` and
+as an LV2 bundle) are C, built with make. The CLAP headers come from `pkg-config clap` (Fedora
+`clap-devel`), plugin-hostd's `pin.h` from `pkg-config plugin-hostd`, lilv and the LV2 headers from
+`pkg-config lilv-0` (`lilv-devel`, `liblilv-dev` and `lv2-dev`). Where the CLAP and plugin-hostd
+headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`;
+it also fetches openmixer's copy of the LV2 measurer, at the commit it was taken from, and the
+omx-contract header that copy reads, so the build carries `native/build/parity/lv2_measure` beside
+ours:
 
 ```
-make -C native deps all   # native/build/clap-qualify, rt_interpose.so, fixtures/rt-{safe,unsafe}.clap
+make -C native deps all   # native/build/clap-qualify, lv2_measure, rt_interpose.so, fixtures/
 ```
 
-The CLAP tests run the build; without it they skip, except on CI, where a missing build fails.
+The native tests run the build; without it they skip, except on CI, where a missing build fails. The
+parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each.
 
-`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober and the interposer (not the
-fixtures). The command looks for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_RT_INTERPOSE`), then in
-the directories the packages install into (`NATIVE_TOOL_DIRS` in `src/qualify-declarations.ts`), then in
+`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
+interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command
+and `tools/lv2-measure.mjs` look for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE`,
+`OMX_RT_INTERPOSE`), then in the directories the packages install into (`NATIVE_TOOL_DIRS`), then in
 `native/build/`.
 
 The container image (`Containerfile`) bundles lilv, the distribution's mod-host and an
@@ -54,11 +61,13 @@ rpmbuild -ba packaging/plugin-qualify.spec        # needs the source tarball in 
 dpkg-buildpackage -b -uc -us                      # the DEB
 ```
 
-Both are built per architecture: they carry the CLAP prober and its interposer, in
-`/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers come
-from packages, never from `make deps`: `clap-devel` and `plugin-hostd-devel` on Fedora, `clap-headers`
-and `plugin-hostd-dev` on Debian (the last two from the FreeMixer channel). An installed package is
-checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap>`, run with nothing set.
+Both are built per architecture: they carry the CLAP prober, the LV2 measurer and their interposer,
+in `/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers
+come from packages, never from `make deps`: `clap-devel`, `lilv-devel`, `lv2-devel` and
+`plugin-hostd-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev` and `plugin-hostd-dev` on
+Debian (`clap-headers` and `plugin-hostd-dev` from the FreeMixer channel). An installed package is
+checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>`, run
+with nothing set.
 
 There is no changelog file: git history is the changelog. `debian/changelog` and the spec's `%changelog`
 are packaging metadata. Bump `version` in `package.json` and `Version:` in the spec together.
