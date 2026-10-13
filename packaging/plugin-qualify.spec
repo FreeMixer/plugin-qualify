@@ -75,6 +75,12 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
   its jobs; the cost record carries the worker's counts.
 - extractJsonRecord, soakTimeoutSeconds and the soak sweep declarations are
   exported.
+- A soak failure measured at the console's rate rates the plugin unsuitable
+  at that rate (hosting.stability.soak-failed-at-rate). A rate the supervisor
+  cut short reads timedOut, never died.
+- The cost gate refuses a reading missing a field it judges
+  (hosting.cost.fields-missing); COST_FIELDS, coreFraction and
+  classifierCostFromDocument are exported.
 - lv2-measure.mjs measures the hosting dimensions (stability, rtSafety,
   features) through it, one process per plugin under the interposer;
   --plugins names the plugins without a scan.
