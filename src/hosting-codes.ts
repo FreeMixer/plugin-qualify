@@ -34,6 +34,7 @@ export const HOSTING_CODE = {
   costAboveCeiling: 'hosting.cost.above-ceiling',
   costSpiky: 'hosting.cost.spiky-tail',
   costUnmeasured: 'hosting.cost.unmeasured-at-rate-and-quantum',
+  costFieldsMissing: 'hosting.cost.fields-missing',
   latencyResolved: 'hosting.latency.resolved',
   latencyUnmeasured: 'hosting.latency.unmeasured',
   latencyNonconforming: 'hosting.latency.nonconforming',

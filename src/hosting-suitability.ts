@@ -306,6 +306,7 @@ export type PluginLv2Features = Omit<FeaturesMeasurement, "unmeasuredReason" | "
 
 export { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
 import { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
+import { costFieldsMissing } from "./cost-fields.js";
 
 /** One declared rate's latency reading from the CLAP qualifier (CLAP spec §3, latency). */
 export interface ClapLatencyAtRate {
@@ -683,6 +684,16 @@ export function hostingCostReasons(
       reason("cost", "objective", "unknown", HOSTING_CODE.costUnmeasured, {
         rate: options.rate,
         quantum: options.quantum ?? 0,
+      }),
+    ];
+  }
+  // Refuse before comparing: `undefined > ceiling` is false, which is how a gate passes by absence.
+  const missing = costFieldsMissing(perRate);
+  if (missing.length > 0) {
+    return [
+      reason("cost", "objective", "unknown", HOSTING_CODE.costFieldsMissing, {
+        rate: options.rate,
+        missing: missing.join(","),
       }),
     ];
   }
