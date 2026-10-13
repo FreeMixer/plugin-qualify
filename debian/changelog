@@ -1,3 +1,15 @@
+plugin-qualify (0.8.0) unstable; urgency=medium
+
+  * With no setting, the native tools are looked for in the checkout's
+    own native/build first, then where the package installs them, so
+    make -C native in a checkout is never shadowed by an older installed
+    prober.
+  * A prober or the measurer and the interposer it runs under come from
+    one place, the first that holds either; a place holding only one of
+    them is refused instead of pairing it with the other from elsewhere.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 13 Oct 2026 19:00:00 +0000
+
 plugin-qualify (0.6.0) unstable; urgency=medium
 
   * The package carries the LV2 measurer taken in from openmixer,
