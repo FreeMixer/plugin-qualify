@@ -11,7 +11,7 @@
 #                            openmixer's LV2 measurer with the omx-contract header it reads
 #   build/parity/lv2_measure openmixer's LV2 measurer, built with these flags when deps/ holds it: the
 #                            parity test runs it beside build/lv2_measure
-#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober and the interposer, for a package
+#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer and the interposer, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
 # header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. lilv and the LV2
@@ -111,9 +111,11 @@ deps:
 	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OPENMIXER_REF) $(OMX_CONTRACT_VERSION)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
-install: $(BUILD)/clap-qualify $(BUILD)/rt_interpose.so
+# exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
+	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
 	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
 
 clean:
