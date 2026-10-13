@@ -1,3 +1,18 @@
+plugin-qualify (0.6.0) unstable; urgency=medium
+
+  * The package carries the LV2 measurer taken in from openmixer,
+    lv2_measure, in /usr/lib/plugin-qualify beside the CLAP prober. It
+    prints what openmixer's copy prints, the plugin's integrity pin
+    included.
+  * lv2-measure.mjs measures the hosting dimensions (stability, rtSafety,
+    features) through it, one process per plugin under the interposer;
+    --plugins names the plugins without a scan.
+  * The command looks for the measurer by its setting (OMX_LV2_MEASURE),
+    then where the package installs it, then in the checkout's
+    native/build.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 13 Oct 2026 03:00:00 +0000
+
 plugin-qualify (0.5.1) unstable; urgency=medium
 
   * The package carries the CLAP prober and its interposer, in

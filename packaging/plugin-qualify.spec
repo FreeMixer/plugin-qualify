@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.5.1
+Version: 0.6.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -62,6 +62,16 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
+- The package carries the LV2 measurer taken in from openmixer, lv2_measure,
+  in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what
+  openmixer's copy prints, the plugin's integrity pin included.
+- lv2-measure.mjs measures the hosting dimensions (stability, rtSafety,
+  features) through it, one process per plugin under the interposer;
+  --plugins names the plugins without a scan.
+- The command looks for the measurer by its setting (OMX_LV2_MEASURE), then
+  where the package installs it, then in the checkout's native/build.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.5.1-1
 - The package carries the CLAP prober and its interposer, in
   /usr/libexec/plugin-qualify, so an installed plugin-qualify qualifies CLAP
