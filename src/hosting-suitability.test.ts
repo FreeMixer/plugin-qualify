@@ -473,6 +473,18 @@ describe("a soak is judged at EVERY rate it ran, by the classifier alone (§3)",
     });
   }
 
+  it("a rate that was CUT SHORT by the supervisor is a timeout, not a death, and proves nothing (§3)", () => {
+    const cut: SoakAtRate = { instantiated: true, timedOut: true, timeoutSeconds: 900, seconds: 700 };
+    const soak = cleanSoak({ "192000": cut });
+    expect(soakFindings(soak, P)?.failures).toEqual(["timed-out@192000"]);
+    for (const rate of [96_000, 192_000]) {
+      const v = classify(measured({}, { stability: { soak } }), { rate });
+      expect(v.rating).toBe("unknown");
+      expect(v.deciding?.code).toBe(HOSTING_CODE.stabilityUnsoaked);
+      expect(v.reasons.map((r) => r.code)).not.toContain(HOSTING_CODE.stabilitySoakFailedAtRate);
+    }
+  });
+
   it("dead is a RATIO against the plugin's own best, never an absolute: a quiet plugin holds", () => {
     const quiet = { ...CLEAN_SOAK_RATE, firstRmsDbfs: -80, lastRmsDbfs: -80 };
     const soak = cleanSoak({ "44100": quiet, "48000": quiet, "96000": quiet, "192000": quiet });
@@ -895,5 +907,44 @@ describe("each core refusal declares its one-line description beside it", () => 
       outputNonFinite: "the plugin produced non-finite output",
     });
     expect(CLAP_CORE_REFUSAL_DESCRIPTIONS).not.toHaveProperty("headlessFailed");
+  });
+});
+
+describe("a MEASURED soak failure at the live rate is unsuitable AT THAT RATE, and only there (§3)", () => {
+  const classes: ReadonlyArray<readonly [string, SoakAtRate, string]> = [
+    ["died", { died: true }, "died"],
+    ["never instantiated", { instantiated: false }, "died"],
+    ["non-finite", { ...CLEAN_SOAK_RATE, nonFiniteWindows: 1 }, "non-finite"],
+    ["dead (settled 40 dB under its best)", { ...CLEAN_SOAK_RATE, lastRmsDbfs: -71 }, "dead"],
+    ["mostly silent", { ...CLEAN_SOAK_RATE, silentWindows: 5_001 }, "mostly-silent"],
+    ["startup blast", { ...CLEAN_SOAK_RATE, firstRmsDbfs: 20 }, "startup-blast"],
+  ];
+  for (const [label, at192, kind] of classes) {
+    it(`${label} at 192 kHz: unsuitable when the console runs 192 kHz, unknown at 96 kHz`, () => {
+      const stability = { soak: cleanSoak({ "192000": at192 }) };
+      const at = classify(measured({}, { stability }), { rate: 192_000 });
+      expect(at.rating).not.toBe("suitable");
+      const reason = at.reasons.find((r) => r.code === HOSTING_CODE.stabilitySoakFailedAtRate);
+      expect(reason?.rating).toBe("unsuitable");
+      expect(reason?.params).toMatchObject({ failure: kind, rate: 192_000 });
+      expect(at.reasons.some((r) => r.code === HOSTING_CODE.stabilityUnsoaked)).toBe(true);
+      // The cost reading in the fixture is at 96 kHz only, so compare the stability dimension.
+      expect(at.reasons.filter((r) => r.dimension === "stability").some((r) => r.rating === "unsuitable")).toBe(true);
+      const other = classify(measured({}, { stability }), { rate: 96_000 });
+      expect(other.reasons.map((r) => r.code)).not.toContain(HOSTING_CODE.stabilitySoakFailedAtRate);
+      expect(other.deciding?.code).toBe(HOSTING_CODE.stabilityUnsoaked);
+      expect(other.rating).toBe("unknown");
+    });
+  }
+
+  it("a failure at the live rate decides the verdict: the deciding reason names the soak", () => {
+    const stability = { soak: cleanSoak({ "96000": { ...CLEAN_SOAK_RATE, nonFiniteWindows: 3 } }) };
+    const v = classify(measured({}, { stability }), { rate: 96_000 });
+    expect(v.rating).toBe("unsuitable");
+    expect(v.deciding?.code).toBe(HOSTING_CODE.stabilitySoakFailedAtRate);
+  });
+
+  it("a clean soak adds no such reason", () => {
+    expect(classify().reasons.map((r) => r.code)).not.toContain(HOSTING_CODE.stabilitySoakFailedAtRate);
   });
 });

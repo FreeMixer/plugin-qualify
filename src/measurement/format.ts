@@ -335,6 +335,11 @@ export interface SoakAtRate {
   /** The process died at this rate. Every other field is then absent. */
   readonly died?: boolean;
   readonly instantiated?: boolean;
+  /** The SUPERVISOR stopped the render at its wall-clock limit: a fact about the harness, never a
+   *  failure of the plugin (and never `died`). */
+  readonly timedOut?: boolean;
+  /** The wall-clock limit that cut it, in seconds. */
+  readonly timeoutSeconds?: number;
   readonly seconds?: number;
   readonly blockFrames?: number;
   readonly windows?: number;
@@ -888,6 +893,8 @@ export function readSoakAtRate(value: unknown): SoakAtRate | undefined {
   return {
     ...optional("died", booleanValue(value.died)),
     ...optional("instantiated", booleanValue(value.instantiated)),
+    ...optional("timedOut", booleanValue(value.timedOut)),
+    ...optional("timeoutSeconds", finiteNumber(value.timeoutSeconds)),
     ...optional("seconds", finiteNumber(value.seconds)),
     ...optional("blockFrames", positiveNumber(value.blockFrames)),
     ...optional("windows", finiteNumber(value.windows)),

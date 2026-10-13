@@ -15,6 +15,7 @@ export const HOSTING_CODE = {
   stabilityCrashedLive: 'hosting.stability.crashed-live-on-this-rig',
   stabilityBelowFloor: 'hosting.stability.cycles-below-floor',
   stabilityUnsoaked: 'hosting.stability.unsoaked',
+  stabilitySoakFailedAtRate: 'hosting.stability.soak-failed-at-rate',
   stabilityUnmeasured: 'hosting.stability.unmeasured',
   stabilityCrashUnattributed: 'hosting.stability.crash-unattributed',
   stabilitySpawnsThreads: 'hosting.stability.spawns-threads',
