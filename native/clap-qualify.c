@@ -458,7 +458,8 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
 
 /*
  * The integrity block: the SHA-256 of the one file the host loads, the `.clap`, by its path relative to
- * its directory, and the plugin's parameter layout in plugin-hostd's omx-layout/1, filled from every
+ * its directory under the name the prober was handed (a symlink's own name, not its target's, since the
+ * console adds the path it was given and plugin-hostd checks that name), and the plugin's parameter layout in plugin-hostd's omx-layout/1, filled from every
  * parameter params.count()/get_info() give (hidden, read-only and bypass included) after init and
  * before activate, as omx-clap-host recomputes it on `add`. pin.h serialises and hashes; nothing here
  * does. A file name a pin cannot hold, or a layout that cannot be read, is no pin and says why.
@@ -491,9 +492,9 @@ out:
   free(infos);
 }
 
-static void put_integrity(const char *path, const char *version, const char *sha256, const struct integrity *pin) {
-  const char *base = strrchr(path, '/');
-  base = base ? base + 1 : path;
+static void put_integrity(const char *named, const char *version, const char *sha256, const struct integrity *pin) {
+  const char *base = strrchr(named, '/');
+  base = base ? base + 1 : named;
   fprintf(g_out, ",\"integrity\":{");
   if (version && *version) {
     fprintf(g_out, "\"version\":");
@@ -867,7 +868,7 @@ struct options {
   uint32_t n_rates;
   uint32_t frames;
   uint32_t blocks;
-  const char *path;
+  const char *path; /* as invoked, before realpath: the name the pin holds */
   const char *id;
 };
 
@@ -888,7 +889,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     if (p) p->destroy(p);
     put_head(d->id, path, sha256);
     put_facts(d, &f, o->frames);
-    put_integrity(path, d->version, sha256, &pin);
+    put_integrity(o->path, d->version, sha256, &pin);
     fprintf(g_out, "}\n");
     return 2;
   }
@@ -921,7 +922,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
-  put_integrity(path, d->version, sha256, &pin);
+  put_integrity(o->path, d->version, sha256, &pin);
   fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;
 }
@@ -975,6 +976,7 @@ int main(int argc, char **argv) {
     }
   }
   if (o.n_rates == 0 || a >= argc || argc - a > 2) return usage(argv[0]);
+  o.path = argv[a];
   o.id = a + 1 < argc ? argv[a + 1] : NULL;
 
   char path[PATH_MAX];

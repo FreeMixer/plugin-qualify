@@ -9,7 +9,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,13 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     // another parameter layout, another fingerprint
     expect(controls!.integrity.layout?.sha256).not.toBe(safe!.integrity.layout?.sha256);
     expect(rtSafetyDocument(safe!).measured.integrity).toEqual(safe!.integrity);
+  });
+
+  live("a symlinked .clap is pinned under the link's name, the name the console adds, with the target's bytes", () => {
+    const link = join(scratch, "link.clap");
+    symlinkSync(SAFE, link);
+    const [l] = qualifyClap(link, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+    expect(l!.integrity.files).toEqual([{ path: "link.clap", sha256: sha256(SAFE) }]);
   });
 
   live("the prober offers exactly the console's CLAP host extensions", () => {
