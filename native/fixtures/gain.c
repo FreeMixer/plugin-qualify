@@ -6,15 +6,24 @@
  *   rt-safe.clap    process() touches only its buffers: the known RT-safe plugin.
  *   rt-unsafe.clap  built with -DFIXTURE_ALLOCATES, process() also allocates and frees a scratch
  *                   buffer every block: the known RT-unsafe plugin.
+ *   params-<n>.clap built with -DFIXTURE_PARAMS=<n>, the rt-safe gain followed by n - 1 hidden
+ *                   read-only parameters: the layout around the host's parameter cap.
  *
  * Nothing else differs, so a verdict that tells them apart is the interposer's count and nothing else.
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <clap/clap.h>
 
-#ifdef FIXTURE_ALLOCATES
+#define FIXTURE_STR_(x) #x
+#define FIXTURE_STR(x) FIXTURE_STR_(x)
+
+#ifdef FIXTURE_PARAMS
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.params-" FIXTURE_STR(FIXTURE_PARAMS)
+#define FIXTURE_NAME "gain with " FIXTURE_STR(FIXTURE_PARAMS) " parameters"
+#elif defined FIXTURE_ALLOCATES
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.rt-unsafe"
 #define FIXTURE_NAME "rt-unsafe gain"
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
@@ -99,11 +108,22 @@ static bool ports_get(const clap_plugin_t *p, uint32_t index, bool is_input, cla
 }
 static const clap_plugin_audio_ports_t audio_ports = { ports_count, ports_get };
 
-static uint32_t params_count(const clap_plugin_t *p) { (void)p; return 1; }
+#ifndef FIXTURE_PARAMS
+#define FIXTURE_PARAMS 1
+#endif
+
+static uint32_t params_count(const clap_plugin_t *p) { (void)p; return FIXTURE_PARAMS; }
 static bool params_info(const clap_plugin_t *p, uint32_t index, clap_param_info_t *info) {
   (void)p;
-  if (index != 0) return false;
+  if (index >= FIXTURE_PARAMS) return false;
   memset(info, 0, sizeof *info);
+  if (index > 0) {
+    info->id = index;
+    info->flags = CLAP_PARAM_IS_HIDDEN | CLAP_PARAM_IS_READONLY;
+    snprintf(info->name, sizeof info->name, "p%u", index);
+    info->max_value = 1.0;
+    return true;
+  }
   info->id = GAIN_ID;
   info->flags = CLAP_PARAM_IS_AUTOMATABLE;
   strcpy(info->name, "gain");

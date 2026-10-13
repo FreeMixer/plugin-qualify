@@ -158,6 +158,17 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(l!.integrity.files).toEqual([{ path: "link.clap", sha256: sha256(SAFE) }]);
   });
 
+  live("a plugin with more parameters than the host accepts is unpinnable; one at the cap is pinned", () => {
+    const [atCap] = qualifyClap(join(FIXTURES, "params-2048.clap"), undefined, { rates: [QUALIFY_RATES[0]!] });
+    expect(atCap!.integrity.layout?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    const [over] = qualifyClap(join(FIXTURES, "params-2049.clap"), undefined, { rates: [QUALIFY_RATES[0]!] });
+    expect(over!.integrity).toEqual({
+      version: "1",
+      unmeasuredReason: "unpinnable",
+      unmeasuredDetail: "more parameters than the host accepts (2048)",
+    });
+  });
+
   live("the prober offers exactly the console's CLAP host extensions", () => {
     const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.hostExtensions).toEqual(OMX_CLAP_HOST_EXTENSIONS);

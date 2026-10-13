@@ -47,6 +47,12 @@
 #define MAX_RATES 16
 #define MAX_PORTS 16
 #define MAX_PARAMS 4096
+/* omx-clap-core's CLAP_HOST_PARAM_COUNT_MAX: the host refuses at `add` a plugin with more parameters,
+ * so the prober pins none (plugin-hostd's layout_pin_write returns -1 above it) */
+#define HOST_PARAM_COUNT_MAX 2048
+_Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every parameter the host accepts");
+#define STR_(x) #x
+#define STR(x) STR_(x)
 /* parameter events one sweep block carries */
 #define EVENTS_PER_BLOCK 64u
 /* frames past the declared latency the impulse is looked for */
@@ -473,8 +479,8 @@ struct integrity {
 static void integrity_layout(const clap_plugin_t *p, struct integrity *pin) {
   const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
   const uint32_t count = params ? params->count(p) : 0;
-  if (count > MAX_PARAMS) {
-    pin->reason = "probe-error", pin->detail = "more parameters than the prober reads";
+  if (count > HOST_PARAM_COUNT_MAX) {
+    pin->reason = "unpinnable", pin->detail = "more parameters than the host accepts (" STR(HOST_PARAM_COUNT_MAX) ")";
     return;
   }
   clap_param_info_t *infos = calloc(count ? count : 1, sizeof *infos);

@@ -82,7 +82,8 @@ export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
     kind: "nothing-to-measure",
     description:
       "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
-      "whitespace, or a manifest using @base or a percent-encoded IRI. The plugin stays unpinned, never partly pinned.",
+      "whitespace, a manifest using @base or a percent-encoded IRI, or a CLAP plugin with more parameters than the " +
+      "host accepts. The plugin stays unpinned, never partly pinned.",
   },
   {
     code: "refused-instantiation",
