@@ -40,6 +40,9 @@ The native tests run the build; without it they skip, except on CI, where a miss
 parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each, once
 the two things only ours prints are taken out of its line: the `host` object and the soak's
 `maxRmsDbfs` (the soak case lifts the sweep's bound, so both sweep the same range).
+`make -C native asan` builds the measurer under AddressSanitizer, `native/build/asan/lv2_measure`,
+which the leak check runs on every way out of it (a measurement, a soak, a plugin that will not
+instantiate). It is not part of `all`, so a package build needs no libasan.
 
 `make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
 interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command

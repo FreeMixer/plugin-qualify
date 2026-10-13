@@ -57,7 +57,7 @@ jobs:
           pnpm install --frozen-lockfile
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
-          make -C native deps all
+          make -C native deps all asan
           pnpm lint
           pnpm test
 

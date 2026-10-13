@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "..", "native");
 const BUILD = join(NATIVE, "build");
 const MEASURE = join(BUILD, "lv2_measure");
+const MEASURE_ASAN = join(BUILD, "asan", "lv2_measure");
 const ORACLE = join(BUILD, "lv2_measure_features_test");
 const INTERPOSER = join(BUILD, "rt_interpose.so");
 const LV2_FIXTURES = join(BUILD, "fixtures", "lv2");
@@ -72,5 +73,35 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     const r = measure("urn:plugin-qualify:not-here");
     expect(r.status).toBe(3);
     expect(r.line).toEqual({ uri: "urn:plugin-qualify:not-here", found: false });
+  });
+
+  // the AddressSanitizer build is not in `all`: its own target, which CI builds
+  it("leaks nothing on any way out: a measurement, a soak, and a plugin that will not instantiate", (ctx) => {
+    if (!BUILT || !existsSync(MEASURE_ASAN)) {
+      if (process.env["CI"]) throw new Error("native/build is missing: CI builds it with make -C native deps all asan");
+      ctx.skip("native/build is missing: make -C native deps all asan");
+    }
+    // needs-options refuses to instantiate at rate 0, as it would without the sampleRate option
+    const NEEDS_OPTIONS = "urn:plugin-qualify:fixture:needs-options";
+    const run = (soak: boolean, ...args: string[]) =>
+      spawnSync(MEASURE_ASAN, args, {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"],
+          LV2_PATH: LV2_FIXTURES,
+          ASAN_OPTIONS: "detect_leaks=1",
+          ...(soak ? { OMX_SOAK_SECONDS: "1" } : {}),
+        },
+      });
+    for (const [soak, args, status] of [
+      [false, [SAFE, "48000", "64", "1", "1"], 0],
+      [true, [SAFE, "48000", "512"], 0],
+      [false, [NEEDS_OPTIONS, "0", "64", "1", "1"], 2],
+      [true, [NEEDS_OPTIONS, "0", "64"], 2],
+    ] as const) {
+      const r = run(soak, ...args);
+      expect(r.stderr, `${soak ? "soak " : ""}${args.join(" ")}`).not.toMatch(/LeakSanitizer/);
+      expect(r.status).toBe(status);
+    }
   });
 });
