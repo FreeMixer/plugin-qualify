@@ -5,7 +5,10 @@
  * wherever it is installed (a checkout, an RPM's bundled node_modules, a pnpm store). The
  * tools are shipped RUNTIME artefacts, not dev scripts.
  */
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { CLAP_QUALIFY_TOOL_NAME, NATIVE_TOOL_DIRS, RT_INTERPOSE_NAME } from "./qualify-declarations.js";
 
 /**
  * `tools/` — `scan.py`, `benchmark.py`, `lv2-measure.mjs`, `hosting-sweep.mjs`. Resolved when a
@@ -21,12 +24,22 @@ export function lv2MeasureToolPath(): string {
   return fileURLToPath(new URL("../tools/lv2-measure.mjs", import.meta.url));
 }
 
+/** The package's own build of the native tools (`make -C native`). */
+function nativeBuildDir(): string {
+  return fileURLToPath(new URL("../native/build/", import.meta.url));
+}
+
 /** The package's own build of the CLAP prober (`make -C native`). */
 export function clapQualifyToolPath(): string {
-  return fileURLToPath(new URL("../native/build/clap-qualify", import.meta.url));
+  return join(nativeBuildDir(), CLAP_QUALIFY_TOOL_NAME);
 }
 
 /** The package's own build of the interposer the CLAP prober runs under. */
 export function rtInterposePath(): string {
-  return fileURLToPath(new URL("../native/build/rt_interpose.so", import.meta.url));
+  return join(nativeBuildDir(), RT_INTERPOSE_NAME);
+}
+
+/** Where a native tool is looked for when no setting names it, in order: the installed directories, then the own build. */
+export function nativeToolCandidates(name: string): string[] {
+  return [...NATIVE_TOOL_DIRS, nativeBuildDir()].map((dir) => join(dir, name));
 }

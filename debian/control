@@ -2,15 +2,20 @@ Source: plugin-qualify
 Section: sound
 Priority: optional
 Maintainer: Pau Aliagas <linuxnow@gmail.com>
-Build-Depends: debhelper-compat (= 13), nodejs (>= 18), npm
+Build-Depends: debhelper-compat (= 13),
+               nodejs (>= 18),
+               npm,
+               pkgconf,
+               clap-headers,
+               plugin-hostd-dev (>= 0.1.4)
 Standards-Version: 4.6.2
 Homepage: https://github.com/FreeMixer/plugin-qualify
 Rules-Requires-Root: no
 
 Package: plugin-qualify
-Architecture: all
-Depends: ${misc:Depends}, nodejs (>= 18), python3, python3-lilv
-Recommends: mod-host
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}, nodejs (>= 18), python3
+Recommends: python3-lilv, mod-host, omx-clap-host
 Description: find out whether an audio plugin is safe to run live
  A plugin that glitches on stage is worse than one you never installed.
  plugin-qualify takes an LV2 or CLAP plugin and tells you whether it can be
