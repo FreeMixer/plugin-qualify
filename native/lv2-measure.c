@@ -63,7 +63,7 @@
 #include "rt-interpose.h"
 #include "lv2-measure-features.h"
 #include "lv2-measure-pin.h"
-#include "lv2-measure-rates.h"
+#include <omxcontract/omx_contract_limits.h>
 #include <lv2/atom/atom.h>
 
 /*
@@ -949,7 +949,7 @@ int main(int argc, char **argv) {
    * outputs digital silence, which is why this runs blocks and checks the output is
    * finite and non-silent for a plugin that was given signal. A plugin that dies or
    * goes quiet at a rate must not be offered at that rate. The rates are the declared ones
-   * (OMX_DECLARED_RATES, lv2-measure-rates.h: omx-contract's STANDARD_SAMPLE_RATES). The probe
+   * (OMX_DECLARED_RATES, <omxcontract/omx_contract_limits.h>: omx-contract's STANDARD_SAMPLE_RATES). The probe
    * runs through the same host as everything else — options, worker — so a plugin whose sound
    * depends on its worker is measured built. */
   fprintf(jout, ",\"rates\":{");

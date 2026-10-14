@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.6.0
+Version: 0.7.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -12,7 +12,7 @@ Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildRequires: nodejs >= 18
 BuildRequires: npm
 # the CLAP prober, the LV2 measurer and their interposer: the CLAP headers and lilv from Fedora,
-# pin.h from plugin-hostd-devel
+# pin.h from plugin-hostd-devel, the declared sample rates from omx-contract-devel
 BuildRequires: gcc
 BuildRequires: make
 BuildRequires: pkgconfig
@@ -20,6 +20,8 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
+BuildRequires: pkgconfig(omx-contract) >= 2.10.1
+BuildRequires: pkgconfig(omx-contract) < 2.11
 
 Requires: nodejs >= 18
 Requires: python3
@@ -62,6 +64,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.7.0-1
+- clap-qualify pins a symlinked .clap under the name it was handed, the name
+  the console adds and plugin-hostd checks, with the target's bytes.
+- A CLAP plugin with more parameters than the host accepts (2048,
+  omx-clap-core's cap) reads unpinnable instead of getting a pin the host
+  refuses at add.
+- A parameter layout that cannot be read says why: a get_info failure, or
+  memory running out while reading or hashing the layout.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
 - The package carries the LV2 measurer taken in from openmixer, lv2_measure,
   in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what
