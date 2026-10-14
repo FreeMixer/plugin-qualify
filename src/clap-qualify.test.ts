@@ -9,7 +9,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,19 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     // another parameter layout, another fingerprint
     expect(controls!.integrity.layout?.sha256).not.toBe(safe!.integrity.layout?.sha256);
     expect(rtSafetyDocument(safe!).measured.integrity).toEqual(safe!.integrity);
+  });
+
+  live("a .clap whose name holds a separator of pin_set or whitespace is unpinnable, not pinned", () => {
+    for (const name of ["a,b.clap", "sp ace.clap"]) {
+      const named = join(scratch, name);
+      copyFileSync(SAFE, named);
+      const [l] = qualifyClap(named, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+      expect(l!.integrity).toEqual({
+        version: "1",
+        unmeasuredReason: "unpinnable",
+        unmeasuredDetail: "the file name holds a separator of pin_set or whitespace",
+      });
+    }
   });
 
   live("a symlinked .clap is pinned under the link's name, the name the console adds, with the target's bytes", () => {
