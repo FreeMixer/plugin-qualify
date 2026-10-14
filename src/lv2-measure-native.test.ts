@@ -18,6 +18,8 @@ const MEASURE = join(BUILD, "lv2_measure");
 const MEASURE_ASAN = join(BUILD, "asan", "lv2_measure");
 const ORACLE = join(BUILD, "lv2_measure_features_test");
 const INTERPOSER = join(BUILD, "rt_interpose.so");
+// liblilv's own world leak (native/lsan.supp) is not ours; every other leak still fails
+const LSAN_SUPPRESSIONS = join(NATIVE, "lsan.supp");
 const LV2_FIXTURES = join(BUILD, "fixtures", "lv2");
 const SAFE = "urn:plugin-qualify:fixture:lv2-rt-safe";
 const UNSAFE = "urn:plugin-qualify:fixture:lv2-rt-unsafe";
@@ -90,6 +92,7 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
           PATH: process.env["PATH"],
           LV2_PATH: LV2_FIXTURES,
           ASAN_OPTIONS: "detect_leaks=1",
+          LSAN_OPTIONS: `suppressions=${LSAN_SUPPRESSIONS}`,
           ...(soak ? { OMX_SOAK_SECONDS: "1" } : {}),
         },
       });
