@@ -21,7 +21,7 @@ BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 BuildRequires: pkgconfig(omx-contract) >= 2.10.1
-BuildRequires: pkgconfig(omx-contract) < 2.11
+BuildRequires: pkgconfig(omx-contract) < 2.12
 
 Requires: nodejs >= 18
 Requires: python3
