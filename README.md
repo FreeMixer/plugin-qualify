@@ -124,6 +124,25 @@ Without `--plugins` it measures every plugin the scan finds. Each plugin's entry
 through plugin-hostd's `pin.h`, as for CLAP. `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` name the
 measurer and the interposer when they are not the installed ones or the checkout's own build.
 
+The features the measurer offers a plugin are the console's own: omx-clap-core's LV2 feature
+provider, the code its LV2 host builds every instance's features with. Each of the provider's
+options is a flag of `tools/lv2-measure.mjs` and of `lv2_measure` itself, and each plugin's record
+names the options it ran under, `featureOptions`:
+
+| flag | what it sets | default |
+| --- | --- | --- |
+| `--features LIST` | the kinds offered: `map`, `unmap`, `options`, `bounded`, `worker`, `default-state`, `log` (empty: none) | all but `default-state` |
+| `--strict` / `--no-strict` | refuse a plugin requiring a feature not offered (the record's `refusedFeature` names it), or hand it to its own instantiate without it | `--no-strict` |
+| `--block-declares LIST` | the buf-size declarations made when `bounded` is offered: `bounded`, `fixed`, `pow2` (empty: none) | `bounded` |
+| `--block-min N` | `bufsz:minBlockLength`; 0 is the run's block | 1 |
+| `--block-max N` | `bufsz:maxBlockLength`; 0 is the run's block | 0 |
+| `--block-nominal N` | `bufsz:nominalBlockLength`; 0 is the maximum | 0 |
+| `--log MODE` | `log:log` lines: `silent`, `route` (to stderr) or `capture` (into the record's `featureOptions.log.lines`) | `silent` |
+| `--log-capture-bytes N` | the capture buffer, its NUL included | 4096 |
+
+The defaults are the measurement as it has always been, so a verdict reached under them does not
+move. `lv2_measure --help` lists the same flags.
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own

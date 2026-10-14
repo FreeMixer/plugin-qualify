@@ -30,6 +30,10 @@ with make. The CLAP headers come from `pkg-config clap` (Fedora
 headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`.
 The measurer's sample rates are omx-contract's `OMX_DECLARED_RATES`: the header comes from
 `pkg-config omx-contract` (`omx-contract-devel`, `libomx-contract-dev`), else `make deps` fetches it.
+Its host features are omx-clap-core's LV2 feature provider, the static `libomx-clap-lv2` and its
+header: `pkg-config omx-clap-lv2` (`omx-clap-lv2-devel`, `libomx-clap-lv2-dev`), else `make deps`
+fetches omx-clap-core at the packages' floor, builds the archive against the fetched CLAP headers and
+installs it into `native/deps/omx-clap-lv2`.
 That header is also what openmixer's copy of the LV2 measurer reads (kept in
 `native/parity/openmixer` as it was at the commit it was taken from, each file's blob id in `BLOBS`),
 so the build carries that copy, `native/build/parity/lv2_measure`, beside ours:
@@ -40,8 +44,9 @@ make -C native deps all   # native/build/clap-qualify, lv2_measure, rt_interpose
 
 The native tests run the build; without it they skip, except on CI, where a missing build fails. The
 parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each, once
-the two things only ours prints are taken out of its line: the `host` object and the soak's
-`maxRmsDbfs` (the soak case lifts the sweep's bound, so both sweep the same range).
+the three things only ours prints are taken out of its line: the `host` object, the
+`featureOptions` object and the soak's `maxRmsDbfs` (the soak case lifts the sweep's bound, so both
+sweep the same range).
 `make -C native asan` builds the measurer under AddressSanitizer, `native/build/asan/lv2_measure`,
 which the leak check runs on every way out of it (a measurement, a soak, a plugin that will not
 instantiate). It is not part of `all`, so a package build needs no libasan.
@@ -75,9 +80,10 @@ dpkg-buildpackage -b -uc -us                      # the DEB
 
 Both are built per architecture: they carry the CLAP prober, the LV2 measurer and their interposer,
 in `/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers
-come from packages, never from `make deps`: `clap-devel`, `lilv-devel`, `lv2-devel` and
-`plugin-hostd-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev` and `plugin-hostd-dev` on
-Debian (`clap-headers` and `plugin-hostd-dev` from the FreeMixer channel). An installed package is
+come from packages, never from `make deps`: `clap-devel`, `lilv-devel`, `lv2-devel`,
+`plugin-hostd-devel` and `omx-clap-lv2-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev`,
+`plugin-hostd-dev` and `libomx-clap-lv2-dev` on Debian (`clap-headers`, `plugin-hostd-dev` and
+`libomx-clap-lv2-dev` from the FreeMixer channel). An installed package is
 checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>`, run
 with nothing set.
 
