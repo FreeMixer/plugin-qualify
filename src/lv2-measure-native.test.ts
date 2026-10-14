@@ -98,6 +98,7 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
       [true, [SAFE, "48000", "512"], 0],
       [false, [NEEDS_OPTIONS, "0", "64", "1", "1"], 2],
       [true, [NEEDS_OPTIONS, "0", "64"], 2],
+      [false, ["urn:plugin-qualify:not-here", "48000", "64", "1", "1"], 3],
     ] as const) {
       const r = run(soak, ...args);
       expect(r.stderr, `${soak ? "soak " : ""}${args.join(" ")}`).not.toMatch(/LeakSanitizer/);
