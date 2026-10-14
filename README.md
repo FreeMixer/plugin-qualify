@@ -27,14 +27,21 @@ sudo apt update
 sudo apt install plugin-qualify
 ```
 
-The package is on the npm registry:
+From the npm registry:
 
 ```
 pnpm add @openmixer/plugin-qualify
+# or, to install the command globally:
+npm install -g @openmixer/plugin-qualify
 ```
 
-(or `npm install -g @openmixer/plugin-qualify`). To run from a checkout instead (Node.js 20 or newer
-and pnpm 10, see `BUILDING.md`):
+The npm package ships the TypeScript command only, not the native tools. The CLAP prober, the LV2 measurer and
+the interposer come with the RPM or DEB, or from `make -C native` in a checkout; with the npm package alone,
+point `OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` at them, or CLAP qualification and the LV2
+hosting dimensions refuse with "no CLAP prober at ...".
+
+The GitHub release also carries the packed tarball, `openmixer-plugin-qualify-<version>.tgz`. To run from a
+checkout instead (Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
 
 ```
 git clone https://github.com/FreeMixer/plugin-qualify.git
