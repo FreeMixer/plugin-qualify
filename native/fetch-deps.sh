@@ -4,7 +4,7 @@
 #
 # The headers the prober builds against, each at a release tag: the CLAP SDK and plugin-hostd (its pin.h).
 # The omx-contract C header both LV2 measurers (ours and openmixer's copy, parity/openmixer) read their
-# rates from, at the version openmixer pinned, for a build with no omx-contract-devel installed.
+# rates from, at the version the packages require, for a build with no omx-contract-devel installed.
 #
 #   fetch-deps.sh <dir> <clap-tag> <plugin-hostd-tag> <omx-contract-version>
 set -eu

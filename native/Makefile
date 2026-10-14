@@ -26,9 +26,9 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.1.4
-# the omx-contract `make deps` fetches where no omx-contract-devel is installed, and the one openmixer's LV2 measurer
-# built against at the commit it was taken from (parity/openmixer/BLOBS)
-OMX_CONTRACT_VERSION := 2.3.0
+# the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so both builds
+# read the same contract. The rates are the same in 2.3.0, which openmixer's copy (parity/openmixer/BLOBS) was built against.
+OMX_CONTRACT_VERSION := 2.10.1
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
