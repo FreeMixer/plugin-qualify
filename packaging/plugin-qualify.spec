@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.6.0
+Version: 0.7.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -62,6 +62,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.7.0-1
+- clap-qualify pins a symlinked .clap under the name it was handed, the name
+  the console adds and plugin-hostd checks, with the target's bytes.
+- A CLAP plugin with more parameters than the host accepts (2048,
+  omx-clap-core's cap) reads unpinnable instead of getting a pin the host
+  refuses at add.
+- A parameter layout that cannot be read says why: a get_info failure, or
+  memory running out while reading or hashing the layout.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
 - The package carries the LV2 measurer taken in from openmixer, lv2_measure,
   in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what
