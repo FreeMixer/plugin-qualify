@@ -9,7 +9,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,6 +244,25 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     const unsafe = run(UNSAFE, join(scratch, "unsafe"));
     expect(unsafe.status).toBe(1);
     expect(unsafe.stdout).toContain(HOSTING_CODE.rtSafetyViolations);
+  });
+});
+
+describe("plugin-qualify --all, live — the standard CLAP search path", () => {
+  live("a .clap only on CLAP_PATH is found by --all and qualified, with ~/.clap empty", () => {
+    const onPath = join(scratch, "clap-path");
+    mkdirSync(onPath, { recursive: true });
+    copyFileSync(SAFE, join(onPath, basename(SAFE)));
+    const home = join(scratch, "home");
+    mkdirSync(home, { recursive: true });
+    const bin = join(PKG, "bin", "plugin-qualify.mjs");
+    const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(QUALIFY_RATES[0])], {
+      encoding: "utf8",
+      // the prober is the scanner here too, so the walk reads the real file
+      env: { ...process.env, HOME: home, CLAP_PATH: onPath, [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath() },
+    });
+    expect(r.stderr).toContain(`target urn:clap:${SAFE_ID} (${onPath})`);
+    expect(r.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));
+    expect(r.status).toBe(0);
   });
 });
 
