@@ -5,17 +5,19 @@
 # qualify.
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
-#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap,
+#                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails}.clap,
+#                            build/fixtures/fail-alloc.so,
 #                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness}.lv2
 #   build/lv2_measure_features_test   the measurer's features oracle, run from native/
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, and
-#                            the omx-contract header openmixer's LV2 measurer reads
+#                            the omx-contract header the LV2 measurer reads its rates from
 #   build/parity/lv2_measure openmixer's LV2 measurer (parity/openmixer, kept as it was there), built with
 #                            these flags when deps/ holds that header: the parity test runs it beside ours
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer and the interposer, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
-# header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. lilv and the LV2
+# header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. omx-contract's limits
+# header from `pkg-config omx-contract` (omx-contract-devel, libomx-contract-dev), else deps/omx-contract. lilv and the LV2
 # headers from `pkg-config lilv-0` (lilv-devel, liblilv-dev).
 
 CC ?= cc
@@ -24,8 +26,9 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.1.4
-# the omx-contract openmixer's LV2 measurer built against at the commit it was taken from (parity/openmixer/BLOBS)
-OMX_CONTRACT_VERSION := 2.3.0
+# the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so both builds
+# read the same contract. The rates are the same in 2.3.0, which openmixer's copy (parity/openmixer/BLOBS) was built against.
+OMX_CONTRACT_VERSION := 2.10.1
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
@@ -36,6 +39,13 @@ ifeq ($(shell $(PKG_CONFIG) --exists plugin-hostd && echo true),true)
 PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-hostd)
 else
 PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
+endif
+
+# the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>
+ifeq ($(shell $(PKG_CONFIG) --exists omx-contract && echo true),true)
+OMX_CONTRACT_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags omx-contract)
+else
+OMX_CONTRACT_CFLAGS ?= -Ideps/omx-contract/include
 endif
 
 LILV_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags lilv-0)
@@ -49,7 +59,9 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 
 
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_features_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
-	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
+	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
+	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/fail-alloc.so \
+	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so
 	@# asked when the recipe runs, so `make deps all` builds it from what deps just fetched
 	@if [ -f deps/omx-contract/include/omxcontract/omx_contract_limits.h ]; then $(MAKE) --no-print-directory $(BUILD)/parity/lv2_measure; fi
@@ -62,11 +74,11 @@ $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-features.c lv2-measure-pin.c
-LV2_MEASURE_HDR := lv2-measure-features.h lv2-measure-pin.h lv2-measure-rates.h rt-interpose.h
+LV2_MEASURE_HDR := lv2-measure-features.h lv2-measure-pin.h rt-interpose.h
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) \
 		$(LILV_LIBS) -lpthread -lm -ldl
 
 # the features' oracle, never installed; it opens the fixtures by these paths, run from native/
@@ -92,6 +104,17 @@ $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
 
 $(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# the host's parameter cap and one past it
+$(BUILD)/fixtures/params-%.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_PARAMS=$* -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+$(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_INFO_FAILS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# a preload failing one chosen allocation, for the prober's out-of-memory paths
+$(BUILD)/fixtures/fail-alloc.so: fixtures/fail-alloc.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
