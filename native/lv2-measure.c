@@ -647,6 +647,16 @@ static void fill_input(struct rig *r, unsigned *rng, int noise, uint32_t block, 
   }
 }
 
+/* What main holds once the host is open, released on every way out, after the instances are gone. */
+static void release(struct host *h, LilvNodes *required, LilvNodes *optional, LilvNode *uri_node, LilvWorld *world) {
+  host_close(h);
+  free(h);
+  lilv_nodes_free(required);
+  lilv_nodes_free(optional);
+  lilv_node_free(uri_node);
+  lilv_world_free(world);
+}
+
 int main(int argc, char **argv) {
   if (argc == 3 && !strcmp(argv[1], "--pin")) return pin_only(argv[2]);
   if (argc < 2) {
@@ -726,6 +736,7 @@ int main(int argc, char **argv) {
       fprintf(jout, "{\"uri\":");
       json_str(jout, uri);
       fprintf(jout, ",\"soak\":{\"instantiated\":false}}\n");
+      release(H, required, optional, uri_node, world);
       return 2;
     }
     lilv_instance_activate(si->inst);
@@ -788,6 +799,7 @@ int main(int argc, char **argv) {
     emit_host_facts(H);
     fprintf(jout, "}\n");
     rig_close(si);
+    release(H, required, optional, uri_node, world);
     return 0;
   }
 
@@ -814,6 +826,7 @@ int main(int argc, char **argv) {
     fprintf(jout, "{\"uri\":");
     json_str(jout, uri);
     fprintf(jout, ",\"found\":true,\"instantiated\":false,\"cyclesAttempted\":%d}\n", cycles);
+    release(H, required, optional, uri_node, world);
     return 2;
   }
 
@@ -1007,11 +1020,6 @@ int main(int argc, char **argv) {
   fprintf(jout, "}\n");
   fflush(jout);
 
-  host_close(H);
-  free(H);
-  lilv_nodes_free(required);
-  lilv_nodes_free(optional);
-  lilv_node_free(uri_node);
-  lilv_world_free(world);
+  release(H, required, optional, uri_node, world);
   return 0;
 }
