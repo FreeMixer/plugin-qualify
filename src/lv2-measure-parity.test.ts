@@ -10,10 +10,11 @@
  * stimulus, the pin alone, a plugin it cannot find, and the soak. The soak's three RSS figures are the
  * process's, not the code's — they move between two runs of one binary — so they are masked.
  *
- * Since the measuring host was made faithful (`lv2-host-faithfulness.test.ts`) ours prints two things
+ * Since the measuring host was made faithful (`lv2-host-faithfulness.test.ts`) ours prints three things
  * openmixer's copy does not, and they alone are taken out of our line before the comparison: the
- * `host` object (what the host did: options, worker, patch:Set, the sweep bounds) and the soak's
- * `maxRmsDbfs`. The soak's sweep is bounded now; the soak case lifts the bound (OMX_SWEEP_DB and
+ * `host` object (what the host did: options, worker, patch:Set, the sweep bounds), the
+ * `featureOptions` the host's features were built under (omx-clap-core's provider, at the measurer's
+ * defaults here) and the soak's `maxRmsDbfs`. The soak's sweep is bounded now; the soak case lifts the bound (OMX_SWEEP_DB and
  * OMX_SWEEP_RATIO far beyond any range) so both sweep the whole range and the levels compare.
  * On CI a missing build is a failure; elsewhere the test skips, saying how to build.
  */
@@ -43,8 +44,10 @@ interface Case {
 }
 
 const RSS = /"(rssStartKb|rssMaxKb|rssGrowthKb)":-?\d+/g;
-/** What only ours prints: the host's facts, and the soak's loudest window. */
-const OURS_ONLY = (stdout: string): string => stdout.replace(/,"host":\{[^{}]*\}/, "").replace(/,"maxRmsDbfs":-?[\d.]+/, "");
+/** What only ours prints: the host's facts, the feature options, and the soak's loudest window. */
+const FEATURE_OPTIONS = /,"featureOptions":\{"features":\[[^\]]*\],"strict":(?:true|false),"block":\{[^{}]*\},"log":\{[^{}]*\}\}/;
+const OURS_ONLY = (stdout: string): string =>
+  stdout.replace(/,"host":\{[^{}]*\}/, "").replace(FEATURE_OPTIONS, "").replace(/,"maxRmsDbfs":-?[\d.]+/, "");
 const UNBOUNDED = { OMX_SWEEP_DB: "1e9", OMX_SWEEP_RATIO: "1e9" };
 
 const CASES: readonly Case[] = [SAFE, UNSAFE].flatMap((uri): Case[] => [

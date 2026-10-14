@@ -137,6 +137,76 @@ describe("the measuring host against the faithfulness fixtures", () => {
   });
 });
 
+/** The feature options a record names when no flag changed them: the measurement as it has always been. */
+const DEFAULT_FEATURE_OPTIONS = {
+  features: ["map", "unmap", "options", "bounded", "worker", "log"],
+  strict: false,
+  block: { declares: ["bounded"], min: 1, max: 0, nominal: 0 },
+  log: { mode: "silent" },
+};
+
+describe("the measuring host's feature options, one run flag each", () => {
+  live("a record names the options it ran under, the defaults when no flag is given", () => {
+    const r = run("needs-options", ["48000", "256", "1", "1"], { OMX_PROBE_BLOCKS: "6" });
+    expect(r.status).toBe(0);
+    expect(r.record["featureOptions"]).toEqual(DEFAULT_FEATURE_OPTIONS);
+  });
+
+  live("--features without options: the plugin that needs them refuses, and the record says what was offered", () => {
+    const r = run("needs-options", ["--features", "map,unmap,bounded,worker,log", "48000", "256", "1", "1"]);
+    expect(r.status).toBe(2);
+    expect(r.record).toMatchObject({ instantiated: false, featureOptions: { features: ["map", "unmap", "bounded", "worker", "log"] } });
+    expect(r.record["refusedFeature"]).toBeUndefined();
+  });
+
+  live("--strict refuses a plugin requiring a feature not offered, naming it; --no-strict leaves the refusal to the plugin", () => {
+    const flags = ["--features", "map,unmap,options,bounded,log"];
+    const strict = run("worker-engine", ["--strict", ...flags, "48000", "256", "1", "1"]);
+    expect(strict.status).toBe(2);
+    expect(strict.record).toMatchObject({ instantiated: false, refusedFeature: "http://lv2plug.in/ns/ext/worker#schedule" });
+    expect(strict.record["featureOptions"].strict).toBe(true);
+    const handed = run("worker-engine", ["--no-strict", ...flags, "48000", "256", "1", "1"]);
+    expect(handed.status).toBe(2);
+    expect(handed.record["refusedFeature"]).toBeUndefined();
+    const offered = run("worker-engine", ["--strict", "48000", "256", "1", "1"], { OMX_PROBE_BLOCKS: "6" });
+    expect(offered.status).toBe(0);
+  });
+
+  live("the block flags and the log flags are named in the record", () => {
+    const r = run(
+      "needs-options",
+      ["--block-declares", "bounded,fixed", "--block-min", "0", "--block-max", "512", "--block-nominal", "256", "--log", "capture",
+        "--log-capture-bytes", "256", "48000", "256", "1", "1"],
+      { OMX_PROBE_BLOCKS: "6" },
+    );
+    expect(r.status).toBe(0);
+    expect(r.record["featureOptions"]).toEqual({
+      ...DEFAULT_FEATURE_OPTIONS,
+      block: { declares: ["bounded", "fixed"], min: 0, max: 512, nominal: 256 },
+      log: { mode: "capture", bytes: 256, lines: "" },
+    });
+  });
+
+  live("a value the provider cannot use is refused before anything is measured", () => {
+    for (const flags of [["--features", "map,midi"], ["--log", "loud"], ["--block-min", "512", "--block-max", "128"], ["--frobnicate"]]) {
+      const r = spawnSync(MEASURE, [...flags, URN("needs-options"), "48000", "256", "1", "1"], {
+        encoding: "utf8",
+        env: { PATH: process.env["PATH"], LV2_PATH: BUNDLES },
+      });
+      expect(r.status, flags.join(" ")).toBe(1);
+      expect(r.stdout, flags.join(" ")).toBe("");
+    }
+  });
+
+  live("--help lists every flag", () => {
+    const r = spawnSync(MEASURE, ["--help"], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    for (const flag of ["--features", "--strict", "--no-strict", "--block-declares", "--block-min", "--block-max", "--block-nominal", "--log", "--log-capture-bytes"]) {
+      expect(r.stdout).toContain(flag);
+    }
+  });
+});
+
 describe("the measurer's sweep bounds", () => {
   it("are the TypeScript declarations (one value, two readers)", () => {
     const src = readFileSync(join(NATIVE, "lv2-measure.c"), "utf8");
