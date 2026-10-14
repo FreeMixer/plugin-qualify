@@ -47,6 +47,12 @@
 #define MAX_RATES 16
 #define MAX_PORTS 16
 #define MAX_PARAMS 4096
+/* omx-clap-core's CLAP_HOST_PARAM_COUNT_MAX: the host refuses at `add` a plugin with more parameters,
+ * so the prober pins none (plugin-hostd's layout_pin_write returns -1 above it) */
+#define HOST_PARAM_COUNT_MAX 2048
+_Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every parameter the host accepts");
+#define STR_(x) #x
+#define STR(x) STR_(x)
 /* parameter events one sweep block carries */
 #define EVENTS_PER_BLOCK 64u
 /* frames past the declared latency the impulse is looked for */
@@ -458,7 +464,8 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
 
 /*
  * The integrity block: the SHA-256 of the one file the host loads, the `.clap`, by its path relative to
- * its directory, and the plugin's parameter layout in plugin-hostd's omx-layout/1, filled from every
+ * its directory under the name the prober was handed (a symlink's own name, not its target's, since the
+ * console adds the path it was given and plugin-hostd checks that name), and the plugin's parameter layout in plugin-hostd's omx-layout/1, filled from every
  * parameter params.count()/get_info() give (hidden, read-only and bypass included) after init and
  * before activate, as omx-clap-host recomputes it on `add`. pin.h serialises and hashes; nothing here
  * does. A file name a pin cannot hold, or a layout that cannot be read, is no pin and says why.
@@ -472,28 +479,39 @@ struct integrity {
 static void integrity_layout(const clap_plugin_t *p, struct integrity *pin) {
   const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
   const uint32_t count = params ? params->count(p) : 0;
-  if (count > MAX_PARAMS) {
-    pin->reason = "probe-error", pin->detail = "more parameters than the prober reads";
+  if (count > HOST_PARAM_COUNT_MAX) {
+    pin->reason = "unpinnable", pin->detail = "more parameters than the host accepts (" STR(HOST_PARAM_COUNT_MAX) ")";
     return;
   }
   clap_param_info_t *infos = calloc(count ? count : 1, sizeof *infos);
   phd_layout_clap_param_t *records = calloc(count ? count : 1, sizeof *records);
-  pin->reason = "probe-error", pin->detail = "a parameter's get_info failed";
-  for (uint32_t i = 0; infos && records && i < count; i++) {
-    if (!params->get_info(p, i, &infos[i])) goto out;
+  pin->reason = "probe-error";
+  if (!infos || !records) {
+    pin->detail = "out of memory reading the parameter layout";
+    goto out;
+  }
+  for (uint32_t i = 0; i < count; i++) {
+    if (!params->get_info(p, i, &infos[i])) {
+      pin->detail = "a parameter's get_info failed";
+      goto out;
+    }
     infos[i].name[sizeof infos[i].name - 1] = '\0';
     records[i] = (phd_layout_clap_param_t){ infos[i].id, infos[i].name, infos[i].min_value, infos[i].max_value,
                                             infos[i].default_value, infos[i].flags };
   }
-  if (infos && records && phd_layout_clap_digest(records, count, pin->layout) == 0) pin->reason = pin->detail = NULL;
+  if (phd_layout_clap_digest(records, count, pin->layout) != 0) {
+    pin->detail = "out of memory hashing the parameter layout";
+    goto out;
+  }
+  pin->reason = pin->detail = NULL;
 out:
   free(records);
   free(infos);
 }
 
-static void put_integrity(const char *path, const char *version, const char *sha256, const struct integrity *pin) {
-  const char *base = strrchr(path, '/');
-  base = base ? base + 1 : path;
+static void put_integrity(const char *named, const char *version, const char *sha256, const struct integrity *pin) {
+  const char *base = strrchr(named, '/');
+  base = base ? base + 1 : named;
   fprintf(g_out, ",\"integrity\":{");
   if (version && *version) {
     fprintf(g_out, "\"version\":");
@@ -867,7 +885,7 @@ struct options {
   uint32_t n_rates;
   uint32_t frames;
   uint32_t blocks;
-  const char *path;
+  const char *path; /* as invoked, before realpath: the name the pin holds */
   const char *id;
 };
 
@@ -888,7 +906,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     if (p) p->destroy(p);
     put_head(d->id, path, sha256);
     put_facts(d, &f, o->frames);
-    put_integrity(path, d->version, sha256, &pin);
+    put_integrity(o->path, d->version, sha256, &pin);
     fprintf(g_out, "}\n");
     return 2;
   }
@@ -921,7 +939,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
-  put_integrity(path, d->version, sha256, &pin);
+  put_integrity(o->path, d->version, sha256, &pin);
   fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;
 }
@@ -975,6 +993,7 @@ int main(int argc, char **argv) {
     }
   }
   if (o.n_rates == 0 || a >= argc || argc - a > 2) return usage(argv[0]);
+  o.path = argv[a];
   o.id = a + 1 < argc ? argv[a + 1] : NULL;
 
   char path[PATH_MAX];

@@ -69,6 +69,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 - make -C native asan builds the measurer under AddressSanitizer for the
   tests' leak check; it is not part of the package build.
 
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.7.0-1
+- clap-qualify pins a symlinked .clap under the name it was handed, the name
+  the console adds and plugin-hostd checks, with the target's bytes.
+- A CLAP plugin with more parameters than the host accepts (2048,
+  omx-clap-core's cap) reads unpinnable instead of getting a pin the host
+  refuses at add.
+- A parameter layout that cannot be read says why: a get_info failure, or
+  memory running out while reading or hashing the layout.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.6.0-1
 - The package carries the LV2 measurer taken in from openmixer, lv2_measure,
   in /usr/libexec/plugin-qualify beside the CLAP prober. It prints what

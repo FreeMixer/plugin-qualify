@@ -5,7 +5,8 @@
 # qualify.
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
-#                            build/fixtures/{rt-safe,rt-unsafe,controls}.clap,
+#                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails}.clap,
+#                            build/fixtures/fail-alloc.so,
 #                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness}.lv2
 #   build/lv2_measure_features_test   the measurer's features oracle, run from native/
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
@@ -51,7 +52,9 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 
 
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_features_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
-	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
+	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
+	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/fail-alloc.so \
+	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so
 	@# asked when the recipe runs, so `make deps all` builds it from what deps just fetched
 	@if [ -f deps/omx-contract/include/omxcontract/omx_contract_limits.h ]; then $(MAKE) --no-print-directory $(BUILD)/parity/lv2_measure; fi
@@ -102,6 +105,17 @@ $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
 
 $(BUILD)/fixtures/rt-unsafe.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# the host's parameter cap and one past it
+$(BUILD)/fixtures/params-%.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_PARAMS=$* -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+$(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_INFO_FAILS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# a preload failing one chosen allocation, for the prober's out-of-memory paths
+$(BUILD)/fixtures/fail-alloc.so: fixtures/fail-alloc.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures/controls.clap: fixtures/controls.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
