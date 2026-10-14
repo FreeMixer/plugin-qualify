@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.7.0
+Version: 0.8.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -64,6 +64,14 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.8.0-1
+- With no setting, the native tools are looked for in the checkout's own
+  native/build first, then where the package installs them, so make -C native
+  in a checkout is never shadowed by an older installed prober.
+- A prober or the measurer and the interposer it runs under come from one
+  place, the first that holds either; a place holding only one of them is
+  refused instead of pairing it with the other from elsewhere.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.7.0-1
 - clap-qualify pins a symlinked .clap under the name it was handed, the name
   the console adds and plugin-hostd checks, with the target's bytes.

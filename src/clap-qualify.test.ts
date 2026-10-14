@@ -358,15 +358,36 @@ describe("qualifyClap — the run, fail closed", () => {
     expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: () => false })).toThrow(new RegExp(CLAP_QUALIFY_TOOL_ENV));
   });
 
-  it("unset, the prober and the interposer are the installed ones, then the package's own build", () => {
+  it("unset, the prober and the interposer are the package's own build, then the installed ones", () => {
     const own = [clapQualifyToolPath(), rtInterposePath()];
     const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
     const holding = (paths: readonly string[]) => (p: string) => paths.includes(p);
-    expect(clapQualifyTools({}, holding([...installed[1]!, ...own]))).toEqual({ tool: installed[1]![0], interposer: installed[1]![1] });
+    expect(clapQualifyTools({}, holding([...installed[0]!, ...own]))).toEqual({ tool: own[0], interposer: own[1] });
+    expect(clapQualifyTools({}, holding(installed[1]!))).toEqual({ tool: installed[1]![0], interposer: installed[1]![1] });
     expect(clapQualifyTools({}, holding([...installed[0]!, ...installed[1]!]))).toEqual({ tool: installed[0]![0], interposer: installed[0]![1] });
     expect(clapQualifyTools({}, holding(own))).toEqual({ tool: own[0], interposer: own[1] });
     const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
     expect(clapQualifyTools(env, () => true)).toEqual({ tool: "/t/clap-qualify", interposer: "/t/rt.so" });
+  });
+
+  it("unset, the prober and the interposer come from one place; a place holding only one of them is refused", () => {
+    const own = [clapQualifyToolPath(), rtInterposePath()];
+    const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
+    const holding = (paths: readonly string[]) => (p: string) => paths.includes(p);
+    const ownDir = dirname(own[0]!);
+    // the own build holds only the interposer: refused, never paired with the installed prober
+    expect(() => clapQualifyTools({}, holding([installed[0]![0]!, own[1]!, ...installed[1]!]))).toThrow(
+      new RegExp(`${ownDir}/? holds ${RT_INTERPOSE_NAME} but not ${CLAP_QUALIFY_TOOL_NAME}`),
+    );
+    // the first installed directory holds only the prober: refused, never paired with the second's interposer
+    expect(() => clapQualifyTools({}, holding([installed[0]![0]!, ...installed[1]!]))).toThrow(
+      new RegExp(`${NATIVE_TOOL_DIRS[0]} holds ${CLAP_QUALIFY_TOOL_NAME} but not ${RT_INTERPOSE_NAME}.*${CLAP_QUALIFY_TOOL_ENV} and ${RT_INTERPOSE_ENV}`),
+    );
+    // a setting decides its own tool; the other still comes from the first place holding it
+    expect(clapQualifyTools({ [RT_INTERPOSE_ENV]: "/t/rt.so" }, holding(["/t/rt.so", installed[1]![0]!]))).toEqual({
+      tool: installed[1]![0],
+      interposer: "/t/rt.so",
+    });
   });
 
   it("a setting naming an absent file is refused, never passed over for an installed tool", () => {
@@ -376,7 +397,7 @@ describe("qualifyClap — the run, fail closed", () => {
 
   it("absent everywhere, the refusal names every place looked", () => {
     expect(() => clapQualifyTools({}, () => false)).toThrow(
-      new RegExp([...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME)), clapQualifyToolPath()].join(", ")),
+      new RegExp([clapQualifyToolPath(), ...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME))].join(", ")),
     );
   });
 
