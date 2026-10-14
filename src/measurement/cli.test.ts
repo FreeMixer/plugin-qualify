@@ -8,6 +8,9 @@
  * mis-sized capture window and every `declaredMismatch` wrong. So the pipeline is asserted
  * as a sequence, not as a set.
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +19,9 @@ import {
   buildPipeline,
   hostingLine,
   INITIAL_PROGRESS,
+  LV2_BLOCK_DECLARATIONS,
+  LV2_FEATURE_KINDS,
+  LV2_LOG_MODES,
   parseMeasureArgs,
   parseProbeProgress,
   TOOL_NAME,
@@ -315,6 +321,36 @@ describe("the hosting pass (the native lv2_measure)", () => {
     const all = buildPipeline(options({ dimensions: ["latency", "cost", ...HOSTING] }), NATIVE);
     expect(all.steps.map((s) => s.id)).toEqual(["scan", "latency-declared", "latency-measured", "cost", "hosting"]);
     expect(all.finalCatalog).toBe("/tmp/run/cost.json");
+  });
+
+  it("passes the feature-option flags to every run, after the positionals, in the order given", () => {
+    const argv = ["--rates", "48000", "--dimensions", "rtSafety", "--plugins", "urn:a"];
+    const flags = ["--features", "map,unmap,options,bounded,log", "--strict", "--block-declares", "", "--block-max", "1024", "--log", "capture", "--log-capture-bytes", "8192"];
+    const r = parseMeasureArgs([...argv, ...flags], {}, DEFAULTS);
+    expect(r.ok && r.options.featureFlags).toEqual(flags);
+    if (!r.ok) return;
+    const [step] = buildPipeline(r.options, NATIVE).steps;
+    expect(step?.args).toEqual(["48000", String(LV2_HOSTING_BLOCK_FRAMES), String(LV2_HOSTING_LIFECYCLES), String(LV2_HOSTING_REPEATS), ...flags]);
+    const plain = parseMeasureArgs(argv, {}, DEFAULTS);
+    expect(plain.ok && plain.options.featureFlags).toBeUndefined();
+  });
+
+  it("refuses a feature-option value the measurer would refuse, and the flags without the hosting pass", () => {
+    const argv = ["--rates", "48000", "--dimensions", "rtSafety", "--plugins", "urn:a"];
+    for (const bad of [["--features", "map,midi"], ["--block-declares", "variable"], ["--block-min", "-1"], ["--block-max", "1k"], ["--log", "loud"], ["--log-capture-bytes", "1"], ["--log"]]) {
+      expect(parseMeasureArgs([...argv, ...bad], {}, DEFAULTS).ok, bad.join(" ")).toBe(false);
+    }
+    const r = parseMeasureArgs(["--rates", "48000", "--strict"], {}, DEFAULTS);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("hosting pass");
+  });
+
+  it("names the feature options' words as the measurer does (one list, two readers)", () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "native", "lv2-measure-options.c"), "utf8");
+    const named = (re: RegExp): string[] => [...(re.exec(src)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+    expect(named(/LV2_MEASURE_FEATURE_NAMES\[[^\]]*\] = \{([^}]*)\}/)).toEqual([...LV2_FEATURE_KINDS]);
+    expect(named(/LV2_MEASURE_DECLARATION_NAMES\[[^\]]*\] = \{([^}]*)\}/)).toEqual([...LV2_BLOCK_DECLARATIONS]);
+    expect(named(/LOG_MODE_NAMES\[\] = \{([^}]*)\}/)).toEqual([...LV2_LOG_MODES]);
   });
 
   it("refuses to plan the pass without the native tools", () => {

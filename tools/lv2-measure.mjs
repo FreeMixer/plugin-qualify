@@ -85,6 +85,22 @@ const HELP = `${TOOL_NAME} ${TOOL_VERSION} — measure LV2 plugin latency and CP
   --dry-run               Print the plan and probe nothing.
   --progress-json         Emit machine-readable progress on stderr, one '@progress {...}' per line.
   --help                  This text.
+
+The hosting pass's host features are omx-clap-core's LV2 feature provider; each of its options is
+a flag, passed to every run of lv2_measure and named in each plugin's record (featureOptions):
+
+  --features LIST         Kinds offered: map,unmap,options,bounded,worker,default-state,log
+                          (default: all but default-state; empty: none).
+  --strict                Refuse a plugin requiring a feature not offered, naming it (refusedFeature).
+  --no-strict             Hand it to its own instantiate without it (default).
+  --block-declares LIST   Buf-size declarations when bounded is offered: bounded,fixed,pow2
+                          (default: bounded; empty: none).
+  --block-min N           bufsz:minBlockLength (default: 1; 0: the run's block).
+  --block-max N           bufsz:maxBlockLength (default: 0, the run's block).
+  --block-nominal N       bufsz:nominalBlockLength (default: 0, the maximum).
+  --log MODE              log:log lines: silent, route (to stderr) or capture (into the record)
+                          (default: silent).
+  --log-capture-bytes N   The capture buffer, its NUL included (default: 4096).
 `;
 
 function fail(message, code = 2) {
