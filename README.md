@@ -27,9 +27,14 @@ sudo apt update
 sudo apt install plugin-qualify
 ```
 
-There is no npm package on the registry yet; the GitHub release carries the packed one,
-`openmixer-plugin-qualify-<version>.tgz`, which `pnpm add` takes by its download URL. To run from a
-checkout instead (Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
+The package is on the npm registry:
+
+```
+pnpm add @openmixer/plugin-qualify
+```
+
+(or `npm install -g @openmixer/plugin-qualify`). To run from a checkout instead (Node.js 20 or newer
+and pnpm 10, see `BUILDING.md`):
 
 ```
 git clone https://github.com/FreeMixer/plugin-qualify.git
