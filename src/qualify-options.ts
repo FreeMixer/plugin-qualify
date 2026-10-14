@@ -45,5 +45,11 @@ export const QUALIFY_OPTIONS: readonly QualifyOption[] = [
     describe: `judge against this host (${HOST_PROFILES.map((p) => p.id).join(", ")}, or a profile JSON file); repeat or comma-separate for one verdict per profile`,
     default: OPENMIXER_CONSOLE_PROFILE.id,
   },
+  {
+    flag: "--pins",
+    value: "file",
+    describe:
+      "write one pin per qualified plugin to this file, with its verdict, for plugin-hostd's pin_file (the verdict is the first host profile's)",
+  },
   { flag: "--help", describe: "this text" },
 ];
