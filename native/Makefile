@@ -88,7 +88,7 @@ asan: $(BUILD)/asan/lv2_measure
 
 $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) \
 		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(LILV_LIBS) -lpthread -lm -ldl
 
 # the features' oracle, never installed; it opens the fixtures by these paths, run from native/
