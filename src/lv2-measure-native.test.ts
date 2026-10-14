@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * The LV2 measurer taken in from openmixer (`native/lv2-measure.c`), run as built (`make -C native`):
- * its features oracle passes, and under the interposer it tells the two LV2 fixtures apart on the
+ * its feature options oracle passes, and under the interposer it tells the two LV2 fixtures apart on the
  * count alone, each line carrying the plugin's pin. On CI a missing build is a failure; elsewhere the
  * tests skip, saying how to build.
  */
@@ -16,7 +16,7 @@ const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "..", "native");
 const BUILD = join(NATIVE, "build");
 const MEASURE = join(BUILD, "lv2_measure");
 const MEASURE_ASAN = join(BUILD, "asan", "lv2_measure");
-const ORACLE = join(BUILD, "lv2_measure_features_test");
+const ORACLE = join(BUILD, "lv2_measure_options_test");
 const INTERPOSER = join(BUILD, "rt_interpose.so");
 // liblilv's own world leak (native/lsan.supp) is not ours; every other leak still fails
 const LSAN_SUPPRESSIONS = join(NATIVE, "lsan.supp");
@@ -44,7 +44,7 @@ function measure(...args: string[]): { status: number | null; line: Record<strin
 }
 
 describe("lv2-measure, live — the LV2 fixtures", () => {
-  live("the features oracle passes", () => {
+  live("the feature options oracle passes", () => {
     const r = spawnSync(ORACLE, [], { cwd: NATIVE, encoding: "utf8" });
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
