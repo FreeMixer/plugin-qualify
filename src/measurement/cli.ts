@@ -79,7 +79,21 @@ export interface MeasureOptions {
   readonly run: boolean;
   /** Print the plan and probe nothing. */
   readonly dryRun: boolean;
+  /**
+   * The LV2 measurer's feature-option flags (`--features`, `--strict`, ...), in the order given, passed
+   * to every run of the hosting pass. Absent or empty: the measurer's defaults.
+   */
+  readonly featureFlags?: readonly string[];
 }
+
+/**
+ * The words the LV2 measurer's feature-option flags take, as `native/lv2-measure-options.c` names
+ * them: the provider's kinds (`--features`), its buf-size declarations (`--block-declares`) and its log
+ * modes (`--log`). A conformance test reads both.
+ */
+export const LV2_FEATURE_KINDS = ["map", "unmap", "options", "bounded", "worker", "default-state", "log"] as const;
+export const LV2_BLOCK_DECLARATIONS = ["bounded", "fixed", "pow2"] as const;
+export const LV2_LOG_MODES = ["silent", "route", "capture"] as const;
 
 /** One subprocess the pipeline runs, and what it leaves behind. */
 export interface PipelineStep {
@@ -205,6 +219,7 @@ export function buildPipeline(options: MeasureOptions, native?: HostingTools): P
         String(LV2_HOSTING_BLOCK_FRAMES),
         String(LV2_HOSTING_LIFECYCLES),
         String(LV2_HOSTING_REPEATS),
+        ...(options.featureFlags ?? []),
       ],
       perPlugin: true,
       env: { LD_PRELOAD: native.interposer, OMX_STIM: "noise" },
@@ -287,6 +302,32 @@ function parseRates(text: string): number[] | undefined {
 /** What `--dimensions` takes: the prober's, and the hosting pass's. */
 export const MEASURED_DIMENSIONS: readonly MeasurementDimension[] = [...PROBED_DIMENSIONS, ...HOSTING_PASS_DIMENSIONS];
 
+/** Whether `text` is a comma-separated list of `words` (empty: none of them). */
+function wordList(text: string, words: readonly string[]): boolean {
+  return text === "" || text.split(",").every((w) => words.includes(w));
+}
+
+/** A block length or a buffer size: a whole number of at least `min`. */
+function wholeNumber(text: string, min: number): boolean {
+  return /^\d+$/.test(text) && Number(text) >= min && Number(text) <= 2 ** 31 - 1;
+}
+
+/**
+ * What each feature-option flag takes: a check of its value, or `undefined` for a switch. The
+ * measurer checks the values again; these refuse a bad one before any plugin is run.
+ */
+const FEATURE_FLAGS: Readonly<Record<string, ((value: string) => boolean) | undefined>> = {
+  "--features": (v) => wordList(v, LV2_FEATURE_KINDS),
+  "--block-declares": (v) => wordList(v, LV2_BLOCK_DECLARATIONS),
+  "--block-min": (v) => wholeNumber(v, 0),
+  "--block-max": (v) => wholeNumber(v, 0),
+  "--block-nominal": (v) => wholeNumber(v, 0),
+  "--log": (v) => (LV2_LOG_MODES as readonly string[]).includes(v),
+  "--log-capture-bytes": (v) => wholeNumber(v, 2),
+  "--strict": undefined,
+  "--no-strict": undefined,
+};
+
 function parseDimensions(text: string): MeasurementDimension[] | undefined {
   const wanted = text.split(",").map((part) => part.trim());
   const dimensions = MEASURED_DIMENSIONS.filter((d) => wanted.includes(d));
@@ -320,6 +361,7 @@ export function parseMeasureArgs(
   let python = env.PYTHON ?? "python3";
   let run = env.LV2_MEASURE_RUN === "1";
   let dryRun = false;
+  const featureFlags: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -403,8 +445,19 @@ export function parseMeasureArgs(
       case "--dry-run":
         dryRun = true;
         break;
-      default:
-        return { ok: false, error: `unknown argument: ${String(flag)}` };
+      default: {
+        if (flag === undefined || !Object.hasOwn(FEATURE_FLAGS, flag)) {
+          return { ok: false, error: `unknown argument: ${String(flag)}` };
+        }
+        const check = FEATURE_FLAGS[flag];
+        if (check === undefined) {
+          featureFlags.push(flag);
+          break;
+        }
+        const value = next();
+        if (value === undefined || !check(value)) return { ok: false, error: `${flag}: ${featureFlagUse(flag)}` };
+        featureFlags.push(flag, value);
+      }
     }
   }
 
@@ -412,6 +465,12 @@ export function parseMeasureArgs(
     return {
       ok: false,
       error: "--rates is required: a measurement with no stated rate is not a measurement",
+    };
+  }
+  if (featureFlags.length > 0 && !dimensions.some((d) => (HOSTING_PASS_DIMENSIONS as readonly string[]).includes(d))) {
+    return {
+      ok: false,
+      error: `the feature options are the hosting pass's: ${featureFlags[0]} needs one of ${HOSTING_PASS_DIMENSIONS.join(",")}`,
     };
   }
   if (plugins !== undefined && dimensions.some((d) => (PROBED_DIMENSIONS as readonly string[]).includes(d))) {
@@ -436,8 +495,24 @@ export function parseMeasureArgs(
       ...(plugins === undefined ? {} : { plugins }),
       ...(costCpu === undefined ? {} : { costCpu }),
       ...(label === undefined ? {} : { label }),
+      ...(featureFlags.length === 0 ? {} : { featureFlags }),
     },
   };
+}
+
+function featureFlagUse(flag: string): string {
+  switch (flag) {
+    case "--features":
+      return `a comma-separated list of ${LV2_FEATURE_KINDS.join(",")} (empty: none)`;
+    case "--block-declares":
+      return `a comma-separated list of ${LV2_BLOCK_DECLARATIONS.join(",")} (empty: none)`;
+    case "--log":
+      return `one of ${LV2_LOG_MODES.join(", ")}`;
+    case "--log-capture-bytes":
+      return "a size in bytes of at least 2";
+    default:
+      return "a number of frames, 0 for the run's block";
+  }
 }
 
 // ---------------------------------------------------------------------------
