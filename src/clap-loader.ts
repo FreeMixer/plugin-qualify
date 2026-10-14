@@ -3,7 +3,8 @@
 /**
  * The CLAP implementation of the one discovery seam (`loader.ts`). A target that is a `.clap` file, or a
  * directory holding one, is scanned by `omx-clap-scan --json` (the scanner of omx-clap-host),
- * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. The
+ * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. `--all` walks
+ * the standard CLAP search path ({@link clapSearchPath}) through the same loader. The
  * scanner's JSON is the input: {@link clapScanDescriptors} normalises it into the interchange
  * rows. A scan that cannot be read is a {@link ClapScanError}, never an empty result.
  *
@@ -13,10 +14,18 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import type { PluginLoader, PluginTarget } from "./loader.js";
-import { CLAP_SCAN_TIMEOUT_S, CLAP_SCAN_TOOL_DEFAULT, CLAP_SCAN_TOOL_ENV } from "./qualify-declarations.js";
+import {
+  CLAP_PATH_ENV,
+  CLAP_SCAN_TIMEOUT_S,
+  CLAP_SCAN_TOOL_DEFAULT,
+  CLAP_SCAN_TOOL_ENV,
+  CLAP_SYSTEM_DIR,
+  CLAP_USER_DIR,
+} from "./qualify-declarations.js";
 
 /** The scanner's own name in its document — anything else is not its output. */
 const SCANNER_NAME = "omx-clap-scan";
@@ -390,4 +399,35 @@ export function clapLoader(options: ClapLoaderOptions = {}): PluginLoader {
       }));
     },
   };
+}
+
+// --- the standard search path (`--all`) ----------------------------------------------------------
+
+/**
+ * The directories `--all` walks, in order and once each: every non-empty entry of `CLAP_PATH`, then
+ * `~/.clap`, then `/usr/lib/clap`.
+ */
+export function clapSearchPath(env: Readonly<Record<string, string | undefined>>, home: string): string[] {
+  const named = (env[CLAP_PATH_ENV] ?? "").split(":").filter((d) => d !== "");
+  return [...new Set([...named, join(home, CLAP_USER_DIR), CLAP_SYSTEM_DIR].map((d) => resolve(d)))];
+}
+
+export interface ClapDiscoverOptions extends ClapLoaderOptions {
+  /** The home directory `~/.clap` is read under; the default is the user's. */
+  readonly home?: string;
+}
+
+/**
+ * Every CLAP plugin on the standard search path, each directory resolved through {@link clapLoader}
+ * exactly as a named directory is. A directory that is absent or holds no `.clap` is skipped; a
+ * plugin id found twice keeps its first place on the path.
+ */
+export function discoverClapTargets(options: ClapDiscoverOptions = {}): PluginTarget[] {
+  const loader = clapLoader(options);
+  const found = new Map<string, PluginTarget>();
+  for (const dir of clapSearchPath(options.env ?? process.env, options.home ?? homedir())) {
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
+    for (const t of loader.resolve(dir) ?? []) if (!found.has(t.uri)) found.set(t.uri, t);
+  }
+  return [...found.values()];
 }

@@ -14,12 +14,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { CLAP_SCAN_TIMEOUT_S, CLAP_SCAN_TOOL_DEFAULT, CLAP_SCAN_TOOL_ENV } from "./qualify-declarations.js";
+import {
+  CLAP_PATH_ENV,
+  CLAP_SCAN_TIMEOUT_S,
+  CLAP_SCAN_TOOL_DEFAULT,
+  CLAP_SCAN_TOOL_ENV,
+  CLAP_SYSTEM_DIR,
+} from "./qualify-declarations.js";
 import {
   ClapScanError,
   clapLoader,
   clapScanDescriptors,
   clapScanTool,
+  clapSearchPath,
+  discoverClapTargets,
   parseClapScan,
   type ClapScanRun,
 } from "./clap-loader.js";
@@ -328,5 +336,36 @@ describe("enum labels, modules and remote-control pages — the controls fixture
     const { binaryPath: _l, ...liveRow } = live!;
     const { binaryPath: _g, ...goldenRow } = row!;
     expect(liveRow).toEqual(goldenRow);
+  });
+});
+
+describe("--all — the standard CLAP search path", () => {
+  it("CLAP_PATH's entries first, in order, then ~/.clap, then /usr/lib/clap, once each", () => {
+    expect(clapSearchPath({ [CLAP_PATH_ENV]: "/a::/b:/a" }, "/home/u")).toEqual(["/a", "/b", "/home/u/.clap", CLAP_SYSTEM_DIR]);
+    expect(clapSearchPath({}, "/home/u")).toEqual(["/home/u/.clap", "/usr/lib/clap"]);
+  });
+
+  it("a .clap only on CLAP_PATH is scanned and found, through the same loader a named directory uses", () => {
+    const onPath = join(scratch, "search", "path");
+    const plugin = touch(join("search", "path", "fake.clap"));
+    const home = join(scratch, "search", "home");
+    mkdirSync(home, { recursive: true });
+    const doc = JSON.parse(FAKE_JSON);
+    doc.files[0].path = plugin;
+    const { run, calls } = answering(JSON.stringify(doc));
+    const targets = discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: onPath, [CLAP_SCAN_TOOL_ENV]: "scan" }, home });
+    expect(calls[0]).toEqual(["scan", "--json", onPath]);
+    expect(targets.map((t) => t.uri)).toEqual(["wide", "sidechain", "notes", "passthrough"].map((n) => `urn:clap:${FAKE_ID}.${n}`));
+    expect(targets.every((t) => t.binaryPath === plugin && t.bundle === onPath)).toBe(true);
+  });
+
+  it("an absent or empty directory on the path is skipped, never scanned", () => {
+    const empty = join(scratch, "search", "empty");
+    mkdirSync(empty, { recursive: true });
+    const nowhere = join(scratch, "nowhere");
+    const { run, calls } = answering('{"scanner":"omx-clap-scan","version":"0","files":[]}');
+    discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: `${nowhere}:${empty}` }, home: empty });
+    expect(calls.map((c) => c[2])).not.toContain(nowhere);
+    expect(calls.map((c) => c[2])).not.toContain(empty);
   });
 });
