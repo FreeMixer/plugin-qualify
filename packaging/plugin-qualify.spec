@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.9.0
+Version: 0.7.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -62,13 +62,6 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
-* Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.0-1
-- lv2_measure frees its host, and the plugin's features, URI node and LV2
-  world, on every way out: the soak, a soak that cannot instantiate and a
-  plugin that never instantiates, not only a full measurement.
-- make -C native asan builds the measurer under AddressSanitizer for the
-  tests' leak check; it is not part of the package build.
-
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.7.0-1
 - clap-qualify pins a symlinked .clap under the name it was handed, the name
   the console adds and plugin-hostd checks, with the target's bytes.
