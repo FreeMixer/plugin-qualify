@@ -59,7 +59,7 @@ them. The commands below are written as `plugin-qualify`; from a checkout run th
 ```
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
-plugin-qualify --all                          # everything lilv finds (LV2_PATH honoured)
+plugin-qualify --all                          # everything lilv finds (LV2_PATH honoured), and every CLAP
 plugin-qualify --help                         # every option and its default
 ```
 
@@ -79,7 +79,14 @@ CLAP prober the package installs (from a checkout, the one built from `native/`,
 ```
 plugin-qualify ./my-fx.clap                   # every plugin in the file
 plugin-qualify --out ./out ./my-fx.clap       # and its RT-safety documents
+CLAP_PATH=~/my-clap plugin-qualify --all      # every CLAP on the search path
 ```
+
+`--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
+names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
+distribution and architecture. A plugin id found twice keeps its first place on that path. The LV2
+plugins lilv finds are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive
+that pass yet.
 
 The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
