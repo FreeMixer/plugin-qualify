@@ -9,6 +9,8 @@
 #                            build/fixtures/fail-alloc.so,
 #                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness}.lv2
 #   build/lv2_measure_features_test   the measurer's features oracle, run from native/
+#   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
+#                            leak check; never installed, and not in `all` (Fedora's gcc lacks libasan)
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, and
 #                            the omx-contract header the LV2 measurer reads its rates from
 #   build/parity/lv2_measure openmixer's LV2 measurer (parity/openmixer, kept as it was there), built with
@@ -81,6 +83,14 @@ $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) \
 		$(LILV_LIBS) -lpthread -lm -ldl
 
+# the same, under AddressSanitizer: the leak check runs it on every way out of main
+asan: $(BUILD)/asan/lv2_measure
+
+$(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LILV_CFLAGS) \
+		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(LILV_LIBS) -lpthread -lm -ldl
+
 # the features' oracle, never installed; it opens the fixtures by these paths, run from native/
 $(BUILD)/lv2_measure_features_test: lv2_measure_features.test.c lv2-measure-features.c lv2-measure-features.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LILV_CFLAGS) -I. '-DTEST_LV2_SO="$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so"' \
@@ -152,4 +162,4 @@ install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all deps install clean
+.PHONY: all asan deps install clean

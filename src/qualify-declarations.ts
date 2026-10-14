@@ -75,7 +75,7 @@ export const CLAP_SCAN_TIMEOUT_S = 300;
 /**
  * The CLAP prober (`native/clap-qualify.c`), the LV2 measurer (`native/lv2-measure.c`) and the
  * interposer both run under (`native/rt-interpose.c`): each located by one environment variable, else
- * the first of `NATIVE_TOOL_DIRS` that holds it, else the package's own build in `native/build/`.
+ * the package's own build in `native/build/`, else the first of `NATIVE_TOOL_DIRS` that holds it.
  */
 export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";

@@ -35,11 +35,12 @@ jobs:
 
       # the CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify;
       # deps/ also holds openmixer's copy of the measurer, which the parity test runs beside ours
+      # asan: the measurer under AddressSanitizer, which the leak check runs
       - name: Build the native tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
-          make -C native deps all
+          make -C native deps all asan
 
       - name: Type-check
         run: pnpm lint
