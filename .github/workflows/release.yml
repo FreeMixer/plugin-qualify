@@ -38,7 +38,8 @@ jobs:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
       needs-mod-host: false
-      # plugin-hostd-devel, whose pin.h the CLAP prober builds against
+      # plugin-hostd-devel, whose pin.h the CLAP prober builds against, and omx-clap-lv2-devel, the
+      # LV2 measurer's host features
       channel-deps: true
       arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["x86_64"]' || '["x86_64", "aarch64"]' }}
     secrets: inherit
@@ -51,7 +52,8 @@ jobs:
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
-      # the CLAP headers from the pin, plugin-hostd-dev (pin.h) from the channel: the CLAP prober's build
+      # the CLAP headers from the pin, plugin-hostd-dev (pin.h) from the channel: the CLAP prober's build;
+      # libomx-clap-lv2-dev from the channel: the LV2 measurer's host features
       dependencies: 'clap-headers'
       requires: ''
       channel-deps: true

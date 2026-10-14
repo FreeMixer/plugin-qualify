@@ -34,7 +34,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # the CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify;
-      # deps/ also holds openmixer's copy of the measurer, which the parity test runs beside ours
+      # deps/ also holds openmixer's copy of the measurer, which the parity test runs beside ours, and
+      # omx-clap-core's LV2 feature provider at the packages' floor, built for the measurer to link
       # asan: the measurer under AddressSanitizer, which the leak check runs
       - name: Build the native tools
         run: |

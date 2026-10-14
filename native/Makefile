@@ -35,7 +35,7 @@ PLUGIN_HOSTD_REF := v0.1.4
 OMX_CONTRACT_VERSION := 2.10.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
-OMX_CLAP_CORE_VERSION := 0.7.0
+OMX_CLAP_CORE_VERSION := 0.8.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
