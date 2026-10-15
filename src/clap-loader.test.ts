@@ -8,7 +8,7 @@
  * `.clap` beside it); the live test runs the built tool and requires it to say the same.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ import {
   clapScanDescriptors,
   clapScanTool,
   clapSearchPath,
+  discoverAllTargets,
   discoverClapTargets,
   parseClapScan,
   type ClapScanRun,
@@ -367,5 +368,70 @@ describe("--all — the standard CLAP search path", () => {
     discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: `${nowhere}:${empty}` }, home: empty });
     expect(calls.map((c) => c[2])).not.toContain(nowhere);
     expect(calls.map((c) => c[2])).not.toContain(empty);
+  });
+});
+
+describe("--all — both formats, and a search directory that cannot be read", () => {
+  const none = '{"scanner":"omx-clap-scan","version":"0","files":[]}';
+
+  it("refuses, naming the LV2 bundles, when the LV2 path holds any: the CLAP side is never reported alone", () => {
+    const clapDir = join(scratch, "both", "clap");
+    const lv2Dir = join(scratch, "both", "lv2");
+    touch("both/clap/x.clap");
+    mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
+    const { run, calls } = answering(none);
+    const env = { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir };
+    expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(ClapScanError);
+    expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(/1 LV2 bundle.*gain\.lv2/);
+    expect(calls).toEqual([]);
+  });
+
+  it("walks the CLAP path as before when the LV2 path holds no bundle", () => {
+    const clapDir = join(scratch, "only-clap", "clap");
+    const lv2Dir = join(scratch, "only-clap", "lv2");
+    touch("only-clap/clap/x.clap");
+    mkdirSync(lv2Dir, { recursive: true });
+    const { run, calls } = answering(none);
+    expect(discoverAllTargets({ run, env: { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir }, home: lv2Dir })).toEqual([]);
+    expect(calls.map((c) => c[2])).toEqual([clapDir]);
+  });
+
+  it("the command exits 2 with both formats present", () => {
+    const bin = join(PKG, "bin", "plugin-qualify.mjs");
+    if (!existsSync(join(PKG, "dist", "index.js"))) return;
+    const lv2Dir = join(scratch, "cli", "lv2");
+    mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
+    const r = spawnSync(process.execPath, [bin, "--all"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: join(scratch, "cli", "home"), LV2_PATH: lv2Dir, CLAP_PATH: join(scratch, "cli", "none") },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/LV2 bundle/);
+  });
+
+  it("a directory that cannot be read is a named scan refusal, not a crash", () => {
+    if (process.getuid?.() === 0) return; // root reads everything
+    const top = join(scratch, "locked", "clap");
+    const sub = join(top, "sub");
+    mkdirSync(sub, { recursive: true });
+    chmodSync(sub, 0o000);
+    try {
+      const { run } = answering(none);
+      const env = { [CLAP_PATH_ENV]: top, LV2_PATH: join(scratch, "locked", "nolv2") };
+      expect(() => discoverClapTargets({ run, env, home: top })).toThrow(ClapScanError);
+      expect(() => discoverClapTargets({ run, env, home: top })).toThrow(new RegExp(`cannot read ${sub}: EACCES`));
+    } finally {
+      chmodSync(sub, 0o755);
+    }
+  });
+
+  it("a symlink loop in the search directory is a named scan refusal, not a crash", () => {
+    const top = join(scratch, "loop", "clap");
+    mkdirSync(top, { recursive: true });
+    symlinkSync(top, join(top, "again"));
+    const { run } = answering(none);
+    const env = { [CLAP_PATH_ENV]: top };
+    expect(() => discoverClapTargets({ run, env, home: top })).toThrow(ClapScanError);
+    expect(() => discoverClapTargets({ run, env, home: top })).toThrow(/cannot read .*again.*: (ELOOP|ENAMETOOLONG)/);
   });
 });

@@ -20,7 +20,7 @@ import {
   ClapScanError,
   EXIT_CODE,
   clapLoader,
-  discoverClapTargets,
+  discoverAllTargets,
   exitCodeFor,
   helpText,
   lv2Loader,
@@ -49,7 +49,7 @@ if (!profiles.ok) {
 for (const p of profiles.profiles) process.stderr.write(`plugin-qualify: host profile ${p.id} (${p.isolation})\n`);
 let plugins;
 try {
-  if (parsed.args.all) plugins = discoverClapTargets();
+  if (parsed.args.all) plugins = discoverAllTargets();
   else {
     const r = resolveTargets(parsed.args.targets, [clapLoader(), lv2Loader]);
     if (!r.ok) {
@@ -66,7 +66,7 @@ try {
 for (const p of plugins) process.stderr.write(`plugin-qualify: target ${p.uri}${p.bundle ? ` (${p.bundle})` : ""}\n`);
 if (plugins.length > 0 && plugins.every((p) => p.format === "clap")) {
   if (parsed.args.all) {
-    process.stderr.write("plugin-qualify: --all qualifies the CLAP plugins on the search path; the LV2 plugins lilv finds are measured by tools/lv2-measure.mjs\n");
+    process.stderr.write("plugin-qualify: --all qualified the CLAP plugins on the search path (no LV2 bundle is on the LV2 path)\n");
   }
   const pass = qualifyClapTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
   for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);

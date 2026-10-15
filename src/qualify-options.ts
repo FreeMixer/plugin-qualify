@@ -32,7 +32,7 @@ export interface QualifyOption {
 }
 
 export const QUALIFY_OPTIONS: readonly QualifyOption[] = [
-  { flag: "--all", describe: "every plugin lilv finds (LV2_PATH honoured) and every CLAP on the CLAP search path" },
+  { flag: "--all", describe: "every CLAP plugin on the CLAP search path; refuses when LV2 bundles are on the LV2 path" },
   { flag: "--rates", value: "list", describe: "sample rates to measure at, comma-separated", default: QUALIFY_RATES.join(",") },
   { flag: "--quanta", value: "list", describe: "quanta (frames) to rate cost at, comma-separated", default: QUALIFY_QUANTA.join(",") },
   { flag: "--out", value: "dir", describe: "write one interchange JSON document per run into this directory" },

@@ -59,7 +59,7 @@ them. The commands below are written as `plugin-qualify`; from a checkout run th
 ```
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
-plugin-qualify --all                          # everything lilv finds (LV2_PATH honoured), and every CLAP
+plugin-qualify --all                          # every CLAP on the search path; refuses if LV2 bundles are on LV2_PATH
 plugin-qualify --help                         # every option and its default
 ```
 
@@ -84,9 +84,11 @@ CLAP_PATH=~/my-clap plugin-qualify --all      # every CLAP on the search path
 
 `--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
 names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
-distribution and architecture. A plugin id found twice keeps its first place on that path. The LV2
-plugins lilv finds are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive
-that pass yet.
+distribution and architecture. A plugin id found twice keeps its first place on that path. LV2 plugins
+are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive that pass yet, so
+`--all` refuses with exit 2 when any `.lv2` bundle is on the LV2 path (`LV2_PATH`, else `~/.lv2` and the
+system lv2 directories) rather than qualify only the CLAP side. A directory on the CLAP path that cannot
+be read (permissions, a symlink loop) also refuses with exit 2, naming it.
 
 The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
