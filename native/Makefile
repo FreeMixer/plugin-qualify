@@ -35,7 +35,9 @@ PLUGIN_HOSTD_REF := v0.1.4
 OMX_CONTRACT_VERSION := 2.10.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
-OMX_CLAP_CORE_VERSION := 0.7.0
+OMX_CLAP_CORE_VERSION := 0.8.0
+# the omx-dsp headers that omx-clap-core's provider reads, at omx-clap-core's own floor
+OMX_DSP_VERSION := 0.18.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
@@ -164,7 +166,7 @@ $(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
-	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION)
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
