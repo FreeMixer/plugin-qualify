@@ -27,6 +27,8 @@ export interface QualifyArgs {
   readonly rates: readonly number[];
   readonly quanta: readonly number[];
   readonly out?: string;
+  /** `--pins`: where the pins file is written. */
+  readonly pins?: string;
   readonly format: OutputFormat;
   readonly isolate: boolean;
   readonly hostSweep: boolean;
@@ -83,6 +85,8 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
     return { ok: false, error: `--format must be one of ${OUTPUT_FORMATS.join(", ")}` };
   }
   const out = seen.get("--out") as string | undefined;
+  const pins = seen.get("--pins") as string | undefined;
+  if (pins !== undefined && pins.startsWith("--")) return { ok: false, error: "--pins needs a file name" };
   const hostProfiles = [...new Set(profileSpecs.length > 0 ? profileSpecs : [defaultOf("--host-profile")])];
   return {
     ok: true,
@@ -92,6 +96,7 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
       rates,
       quanta,
       ...(out === undefined ? {} : { out }),
+      ...(pins === undefined ? {} : { pins }),
       format: format as OutputFormat,
       isolate: seen.has("--isolate"),
       hostSweep: !seen.has("--no-host-sweep"),

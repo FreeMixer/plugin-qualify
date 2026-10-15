@@ -229,6 +229,18 @@ validates a profile file, and `judgedDocument(run, plugins, profiles, verdicts)`
 document. All of them are exported from the package root. The package depends on no other
 OpenMixer package.
 
+### Pinning what was qualified
+
+```
+plugin-qualify --pins pins.txt ./my-synth.clap     # a pin and a verdict per plugin, in a file plugin-hostd loads
+```
+
+`--pins <file>` writes one line per qualified plugin, the same line as plugin-hostd's `pin_set` verb with the verdict as
+a last word: the SHA-256 of every file the host loads, the parameter-layout fingerprint, and `verdict=in-process`
+(suitable), `isolated` (conditional) or `refused` (unsuitable). A plugin with no verdict is pinned without one. Put the
+file in plugin-hostd's settings as `pin_file` and an `add` of that plugin needs no `pin_set`; a changed file is refused
+with -509. The verdict is the first `--host-profile`'s. A run that took no pin leaves an existing file alone.
+
 ### The container image
 
 ```
