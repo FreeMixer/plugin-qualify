@@ -55,8 +55,12 @@ export interface PinEntry {
   readonly verdict?: PinVerdict;
 }
 
-/** The line of one pin, or `undefined` when the integrity block is not a whole pin. */
+/** The line of one pin, or `undefined` when the integrity block is not a whole pin. A uri with whitespace in it would be read back as more words: it is refused, by name. */
 export function pinLine(entry: PinEntry): string | undefined {
+  const spaced = [entry.uri, ...(entry.integrity.files ?? []).map((f) => f.path)].find((w) => /\s/.test(w));
+  if (spaced !== undefined) {
+    throw new Error(`${entry.uri}: ${JSON.stringify(spaced)} has whitespace in it and cannot be a word of a pin line`);
+  }
   const { files, layout } = entry.integrity;
   if (files === undefined || files.length === 0 || layout === undefined) return undefined;
   const list = files.map((f) => `${f.path}=${f.sha256}`).join(",");
@@ -77,6 +81,8 @@ export interface PinsFile {
   readonly written: readonly string[];
   /** The uris of plugins that took no whole pin: they have no line. */
   readonly skipped: readonly string[];
+  /** The uris refused because a word of their line has whitespace in it, each with the reason: they have no line. */
+  readonly refused: readonly { readonly uri: string; readonly problem: string }[];
 }
 
 /**
@@ -88,9 +94,16 @@ export function pinsFile(entries: readonly PinEntry[]): PinsFile {
   const byUri = new Map<string, string>();
   const verdictOf = new Map<string, PinVerdict | undefined>();
   const skipped: string[] = [];
+  const refused: { uri: string; problem: string }[] = [];
   const rank = (v: PinVerdict | undefined): number => (v === undefined ? 4 : { "in-process": 1, isolated: 2, refused: 3 }[v]);
   for (const entry of entries) {
-    const line = pinLine(entry);
+    let line: string | undefined;
+    try {
+      line = pinLine(entry);
+    } catch (e) {
+      refused.push({ uri: entry.uri, problem: (e as Error).message });
+      continue;
+    }
     if (line === undefined) {
       skipped.push(entry.uri);
       continue;
@@ -105,7 +118,7 @@ export function pinsFile(entries: readonly PinEntry[]): PinsFile {
     ...uris.map((u) => byUri.get(u)!),
     "",
   ].join("\n");
-  return { text, written: uris, skipped: skipped.filter((u) => !byUri.has(u)) };
+  return { text, written: uris, skipped: skipped.filter((u) => !byUri.has(u)), refused };
 }
 
 /**

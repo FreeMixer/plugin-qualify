@@ -27,14 +27,21 @@ sudo apt update
 sudo apt install plugin-qualify
 ```
 
-The package is on the npm registry:
+From the npm registry:
 
 ```
 pnpm add @openmixer/plugin-qualify
+# or, to install the command globally:
+npm install -g @openmixer/plugin-qualify
 ```
 
-(or `npm install -g @openmixer/plugin-qualify`). To run from a checkout instead (Node.js 20 or newer
-and pnpm 10, see `BUILDING.md`):
+The npm package ships the TypeScript command only, not the native tools. The CLAP prober, the LV2 measurer and
+the interposer come with the RPM or DEB, or from `make -C native` in a checkout; with the npm package alone,
+point `OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` at them, or CLAP qualification and the LV2
+hosting dimensions refuse with "no CLAP prober at ...".
+
+The GitHub release also carries the packed tarball, `openmixer-plugin-qualify-<version>.tgz`. To run from a
+checkout instead (Node.js 20 or newer and pnpm 10, see `BUILDING.md`):
 
 ```
 git clone https://github.com/FreeMixer/plugin-qualify.git
@@ -52,7 +59,7 @@ them. The commands below are written as `plugin-qualify`; from a checkout run th
 ```
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
-plugin-qualify --all                          # everything lilv finds (LV2_PATH honoured)
+plugin-qualify --all                          # every CLAP on the search path; refuses if LV2 bundles are on LV2_PATH
 plugin-qualify --help                         # every option and its default
 ```
 
@@ -72,7 +79,16 @@ CLAP prober the package installs (from a checkout, the one built from `native/`,
 ```
 plugin-qualify ./my-fx.clap                   # every plugin in the file
 plugin-qualify --out ./out ./my-fx.clap       # and its RT-safety documents
+CLAP_PATH=~/my-clap plugin-qualify --all      # every CLAP on the search path
 ```
+
+`--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
+names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
+distribution and architecture. A plugin id found twice keeps its first place on that path. LV2 plugins
+are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive that pass yet, so
+`--all` refuses with exit 2 when any `.lv2` bundle is on the LV2 path (`LV2_PATH`, else `~/.lv2` and the
+system lv2 directories) rather than qualify only the CLAP side. A directory on the CLAP path that cannot
+be read (permissions, a symlink loop) also refuses with exit 2, naming it.
 
 The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints

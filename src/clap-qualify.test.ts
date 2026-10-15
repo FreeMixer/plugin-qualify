@@ -9,7 +9,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,6 +151,19 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(rtSafetyDocument(safe!).measured.integrity).toEqual(safe!.integrity);
   });
 
+  live("a .clap whose name holds a separator of pin_set or whitespace is unpinnable, not pinned", () => {
+    for (const name of ["a,b.clap", "sp ace.clap"]) {
+      const named = join(scratch, name);
+      copyFileSync(SAFE, named);
+      const [l] = qualifyClap(named, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+      expect(l!.integrity).toEqual({
+        version: "1",
+        unmeasuredReason: "unpinnable",
+        unmeasuredDetail: "the file name holds a separator of pin_set or whitespace",
+      });
+    }
+  });
+
   live("a symlinked .clap is pinned under the link's name, the name the console adds, with the target's bytes", () => {
     const link = join(scratch, "link.clap");
     symlinkSync(SAFE, link);
@@ -231,6 +244,25 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     const unsafe = run(UNSAFE, join(scratch, "unsafe"));
     expect(unsafe.status).toBe(1);
     expect(unsafe.stdout).toContain(HOSTING_CODE.rtSafetyViolations);
+  });
+});
+
+describe("plugin-qualify --all, live — the standard CLAP search path", () => {
+  live("a .clap only on CLAP_PATH is found by --all and qualified, with ~/.clap empty", () => {
+    const onPath = join(scratch, "clap-path");
+    mkdirSync(onPath, { recursive: true });
+    copyFileSync(SAFE, join(onPath, basename(SAFE)));
+    const home = join(scratch, "home");
+    mkdirSync(home, { recursive: true });
+    const bin = join(PKG, "bin", "plugin-qualify.mjs");
+    const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(QUALIFY_RATES[0])], {
+      encoding: "utf8",
+      // the prober is the scanner here too, so the walk reads the real file
+      env: { ...process.env, HOME: home, CLAP_PATH: onPath, LV2_PATH: join(scratch, "no-lv2"), [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath() },
+    });
+    expect(r.stderr).toContain(`target urn:clap:${SAFE_ID} (${onPath})`);
+    expect(r.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));
+    expect(r.status).toBe(0);
   });
 });
 
@@ -345,15 +377,36 @@ describe("qualifyClap — the run, fail closed", () => {
     expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: () => false })).toThrow(new RegExp(CLAP_QUALIFY_TOOL_ENV));
   });
 
-  it("unset, the prober and the interposer are the installed ones, then the package's own build", () => {
+  it("unset, the prober and the interposer are the package's own build, then the installed ones", () => {
     const own = [clapQualifyToolPath(), rtInterposePath()];
     const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
     const holding = (paths: readonly string[]) => (p: string) => paths.includes(p);
-    expect(clapQualifyTools({}, holding([...installed[1]!, ...own]))).toEqual({ tool: installed[1]![0], interposer: installed[1]![1] });
+    expect(clapQualifyTools({}, holding([...installed[0]!, ...own]))).toEqual({ tool: own[0], interposer: own[1] });
+    expect(clapQualifyTools({}, holding(installed[1]!))).toEqual({ tool: installed[1]![0], interposer: installed[1]![1] });
     expect(clapQualifyTools({}, holding([...installed[0]!, ...installed[1]!]))).toEqual({ tool: installed[0]![0], interposer: installed[0]![1] });
     expect(clapQualifyTools({}, holding(own))).toEqual({ tool: own[0], interposer: own[1] });
     const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
     expect(clapQualifyTools(env, () => true)).toEqual({ tool: "/t/clap-qualify", interposer: "/t/rt.so" });
+  });
+
+  it("unset, the prober and the interposer come from one place; a place holding only one of them is refused", () => {
+    const own = [clapQualifyToolPath(), rtInterposePath()];
+    const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
+    const holding = (paths: readonly string[]) => (p: string) => paths.includes(p);
+    const ownDir = dirname(own[0]!);
+    // the own build holds only the interposer: refused, never paired with the installed prober
+    expect(() => clapQualifyTools({}, holding([installed[0]![0]!, own[1]!, ...installed[1]!]))).toThrow(
+      new RegExp(`${ownDir}/? holds ${RT_INTERPOSE_NAME} but not ${CLAP_QUALIFY_TOOL_NAME}`),
+    );
+    // the first installed directory holds only the prober: refused, never paired with the second's interposer
+    expect(() => clapQualifyTools({}, holding([installed[0]![0]!, ...installed[1]!]))).toThrow(
+      new RegExp(`${NATIVE_TOOL_DIRS[0]} holds ${CLAP_QUALIFY_TOOL_NAME} but not ${RT_INTERPOSE_NAME}.*${CLAP_QUALIFY_TOOL_ENV} and ${RT_INTERPOSE_ENV}`),
+    );
+    // a setting decides its own tool; the other still comes from the first place holding it
+    expect(clapQualifyTools({ [RT_INTERPOSE_ENV]: "/t/rt.so" }, holding(["/t/rt.so", installed[1]![0]!]))).toEqual({
+      tool: installed[1]![0],
+      interposer: "/t/rt.so",
+    });
   });
 
   it("a setting naming an absent file is refused, never passed over for an installed tool", () => {
@@ -363,7 +416,7 @@ describe("qualifyClap — the run, fail closed", () => {
 
   it("absent everywhere, the refusal names every place looked", () => {
     expect(() => clapQualifyTools({}, () => false)).toThrow(
-      new RegExp([...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME)), clapQualifyToolPath()].join(", ")),
+      new RegExp([clapQualifyToolPath(), ...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME))].join(", ")),
     );
   });
 

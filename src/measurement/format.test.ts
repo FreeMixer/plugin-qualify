@@ -20,6 +20,7 @@ import {
   MEASUREMENT_FORMAT_MAJOR,
   MEASUREMENT_FORMAT_VERSION,
   parseFormatVersion,
+  readIntegrity,
   readMeasurementDocument,
   serialiseMeasurementDocument,
 } from "./format.js";
@@ -251,5 +252,42 @@ describe("v1.2 — verdicts per host profile (§3b)", () => {
     expect("verdicts" in doc).toBe(false);
     expect("hostProfiles" in doc).toBe(false);
     expect(doc.formatVersion).toBe("1.3");
+  });
+});
+
+describe("readIntegrity — a pin is whole or absent, never partly read", () => {
+  const A = "a".repeat(64);
+  const B = "b".repeat(64);
+  const layout = { scheme: "omx-layout/1", sha256: B };
+  const notWhole = { unmeasuredReason: "probe-error", unmeasuredDetail: "the integrity block is not a whole pin" };
+  const pin = (...paths: string[]) => readIntegrity({ version: "1", files: paths.map((path) => ({ path, sha256: A })), layout });
+
+  it("reads a pin of paths inside the bundle, sorted", () => {
+    expect(pin("sub/b.clap", "a.clap")).toEqual({
+      version: "1",
+      files: [
+        { path: "a.clap", sha256: A },
+        { path: "sub/b.clap", sha256: A },
+      ],
+      layout,
+    });
+  });
+
+  it.each([
+    ["a path climbing out of the bundle", "../a.clap"],
+    ["a '..' inside the path", "sub/../a.clap"],
+    ["a '.' segment", "./a.clap"],
+    ["an empty segment", "sub//a.clap"],
+    ["a leading '/'", "/usr/lib/clap/a.clap"],
+  ])("refuses %s", (_, path) => {
+    expect(pin(path)).toEqual({ version: "1", ...notWhole });
+  });
+
+  it("refuses a path named twice", () => {
+    expect(pin("a.clap", "a.clap")).toEqual({ version: "1", ...notWhole });
+  });
+
+  it("refuses an empty files list", () => {
+    expect(pin()).toEqual({ version: "1", ...notWhole });
   });
 });

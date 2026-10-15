@@ -69,13 +69,22 @@ export const SOAK_CALIBRATION_S = 30;
 export const CLAP_SCAN_TOOL_ENV = "OMX_CLAP_SCAN";
 export const CLAP_SCAN_TOOL_DEFAULT = "omx-clap-scan";
 
+/**
+ * The standard CLAP search path `--all` walks, in this order: every directory `CLAP_PATH` names
+ * (colon-separated), then `~/.clap`, then `/usr/lib/clap`. The system directory is the same on
+ * every distribution and architecture; it is never the library directory (`/usr/lib64`).
+ */
+export const CLAP_PATH_ENV = "CLAP_PATH";
+export const CLAP_USER_DIR = ".clap";
+export const CLAP_SYSTEM_DIR = "/usr/lib/clap";
+
 /** Seconds one run of the CLAP scanner may take over everything it was pointed at. */
 export const CLAP_SCAN_TIMEOUT_S = 300;
 
 /**
  * The CLAP prober (`native/clap-qualify.c`), the LV2 measurer (`native/lv2-measure.c`) and the
  * interposer both run under (`native/rt-interpose.c`): each located by one environment variable, else
- * the first of `NATIVE_TOOL_DIRS` that holds it, else the package's own build in `native/build/`.
+ * the package's own build in `native/build/`, else the first of `NATIVE_TOOL_DIRS` that holds it.
  */
 export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";

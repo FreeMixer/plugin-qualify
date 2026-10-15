@@ -5,7 +5,7 @@
  * with the daemon's own rules, and the worse verdict wins. The live test qualifies a fixture plugin into a pins file
  * (the native build, as `clap-qualify.test.ts`). The daemon test starts plugin-hostd on that file with `pin_file` and
  * require_pins on, adds the plugin with no `pin_set`, and corrupts one hash to get -509; it needs `PLUGIN_HOSTD` and
- * `PLUGIN_HOSTD_FAKE_HOST` (plugin-hostd's `tests/fake-host`) and skips without them.
+ * `PLUGIN_HOSTD_FAKE_HOST` (plugin-hostd's `tests/fake-host`) and skips visibly without them; under CI (CI set) it fails instead, and the workflow builds them.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -90,6 +90,30 @@ describe("pinLine — hostd's pin_set line", () => {
       layout: { scheme: "omx-layout/1", sha256: B },
       verdict: "isolated",
     });
+  });
+});
+
+describe("a word with whitespace in it", () => {
+  it("is refused by name in pinLine, and left out (and named) by pinsFile", () => {
+    expect(() => pinLine(entry("clap:/p/My Plugins/x.clap#id"))).toThrow(/clap:\/p\/My Plugins\/x\.clap#id/);
+    expect(() => pinLine({ uri: "u", integrity: { files: [{ path: "a b.clap", sha256: A }], layout: { scheme: "omx-layout/1", sha256: B } } })).toThrow(/whitespace/);
+    const file = pinsFile([entry("clap:/p/My Plugins/x.clap#id"), entry("clap:/p/x.clap#id")]);
+    expect(file.written).toEqual(["clap:/p/x.clap#id"]);
+    expect(file.refused.map((r) => r.uri)).toEqual(["clap:/p/My Plugins/x.clap#id"]);
+    expect(file.text).not.toContain("My Plugins");
+  });
+
+  it("every line written round-trips through parsePinLine to the entry it came from", () => {
+    const entries = [entry("a"), entry("clap:/p/x.clap#id", { verdict: "isolated" }), entry("urn:b", { verdict: "refused" }), entry("c", { verdict: "in-process" })];
+    for (const e of entries) {
+      const line = pinLine(e)!;
+      const p = parsePinLine(line)!;
+      expect(p.uri).toBe(e.uri);
+      expect(p.files).toEqual(e.integrity.files);
+      expect(p.layout).toEqual(e.integrity.layout);
+      expect(p.verdict).toBe(e.verdict);
+    }
+    for (const line of pinsFile(entries).text.split("\n")) if (!line.startsWith("#") && line !== "") expect(() => parsePinLine(line)).not.toThrow();
   });
 });
 

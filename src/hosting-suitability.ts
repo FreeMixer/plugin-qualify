@@ -799,7 +799,7 @@ export function clapTopologyReasons(clap: PluginClapMeasurement | undefined, ins
     return [reason("topology", "objective", "unsuitable", HOSTING_CODE.topologyWiderThanStrip, { ins, outs })];
   }
   if (clap.sidechainInputs > 0) {
-    return [reason("topology", "objective", "conditional", HOSTING_CODE.topologyExtraInputs, { ins, outs, sidechains: clap.sidechainInputs })];
+    return [reason("topology", "objective", "unsuitable", HOSTING_CODE.topologyExtraInputs, { ins, outs, sidechains: clap.sidechainInputs })];
   }
   return [reason("topology", "objective", "suitable", HOSTING_CODE.topologyMatched, { ins, outs })];
 }

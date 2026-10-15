@@ -1,0 +1,4 @@
+# liblilv 0.26.4 (Fedora 44) leaks one plugin-class node in lilv_world_load_all and keeps it past
+# lilv_world_free: a lilv program that does nothing else leaks the same 24 bytes. The leak check
+# ignores that one frame; a leak from this tree's own code still fails it.
+leak:lilv_world_add_plugin_class

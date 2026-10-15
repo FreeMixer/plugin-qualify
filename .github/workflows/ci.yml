@@ -35,11 +35,33 @@ jobs:
 
       # the CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify;
       # deps/ also holds openmixer's copy of the measurer, which the parity test runs beside ours
+      # asan: the measurer under AddressSanitizer, which the leak check runs
       - name: Build the native tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
-          make -C native deps all
+          make -C native deps all asan
+
+      # the daemon and its fake worker, which src/pins-file.test.ts runs on the file the CLI wrote (it throws under CI
+      # without them); plugin-hostd at a commit, the protocol library at the commit its own CI uses
+      - uses: actions/checkout@v4
+        with:
+          repository: FreeMixer/plugin-hostd
+          ref: c71528ae13e07b5811cc2747726a12c27357fc29
+          path: plugin-hostd
+
+      - uses: FreeMixer/.github/.github/actions/mod-host-protocol@v1
+        with:
+          ref: ce0d247dce860051456e45d5e4e4e70d5884629f
+
+      - name: Build plugin-hostd and its fake worker
+        run: |
+          set -euo pipefail
+          make -C plugin-hostd plugin-hostd tests/fake-host MOD_HOST_DIR="$MOD_HOST_DIR"
+          {
+            echo "PLUGIN_HOSTD=$GITHUB_WORKSPACE/plugin-hostd/plugin-hostd"
+            echo "PLUGIN_HOSTD_FAKE_HOST=$GITHUB_WORKSPACE/plugin-hostd/tests/fake-host"
+          } >> "$GITHUB_ENV"
 
       - name: Type-check
         run: pnpm lint
@@ -66,6 +88,8 @@ jobs:
     name: packages, dry run
     permissions:
       contents: write
+      issues: write
+      actions: read
     uses: ./.github/workflows/release.yml
     with:
       publish: false
