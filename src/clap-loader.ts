@@ -310,8 +310,10 @@ const channels = (ports: readonly ClapScanPort[]): number => ports.reduce((n, p)
 export function clapScanDescriptors(doc: ClapScanDocument): ClapDescriptorRow[] {
   const rows: ClapDescriptorRow[] = [];
   for (const file of doc.files) {
+    if (!("plugins" in file)) continue;
     const binaryPath = resolve(file.path);
     for (const p of file.plugins) {
+      if (!isPlugin(p)) continue;
       rows.push({
         uri: `urn:clap:${p.id}`,
         name: p.name,
@@ -449,6 +451,7 @@ export function discoverClapTargets(options: ClapDiscoverOptions = {}): PluginTa
   const found = new Map<string, PluginTarget>();
   for (const dir of clapSearchPath(options.env ?? process.env, options.home ?? homedir())) {
     try {
+      if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
       for (const t of loader.resolve(dir) ?? []) if (!found.has(t.uri)) found.set(t.uri, t);
     } catch (e) {
       throw unreadable(dir, e);
