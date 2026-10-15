@@ -58,6 +58,12 @@ _Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every param
 /* frames past the declared latency the impulse is looked for */
 #define IMPULSE_TAIL 8192u
 #define SILENCE 1e-6f
+/* the impulse's arrival is the first frame at or above this fraction of the response's own peak
+ * magnitude: an absolute floor as low as SILENCE reads the leakage a fractional-delay read puts one
+ * frame ahead of the main arrival (omx-pitch at 44.1 kHz: -2.1e-5 at 882, 1.03 at 883) as the onset,
+ * and refuses a plugin that declares its true delay by one frame (openmixer#1538). -60 dB below the
+ * peak sits far above that leakage and far below any arrival a plugin means. */
+#define ONSET_OF_PEAK 1e-3f
 
 /* what the host offers, in the order the document lists it */
 static const char *const HOST_EXTENSIONS[] = {
@@ -303,11 +309,15 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
   }
   int64_t steady = 0;
 
-  /* the impulse: where does it land? Scanned up to the declared figure plus a tail. */
+  /* the impulse: where does it land? The whole response up to the declared figure plus a tail is
+   * kept as its per-frame magnitude (the loudest main-out channel), and the arrival is read against
+   * its own peak (ONSET_OF_PEAK); a response that never leaves SILENCE has not arrived. */
   if (p->reset) p->reset(p);
   const uint32_t horizon = f->declared[r] + IMPULSE_TAIL;
+  const uint32_t span = (horizon + frames - 1u) / frames * frames;
+  float *mag = calloc(span, sizeof *mag);
   uint32_t seen_at = UINT32_MAX;
-  for (uint32_t base = 0; base < horizon && seen_at == UINT32_MAX; base += frames) {
+  for (uint32_t base = 0; mag && base < horizon; base += frames) {
     ports_fill(&ins, frames, 0.0f);
     if (base == 0 && ins.main_port >= 0)
       for (uint32_t c = 0; c < ins.buf[ins.main_port].channel_count; c++) ins.chan[ins.main_port][c][0] = 1.0f;
@@ -320,12 +330,23 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
       break;
     }
     if (outs.main_port < 0) break;
-    for (uint32_t i = 0; i < frames && seen_at == UINT32_MAX; i++)
-      for (uint32_t c = 0; c < outs.buf[outs.main_port].channel_count; c++)
-        if (fabsf(outs.chan[outs.main_port][c][i]) > SILENCE) {
-          seen_at = base + i;
-          break;
-        }
+    for (uint32_t i = 0; i < frames; i++)
+      for (uint32_t c = 0; c < outs.buf[outs.main_port].channel_count; c++) {
+        const float m = fabsf(outs.chan[outs.main_port][c][i]);
+        if (m > mag[base + i]) mag[base + i] = m;
+      }
+  }
+  if (mag) {
+    float peak = 0.0f;
+    for (uint32_t i = 0; i < horizon; i++)
+      if (mag[i] > peak) peak = mag[i];
+    const float floor = peak * ONSET_OF_PEAK > SILENCE ? peak * ONSET_OF_PEAK : SILENCE;
+    for (uint32_t i = 0; i < horizon && peak > SILENCE; i++)
+      if (mag[i] >= floor) {
+        seen_at = i;
+        break;
+      }
+    free(mag);
   }
   f->measured[r] = seen_at == UINT32_MAX ? f->declared[r] + 1u : seen_at;
 

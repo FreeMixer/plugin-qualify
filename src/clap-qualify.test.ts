@@ -138,6 +138,19 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(doc.measured.rtSafety.events).toContain("malloc");
   });
 
+  live("the arrival is read against the response's peak: a leak one frame ahead of a declared delay is not its onset (openmixer#1538)", () => {
+    // 883 frames, with -2.1e-5 at 882: what omx-pitch's fractional read puts out at 44.1 kHz
+    const [l] = qualifyClap(join(FIXTURES, "leaky-delay.clap"), undefined, { rates: QUALIFY_RATES });
+    const latency = rtSafetyDocument(l!).measured.clap.latency;
+    for (const rate of QUALIFY_RATES) expect(latency[String(rate)]).toEqual({ declaredFrames: 883, measuredFrames: 883 });
+  });
+
+  live("a delay that declares no latency is still measured at its arrival, so the mismatch stands", () => {
+    const [l] = qualifyClap(join(FIXTURES, "undeclared-delay.clap"), undefined, { rates: QUALIFY_RATES });
+    const latency = rtSafetyDocument(l!).measured.clap.latency;
+    for (const rate of QUALIFY_RATES) expect(latency[String(rate)]).toEqual({ declaredFrames: 0, measuredFrames: 883 });
+  });
+
   live("the pin: the .clap's digest by its name is sha256sum's, and the layout is an omx-layout/1 fingerprint", () => {
     const [safe] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     const [again] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
