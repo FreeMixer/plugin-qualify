@@ -43,11 +43,11 @@ jobs:
           make -C native deps all asan
 
       # the daemon and its fake worker, which src/pins-file.test.ts runs on the file the CLI wrote (it throws under CI
-      # without them); plugin-hostd at a commit, the protocol library at the commit its own CI uses
+      # without them); plugin-hostd at the commit that has pin_file (FreeMixer/plugin-hostd#30), the protocol library at the commit its own CI uses
       - uses: actions/checkout@v4
         with:
           repository: FreeMixer/plugin-hostd
-          ref: c71528ae13e07b5811cc2747726a12c27357fc29
+          ref: 5f702d375649166f7c02cfb8b73f032e86019353
           path: plugin-hostd
 
       - uses: FreeMixer/.github/.github/actions/mod-host-protocol@v1
