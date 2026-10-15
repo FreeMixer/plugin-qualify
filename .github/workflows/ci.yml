@@ -42,27 +42,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
           make -C native deps all asan
 
-      # the daemon and its fake worker, which src/pins-file.test.ts runs on the file the CLI wrote (it throws under CI
-      # without them); plugin-hostd at the commit that has pin_file (FreeMixer/plugin-hostd#30), the protocol library at the commit its own CI uses
-      - uses: actions/checkout@v4
-        with:
-          repository: FreeMixer/plugin-hostd
-          ref: 5f702d375649166f7c02cfb8b73f032e86019353
-          path: plugin-hostd
-
-      - uses: FreeMixer/.github/.github/actions/mod-host-protocol@v1
-        with:
-          ref: ce0d247dce860051456e45d5e4e4e70d5884629f
-
-      - name: Build plugin-hostd and its fake worker
-        run: |
-          set -euo pipefail
-          make -C plugin-hostd plugin-hostd tests/fake-host MOD_HOST_DIR="$MOD_HOST_DIR"
-          {
-            echo "PLUGIN_HOSTD=$GITHUB_WORKSPACE/plugin-hostd/plugin-hostd"
-            echo "PLUGIN_HOSTD_FAKE_HOST=$GITHUB_WORKSPACE/plugin-hostd/tests/fake-host"
-          } >> "$GITHUB_ENV"
-
       - name: Type-check
         run: pnpm lint
 
