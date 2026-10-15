@@ -324,7 +324,6 @@ async function daemon(conf: Record<string, string | number>): Promise<{ proc: Ch
 describe("plugin-hostd on the file, with require_pins on and no pin_set", () => {
   it("adds the qualified plugin, and refuses it with -509 when one hash of the file is corrupt", async (ctx) => {
     if (!BUILT && process.env["CI"]) throw new Error("native/build is needed and CI builds it");
-    if (!BUILT && process.env["CI"]) throw new Error("native/build is needed and CI builds it");
     if (HOSTD === undefined || FAKE_HOST === undefined) {
       if (process.env["CI"]) throw new Error("PLUGIN_HOSTD and PLUGIN_HOSTD_FAKE_HOST are needed: CI installs plugin-hostd and plugin-hostd-tests");
       // a visible skip, never a pass, off CI
