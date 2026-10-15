@@ -6,7 +6,8 @@
  * pure function in `src/qualify-cli.ts`; this file only reads argv, prints and exits.
  *
  * CLAP targets are qualified here: the prober (`native/clap-qualify`) runs each under the interposer
- * and every plugin gets its RT-safety verdict document, per binary hash and console.
+ * and every plugin gets its RT-safety verdict document, per binary hash and console. `--all` finds
+ * them on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then `/usr/lib/clap`).
  *
  * NOT YET WIRED for LV2 (refused with exit 2, never a silent partial run): driving the offline pass
  * (`tools/lv2-measure.mjs`) for a named subset and the mod-host hosting sweep from this entry
@@ -19,6 +20,7 @@ import {
   ClapScanError,
   EXIT_CODE,
   clapLoader,
+  discoverAllTargets,
   exitCodeFor,
   helpText,
   lv2Loader,
@@ -45,30 +47,35 @@ if (!profiles.ok) {
   process.exit(EXIT_CODE.couldNotMeasure);
 }
 for (const p of profiles.profiles) process.stderr.write(`plugin-qualify: host profile ${p.id} (${p.isolation})\n`);
-if (!parsed.args.all) {
-  let r;
-  try {
-    r = resolveTargets(parsed.args.targets, [clapLoader(), lv2Loader]);
-  } catch (e) {
-    if (!(e instanceof ClapScanError)) throw e;
-    process.stderr.write(`plugin-qualify: ${e.message}\n`);
-    process.exit(EXIT_CODE.couldNotMeasure);
-  }
-  if (!r.ok) {
-    process.stderr.write(`plugin-qualify: no plugin found for: ${r.refused.join(", ")}\n`);
-    process.exit(EXIT_CODE.couldNotMeasure);
-  }
-  for (const p of r.plugins) process.stderr.write(`plugin-qualify: target ${p.uri}${p.bundle ? ` (${p.bundle})` : ""}\n`);
-  if (r.plugins.every((p) => p.format === "clap")) {
-    const pass = qualifyClapTargets(r.plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
-    for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
-    if (parsed.args.out !== undefined) {
-      mkdirSync(parsed.args.out, { recursive: true });
-      for (const doc of pass.documents) writeFileSync(join(parsed.args.out, rtSafetyDocumentName(doc)), `${JSON.stringify(doc, null, 2)}\n`);
+let plugins;
+try {
+  if (parsed.args.all) plugins = discoverAllTargets();
+  else {
+    const r = resolveTargets(parsed.args.targets, [clapLoader(), lv2Loader]);
+    if (!r.ok) {
+      process.stderr.write(`plugin-qualify: no plugin found for: ${r.refused.join(", ")}\n`);
+      process.exit(EXIT_CODE.couldNotMeasure);
     }
-    process.stdout.write(parsed.args.format === "json" ? `${JSON.stringify(pass.documents, null, 2)}\n` : textTable(pass.verdicts));
-    process.exit(exitCodeFor(pass.verdicts));
+    plugins = r.plugins;
   }
+} catch (e) {
+  if (!(e instanceof ClapScanError)) throw e;
+  process.stderr.write(`plugin-qualify: ${e.message}\n`);
+  process.exit(EXIT_CODE.couldNotMeasure);
+}
+for (const p of plugins) process.stderr.write(`plugin-qualify: target ${p.uri}${p.bundle ? ` (${p.bundle})` : ""}\n`);
+if (plugins.length > 0 && plugins.every((p) => p.format === "clap")) {
+  if (parsed.args.all) {
+    process.stderr.write("plugin-qualify: --all qualified the CLAP plugins on the search path (no LV2 bundle is on the LV2 path)\n");
+  }
+  const pass = qualifyClapTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
+  for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
+  if (parsed.args.out !== undefined) {
+    mkdirSync(parsed.args.out, { recursive: true });
+    for (const doc of pass.documents) writeFileSync(join(parsed.args.out, rtSafetyDocumentName(doc)), `${JSON.stringify(doc, null, 2)}\n`);
+  }
+  process.stdout.write(parsed.args.format === "json" ? `${JSON.stringify(pass.documents, null, 2)}\n` : textTable(pass.verdicts));
+  process.exit(exitCodeFor(pass.verdicts));
 }
 process.stderr.write(
   "plugin-qualify: measuring from this entry point is not wired yet " +

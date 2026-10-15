@@ -9,8 +9,9 @@
  * The manifest read is the subset every LV2 bundle's manifest uses (subject, `a lv2:Plugin`,
  * `lv2:binary <x.so>`), not a Turtle parser; `--all` goes through lilv itself.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
 
 import type { PluginLoader, PluginTarget } from "./loader.js";
 
@@ -48,3 +49,28 @@ export const lv2Loader: PluginLoader = {
     return URI_SHAPE.test(target) ? [{ format: "lv2", uri: target }] : undefined;
   },
 };
+
+/** lilv's default LV2 search path, used when `LV2_PATH` is unset. */
+const LV2_DEFAULT_DIRS = [".lv2", "/usr/lib/lv2", "/usr/lib64/lv2", "/usr/local/lib/lv2", "/usr/local/lib64/lv2"];
+
+/**
+ * Every `.lv2` bundle directly under the LV2 search path (`LV2_PATH`, else lilv's defaults). An
+ * absent directory holds none; any other fs error propagates for the caller to name.
+ */
+export function lv2BundlesOnPath(env: Readonly<Record<string, string | undefined>>, home: string = homedir()): string[] {
+  const named = (env["LV2_PATH"] ?? "").split(":").filter((d) => d !== "");
+  const dirs = named.length > 0 ? named : LV2_DEFAULT_DIRS.map((d) => (d.startsWith("/") ? d : join(home, d)));
+  const bundles: string[] = [];
+  for (const dir of new Set(dirs.map((d) => resolve(d)))) {
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
+      throw e;
+    }
+    for (const n of names.sort()) if (n.endsWith(".lv2")) bundles.push(join(dir, n));
+  }
+  return bundles;
+}
