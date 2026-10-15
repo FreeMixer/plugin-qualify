@@ -38,8 +38,9 @@
  * reads `unknown` until it has been soaked, and that is deliberate.
  *
  *   make -C native              (builds native/build/lv2_measure; the Makefile carries the line)
- *   LD_PRELOAD=$PWD/native/build/rt_interpose.so native/build/lv2_measure <uri> [rate] [block] [cycles]
+ *   LD_PRELOAD=$PWD/native/build/rt_interpose.so native/build/lv2_measure [flags] <uri> [rate] [block] [cycles] [repeats]
  *   native/build/lv2_measure --pin <uri>     the pin alone, nothing instantiated
+ *   native/build/lv2_measure --help          the flags: the feature options (lv2-measure-options.h)
  *
  * The measurement line also carries the plugin's pin, `integrity` (lv2-measure-pin.h): the
  * SHA-256 of every file the host loads and the parameter-layout fingerprint, through
@@ -61,7 +62,7 @@
 
 #include <lilv/lilv.h>
 #include "rt-interpose.h"
-#include "lv2-measure-features.h"
+#include "lv2-measure-options.h"
 #include "lv2-measure-pin.h"
 #include <omxcontract/omx_contract_limits.h>
 #include <lv2/atom/atom.h>
@@ -72,10 +73,11 @@
  * A plugin measured under a host that offers more than ours does would earn a
  * verdict our RT thread cannot honour; measured under one that offers less, a
  * perfectly good plugin fails to instantiate and reads as broken. So the providers
- * are lv2-measure-features.h's, built on the kinds the LV2 adapter the engine hosts
- * through provides (host-backend-one-contract §3) — one URI table, the options at the
- * measured rate and block, a silent log. The worker's schedule is each instance's own
- * (below). Instantiating with NULL
+ * are the ones the engine hosts LV2 through: omx-clap-core's feature provider
+ * (<omx-clap-lv2/omx_lv2_features.h>, host-backend-one-contract §3) — one URI table, the
+ * options at the measured rate and block, a silent log — under the feature options of
+ * lv2-measure-options.h, which a run's flags change and its record names. The worker's
+ * schedule is each instance's own (below). Instantiating with NULL
  * features, which is what this program did first, made every LSP plugin segfault:
  * they require urid:map, and a host that does not map URIs is not a host.
  */
@@ -84,7 +86,7 @@
  * (`2026-09-25-plugin-qualify.md` §2a). A figure is only as true as the host is faithful, so
  * this offers a plugin what a real host does:
  *
- *   options   lv2-measure-features.h's table at the rate and block of each instance. An EMPTY
+ *   options   the provider's table at the rate and block of each instance. An EMPTY
  *             table makes every JUCE-built LV2 refuse to instantiate.
  *   worker    worker:schedule QUEUES a job; the host runs the plugin's work() between blocks,
  *             off run(), delivers the answer through work_response() before the next block and
@@ -134,7 +136,7 @@ struct host {
   struct param params[MAX_PARAMS];
   int n_params;
   int patch_port; /* the atom input that takes patch:Set, or -1 */
-  LV2_URID_Map map; /* lv2-measure-features.h's one URI table, for the forge */
+  LV2_URID_Map map; /* the provider's one URI table, for the forge */
   LV2_URID u_float, u_int, u_bool, u_long, u_double;
   LV2_URID u_chunk, u_sequence, u_patch_set, u_patch_prop, u_patch_val;
   double sweep_db, sweep_ratio;
@@ -142,6 +144,11 @@ struct host {
   /* What the host did, reported so a measurement can prove the injection landed. */
   long worker_jobs, worker_responses, worker_dropped, patch_sets;
   int worker_interface;
+  /* The feature options every instance is built under, the plugin's lv2:requiredFeature list
+   * (NULL-terminated), and the first of them a strict host refused it for. */
+  const struct lv2_measure_options *opts;
+  const char **required;
+  const char *refused;
 };
 
 struct job {
@@ -156,7 +163,6 @@ struct rig {
   size_t audio_slots;
   float *audio, *controls;
   uint8_t **atoms;
-  struct omx_lv2_options options;
   LV2_Worker_Schedule sched;
   struct omx_lv2_feature_block feature_block;
   const LV2_Worker_Interface *wk;
@@ -348,19 +354,24 @@ static void atom_reset(const struct host *h, uint8_t *buf, uint32_t port) {
   }
 }
 
-/* Open one instance the way a real host does: lv2-measure-features.h's block, with this
- * instance's options and its own worker schedule.
+/* Open one instance the way a real host does: the provider's feature block under the run's
+ * feature options, at this instance's rate and block, with its own worker schedule. A strict
+ * host refuses a plugin requiring a feature it does not offer before instantiating it.
  * `bind` also connects every port to a buffer of the type it expects. */
 static struct rig *rig_open(struct host *h, double rate, uint32_t block, int bind) {
   struct rig *r = calloc(1, sizeof *r);
   if (r == NULL) return NULL;
   r->h = h;
   r->block = block;
-  omx_lv2_options_build(&r->options, rate, block);
   r->sched = (LV2_Worker_Schedule){r, schedule_work};
+  const struct omx_lv2_feature_options *fo = &h->opts->feature;
+  if (fo->strict && omx_lv2_features_admit(fo, h->required, &h->refused) != 0) {
+    free(r);
+    return NULL;
+  }
   const LV2_Feature *const *features =
-      omx_lv2_features_build(&r->feature_block, OMX_LV2_LILV_HOST_FEATURES, &r->options, &r->sched);
-  r->inst = lilv_plugin_instantiate(h->plugin, rate, features);
+      omx_lv2_features_build(&r->feature_block, fo, rate, block, block, &r->sched);
+  r->inst = features ? lilv_plugin_instantiate(h->plugin, rate, features) : NULL;
   if (r->inst == NULL) {
     free(r);
     return NULL;
@@ -633,6 +644,13 @@ static void emit_host_facts(const struct host *h) {
           h->sweep_db, h->sweep_ratio);
 }
 
+/* The required feature a strict host refused the plugin for, when that is why nothing instantiated. */
+static void emit_refusal(const struct host *h) {
+  if (h->refused == NULL) return;
+  fprintf(jout, ",\"refusedFeature\":");
+  json_str(jout, h->refused);
+}
+
 static void fill_input(struct rig *r, unsigned *rng, int noise, uint32_t block, double rate, long frame0) {
   for (uint32_t i = 0; i < r->h->n_audio_in; i++) {
     float *in = rig_in(r, i);
@@ -647,37 +665,112 @@ static void fill_input(struct rig *r, unsigned *rng, int noise, uint32_t block, 
   }
 }
 
+/* The run's feature options, and the buffer --log capture appends to. */
+static struct lv2_measure_options g_opts;
+static char *g_capture;
+
+/* --log route: each line on stderr, which is where fd 1 went too, never into the record. */
+static void log_to_stderr(void *ctx, const char *type, const char *line) {
+  (void)ctx;
+  const char *kind = type ? strrchr(type, '#') : NULL;
+  const size_t len = strlen(line);
+  fprintf(stderr, "lv2-measure: log %s: %.*s\n", kind ? kind + 1 : "?", (int)(len && line[len - 1] == '\n' ? len - 1 : len),
+          line);
+}
+
+/* The record's featureOptions, beside whatever the log captured. */
+static void emit_feature_options(void) {
+  lv2_measure_options_print(jout, &g_opts, g_capture);
+}
+
 /* What main holds once the host is open, released on every way out, after the instances are gone. */
 static void release(struct host *h, LilvNodes *required, LilvNodes *optional, LilvNode *uri_node, LilvWorld *world) {
+  free(h->required);
   host_close(h);
   free(h);
+  free(g_capture);
   lilv_nodes_free(required);
   lilv_nodes_free(optional);
   lilv_node_free(uri_node);
   lilv_world_free(world);
 }
 
+static void usage(FILE *out, const char *self) {
+  fprintf(out,
+          "usage: %s [flags] <plugin-uri> [rate] [block] [cycles] [repeats]\n"
+          "       %s --pin <plugin-uri>\n"
+          "       %s --help\n\n%s",
+          self, self, self, LV2_MEASURE_OPTIONS_HELP);
+}
+
 int main(int argc, char **argv) {
-  if (argc == 3 && !strcmp(argv[1], "--pin")) return pin_only(argv[2]);
-  if (argc < 2) {
-    fprintf(stderr, "usage: %s <plugin-uri> [rate] [block] [cycles] | %s --pin <plugin-uri>\n", argv[0], argv[0]);
+  /* The flags anywhere on the line, the positionals in their order. */
+  const char *pos[5] = {NULL};
+  int npos = 0, pin = 0;
+  lv2_measure_options_init(&g_opts);
+  for (int i = 1; i < argc;) {
+    const char *why = NULL;
+    if (!strcmp(argv[i], "--help")) {
+      usage(stdout, argv[0]);
+      return 0;
+    }
+    if (!strcmp(argv[i], "--pin")) {
+      pin = 1;
+      i++;
+      continue;
+    }
+    const int taken = lv2_measure_option_parse(&g_opts, argc, argv, &i, &why);
+    if (taken < 0) {
+      fprintf(stderr, "lv2-measure: %s: %s\n", argv[i], why);
+      return 1;
+    }
+    if (taken > 0) continue;
+    if (!strncmp(argv[i], "--", 2) || npos == 5) {
+      fprintf(stderr, "lv2-measure: unexpected argument: %s\n", argv[i]);
+      usage(stderr, argv[0]);
+      return 1;
+    }
+    pos[npos++] = argv[i++];
+  }
+  if (npos < 1 || (pin && npos != 1)) {
+    usage(stderr, argv[0]);
     return 1;
   }
+  if (pin) return pin_only(pos[0]);
+  const char *uri = pos[0];
+  const double rate = pos[1] ? atof(pos[1]) : 192000.0;
+  const uint32_t block = pos[2] ? (uint32_t)atoi(pos[2]) : 512;
+  const int cycles = pos[3] ? atoi(pos[3]) : 20;
+  /* RT safety is measured REPEATS times and reported as the worst case. A single
+   * sample is not a measurement here: LSP's gate swings between 0 and 74 allocations
+   * across identical runs, so one clean run would have licensed it onto the RT
+   * thread. The max is what an operator actually risks. */
+  const int repeats = pos[4] ? atoi(pos[4]) : 3;
+
+  /* The options the provider is handed, refused here rather than as a plugin that would not
+   * instantiate: what the provider checks, and block lengths whose minimum passes the maximum. */
+  if (g_opts.feature.log.mode == OMX_LV2_LOG_ROUTE) g_opts.feature.log.sink = log_to_stderr;
+  if (g_opts.feature.log.mode == OMX_LV2_LOG_CAPTURE) {
+    g_capture = calloc(1, g_opts.capture_bytes);
+    g_opts.feature.log.capture = g_capture;
+    g_opts.feature.log.capture_size = g_capture ? g_opts.capture_bytes : 0;
+  }
+  {
+    const struct omx_lv2_feature_options *fo = &g_opts.feature;
+    const uint32_t lo = fo->block.min ? fo->block.min : block, hi = fo->block.max ? fo->block.max : block;
+    if (omx_lv2_feature_options_check(fo) != 0 || lo > hi) {
+      fprintf(stderr, "lv2-measure: the feature options do not hold together (block lengths %u..%u)\n", lo, hi);
+      free(g_capture);
+      return 1;
+    }
+  }
+
   fflush(stdout);
   {
     const int fd = dup(1);
     if (fd >= 0 && dup2(2, 1) >= 0) jout = fdopen(fd, "w");
     if (jout == NULL) jout = stdout;
   }
-  const char *uri = argv[1];
-  const double rate = argc > 2 ? atof(argv[2]) : 192000.0;
-  const uint32_t block = argc > 3 ? (uint32_t)atoi(argv[3]) : 512;
-  const int cycles = argc > 4 ? atoi(argv[4]) : 20;
-  /* RT safety is measured REPEATS times and reported as the worst case. A single
-   * sample is not a measurement here: LSP's gate swings between 0 and 74 allocations
-   * across identical runs, so one clean run would have licensed it onto the RT
-   * thread. The max is what an operator actually risks. */
-  const int repeats = argc > 5 ? atoi(argv[5]) : 3;
   const int warmup_blocks = 64, measured_blocks = 512;
 
   /* A tone excites a narrow band; noise excites everything. AmpVTS's rate-dependent
@@ -700,6 +793,7 @@ int main(int argc, char **argv) {
     fprintf(jout, ",\"found\":false}\n");
     lilv_node_free(uri_node);
     lilv_world_free(world);
+    free(g_capture);
     return 3;
   }
 
@@ -711,6 +805,13 @@ int main(int argc, char **argv) {
   struct host *hp = calloc(1, sizeof *hp);
   host_open(hp, world, plugin);
   struct host *H = hp;
+  H->opts = &g_opts;
+  {
+    size_t n = 0, k = 0;
+    LILV_FOREACH (nodes, i, required) n++;
+    H->required = calloc(n + 1, sizeof *H->required);
+    LILV_FOREACH (nodes, i, required) if (H->required) H->required[k++] = lilv_node_as_uri(lilv_nodes_get(required, i));
+  }
   const uint32_t n_ports = H->n_ports, n_audio_in = H->n_audio_in, n_audio_out = H->n_audio_out;
   const uint32_t n_cv = H->n_cv, n_control_in = H->n_control_in;
 
@@ -735,7 +836,10 @@ int main(int argc, char **argv) {
     if (si == NULL) {
       fprintf(jout, "{\"uri\":");
       json_str(jout, uri);
-      fprintf(jout, ",\"soak\":{\"instantiated\":false}}\n");
+      fprintf(jout, ",\"soak\":{\"instantiated\":false}");
+      emit_refusal(H);
+      emit_feature_options();
+      fprintf(jout, "}\n");
       release(H, required, optional, uri_node, world);
       return 2;
     }
@@ -797,6 +901,7 @@ int main(int argc, char **argv) {
            max_rms > 0 ? 20.0 * log10(max_rms) : -999.0,
            rss_start, rss_max, rss_max - rss_start);
     emit_host_facts(H);
+    emit_feature_options();
     fprintf(jout, "}\n");
     rig_close(si);
     release(H, required, optional, uri_node, world);
@@ -825,7 +930,10 @@ int main(int argc, char **argv) {
   if (instantiated == 0) {
     fprintf(jout, "{\"uri\":");
     json_str(jout, uri);
-    fprintf(jout, ",\"found\":true,\"instantiated\":false,\"cyclesAttempted\":%d}\n", cycles);
+    fprintf(jout, ",\"found\":true,\"instantiated\":false,\"cyclesAttempted\":%d", cycles);
+    emit_refusal(H);
+    emit_feature_options();
+    fprintf(jout, "}\n");
     release(H, required, optional, uri_node, world);
     return 2;
   }
@@ -1017,6 +1125,7 @@ int main(int argc, char **argv) {
   }
   fprintf(jout, "}");
   emit_host_facts(H);
+  emit_feature_options();
   fprintf(jout, "}\n");
   fflush(jout);
 
