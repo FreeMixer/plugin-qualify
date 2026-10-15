@@ -5,7 +5,7 @@
  * with the daemon's own rules, and the worse verdict wins. The live test qualifies a fixture plugin into a pins file
  * (the native build, as `clap-qualify.test.ts`). The daemon test starts plugin-hostd on that file with `pin_file` and
  * require_pins on, adds the plugin with no `pin_set`, and corrupts one hash to get -509; it needs `PLUGIN_HOSTD` and
- * `PLUGIN_HOSTD_FAKE_HOST` (plugin-hostd's `tests/fake-host`) and skips visibly without them (CI has no released plugin-hostd with pin_file yet: plugin-hostd#30).
+ * `PLUGIN_HOSTD_FAKE_HOST` (plugin-hostd's `tests/fake-host`) and skips visibly without them off CI; under CI their absence fails the test (the workflow installs plugin-hostd and plugin-hostd-tests).
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -324,10 +324,13 @@ async function daemon(conf: Record<string, string | number>): Promise<{ proc: Ch
 describe("plugin-hostd on the file, with require_pins on and no pin_set", () => {
   it("adds the qualified plugin, and refuses it with -509 when one hash of the file is corrupt", async (ctx) => {
     if (!BUILT && process.env["CI"]) throw new Error("native/build is needed and CI builds it");
-    if (!BUILT || HOSTD === undefined || FAKE_HOST === undefined) {
-      // a visible skip, never a pass: no released plugin-hostd reads pin_file yet
-      ctx.skip("needs a released plugin-hostd with pin_file, hostd#30 (FreeMixer/plugin-hostd#30), and native/build: PLUGIN_HOSTD, PLUGIN_HOSTD_FAKE_HOST");
+    if (!BUILT && process.env["CI"]) throw new Error("native/build is needed and CI builds it");
+    if (HOSTD === undefined || FAKE_HOST === undefined) {
+      if (process.env["CI"]) throw new Error("PLUGIN_HOSTD and PLUGIN_HOSTD_FAKE_HOST are needed: CI installs plugin-hostd and plugin-hostd-tests");
+      // a visible skip, never a pass, off CI
+      ctx.skip("needs plugin-hostd with pin_file and its fake worker: PLUGIN_HOSTD, PLUGIN_HOSTD_FAKE_HOST (plugin-hostd-tests)");
     }
+    if (!BUILT) ctx.skip("native/build is missing: make -C native deps all");
     const { entries } = pinsOf(SAFE, SAFE_ID);
     // The fake worker's layout is not the fixture's: the daemon is tested on the file it loads and the files it hashes;
     // that a prober and a host agree on a layout is the real workers' test (plugin-hostd's tests/jack_e2e.sh)
