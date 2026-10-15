@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.8.0
+Version: 0.9.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -66,6 +66,19 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 15 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.0-1
+- The LV2 measurer takes its host features and options from the shared LV2
+  feature provider in omx-clap-core, so a plugin that asks for options,
+  bounded block length or a worker is measured with the same features the
+  console's host gives it.
+- --all now walks the CLAP search path as well as the LV2 path. An unreadable
+  CLAP directory is a named scan refusal, and LV2 bundles on the path are
+  reported instead of skipped.
+- --pins writes one pin and its verdict per qualified plugin in the pin_set
+  line plugin-hostd reads from its pin_file.
+- Dependencies are floors only (omx-clap-lv2 >= 0.8.0, omx-dsp >= 0.18.0,
+  omx-contract), with no ceiling.
+
 * Tue Oct 13 2026 Pau Aliagas <linuxnow@gmail.com> - 0.8.0-1
 - With no setting, the native tools are looked for in the checkout's own
   native/build first, then where the package installs them, so make -C native
