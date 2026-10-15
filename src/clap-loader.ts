@@ -3,7 +3,8 @@
 /**
  * The CLAP implementation of the one discovery seam (`loader.ts`). A target that is a `.clap` file, or a
  * directory holding one, is scanned by `omx-clap-scan --json` (the scanner of omx-clap-host),
- * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. The
+ * located by the ONE declared setting; `urn:clap:<id>` is one plugin without a scan. `--all` walks
+ * the standard CLAP search path ({@link clapSearchPath}) through the same loader. The
  * scanner's JSON is the input: {@link clapScanDescriptors} normalises it into the interchange
  * rows. A scan that cannot be read is a {@link ClapScanError}, never an empty result.
  *
@@ -12,11 +13,20 @@
  * remote-control pages; a row keeps them, and each parameter's module, wherever the scan read them.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import type { PluginLoader, PluginTarget } from "./loader.js";
-import { CLAP_SCAN_TIMEOUT_S, CLAP_SCAN_TOOL_DEFAULT, CLAP_SCAN_TOOL_ENV } from "./qualify-declarations.js";
+import { lv2BundlesOnPath } from "./lv2-loader.js";
+import {
+  CLAP_PATH_ENV,
+  CLAP_SCAN_TIMEOUT_S,
+  CLAP_SCAN_TOOL_DEFAULT,
+  CLAP_SCAN_TOOL_ENV,
+  CLAP_SYSTEM_DIR,
+  CLAP_USER_DIR,
+} from "./qualify-declarations.js";
 
 /** The scanner's own name in its document — anything else is not its output. */
 const SCANNER_NAME = "omx-clap-scan";
@@ -344,11 +354,33 @@ export function clapScanTool(env: Readonly<Record<string, string | undefined>>):
   return named === undefined || named === "" ? CLAP_SCAN_TOOL_DEFAULT : named;
 }
 
+/** An fs error met while walking a search directory, as the scan refusal that names the path. */
+function unreadable(path: string, e: unknown): ClapScanError {
+  if (e instanceof ClapScanError) return e;
+  const code = (e as NodeJS.ErrnoException).code;
+  return new ClapScanError(`cannot read ${path}: ${typeof code === "string" ? code : String(e)}`);
+}
+
+/** A directory entry that is a directory, or a symlink to one; a dangling link is not, any other fs error (a loop) is thrown. */
+function isDirectory(e: Dirent, p: string): boolean {
+  if (e.isDirectory()) return true;
+  if (!e.isSymbolicLink()) return false;
+  try {
+    return statSync(p).isDirectory();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+}
+
 function holdsClap(dir: string): boolean {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    const isDir = e.isDirectory() || (e.isSymbolicLink() && existsSync(p) && statSync(p).isDirectory());
-    if (isDir ? holdsClap(p) : e.name.endsWith(CLAP_SUFFIX)) return true;
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (isDirectory(e, p) ? holdsClap(p) : e.name.endsWith(CLAP_SUFFIX)) return true;
+    }
+  } catch (e) {
+    throw unreadable(dir, e);
   }
   return false;
 }
@@ -390,4 +422,64 @@ export function clapLoader(options: ClapLoaderOptions = {}): PluginLoader {
       }));
     },
   };
+}
+
+// --- the standard search path (`--all`) ----------------------------------------------------------
+
+/**
+ * The directories `--all` walks, in order and once each: every non-empty entry of `CLAP_PATH`, then
+ * `~/.clap`, then `/usr/lib/clap`.
+ */
+export function clapSearchPath(env: Readonly<Record<string, string | undefined>>, home: string): string[] {
+  const named = (env[CLAP_PATH_ENV] ?? "").split(":").filter((d) => d !== "");
+  return [...new Set([...named, join(home, CLAP_USER_DIR), CLAP_SYSTEM_DIR].map((d) => resolve(d)))];
+}
+
+export interface ClapDiscoverOptions extends ClapLoaderOptions {
+  /** The home directory `~/.clap` is read under; the default is the user's. */
+  readonly home?: string;
+}
+
+/**
+ * Every CLAP plugin on the standard search path, each directory resolved through {@link clapLoader}
+ * exactly as a named directory is. A directory that is absent or holds no `.clap` is skipped; a
+ * plugin id found twice keeps its first place on the path. A directory that cannot be read (a
+ * permission error, a symlink loop) is a {@link ClapScanError} naming it, never a partial list.
+ */
+export function discoverClapTargets(options: ClapDiscoverOptions = {}): PluginTarget[] {
+  const loader = clapLoader(options);
+  const found = new Map<string, PluginTarget>();
+  for (const dir of clapSearchPath(options.env ?? process.env, options.home ?? homedir())) {
+    try {
+      if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
+      for (const t of loader.resolve(dir) ?? []) if (!found.has(t.uri)) found.set(t.uri, t);
+    } catch (e) {
+      throw unreadable(dir, e);
+    }
+  }
+  return [...found.values()];
+}
+
+export interface DiscoverAllOptions extends ClapDiscoverOptions {}
+
+/**
+ * The targets of `--all`. The LV2 plugins lilv finds cannot be measured from this entry point, so
+ * when the LV2 search path holds any bundle the run refuses (exit 2) and names how many, rather
+ * than qualifying only the CLAP side and reporting everything qualified.
+ */
+export function discoverAllTargets(options: DiscoverAllOptions = {}): PluginTarget[] {
+  const env = options.env ?? process.env;
+  let bundles: string[];
+  try {
+    bundles = lv2BundlesOnPath(env, options.home ?? homedir());
+  } catch (e) {
+    throw unreadable("the LV2 search path", e);
+  }
+  if (bundles.length > 0) {
+    throw new ClapScanError(
+      `--all cannot measure LV2 from this entry point and ${String(bundles.length)} LV2 bundle(s) are on the LV2 path ` +
+        `(first: ${bundles[0]}); name the plugins or bundles to qualify instead, or unset LV2_PATH to an empty directory`,
+    );
+  }
+  return discoverClapTargets(options);
 }

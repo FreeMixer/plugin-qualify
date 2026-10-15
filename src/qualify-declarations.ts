@@ -69,6 +69,15 @@ export const SOAK_CALIBRATION_S = 30;
 export const CLAP_SCAN_TOOL_ENV = "OMX_CLAP_SCAN";
 export const CLAP_SCAN_TOOL_DEFAULT = "omx-clap-scan";
 
+/**
+ * The standard CLAP search path `--all` walks, in this order: every directory `CLAP_PATH` names
+ * (colon-separated), then `~/.clap`, then `/usr/lib/clap`. The system directory is the same on
+ * every distribution and architecture; it is never the library directory (`/usr/lib64`).
+ */
+export const CLAP_PATH_ENV = "CLAP_PATH";
+export const CLAP_USER_DIR = ".clap";
+export const CLAP_SYSTEM_DIR = "/usr/lib/clap";
+
 /** Seconds one run of the CLAP scanner may take over everything it was pointed at. */
 export const CLAP_SCAN_TIMEOUT_S = 300;
 
