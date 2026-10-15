@@ -1,3 +1,19 @@
+plugin-qualify (0.9.0) unstable; urgency=medium
+
+  * The LV2 measurer takes its host features and options from the shared
+    LV2 feature provider in omx-clap-core, so a plugin that asks for
+    options, bounded block length or a worker is measured with the same
+    features the console's host gives it.
+  * --all now walks the CLAP search path as well as the LV2 path. An
+    unreadable CLAP directory is a named scan refusal, and LV2 bundles on
+    the path are reported instead of skipped.
+  * --pins writes one pin and its verdict per qualified plugin in the
+    pin_set line plugin-hostd reads from its pin_file.
+  * Dependencies are floors only (omx-clap-lv2 >= 0.8.0, omx-dsp >= 0.18.0,
+    omx-contract), with no ceiling.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Thu, 15 Oct 2026 10:00:00 +0000
+
 plugin-qualify (0.8.0) unstable; urgency=medium
 
   * With no setting, the native tools are looked for in the checkout's
