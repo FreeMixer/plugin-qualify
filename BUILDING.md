@@ -44,8 +44,11 @@ The native tests run the build; without it they skip, except on CI, where a miss
 which the leak check runs on every way out of it (a measurement, a soak, a plugin that will not
 instantiate). It is not part of `all`, so a package build needs no libasan.
 
-`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
-interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command
+`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer, the
+interposer and the LV2 host probe (not the fixtures): exactly `NATIVE_TOOLS` in
+`src/qualify-declarations.ts`. The host probe (`lv2_host_probe <bundle> [uri]`) loads a worker plugin
+through lilv and drives it as a host does, so a console that exports an LV2 plugin tests that
+plugin's host-facing half with it. The command
 and `tools/lv2-measure.mjs` look for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE`,
 `OMX_RT_INTERPOSE`), then in `native/build/`, then in the directories the packages install into
 (`NATIVE_TOOL_DIRS`). An installed package has no `native/build/`; in a checkout, its own build wins

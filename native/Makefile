@@ -14,7 +14,8 @@
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, the
 #                            omx-contract header the LV2 measurer reads its rates from, and omx-clap-core's
 #                            LV2 feature provider (libomx-clap-lv2), built and installed into deps/
-#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer and the interposer, for a package
+#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer, the interposer and the LV2 host
+#                            probe, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
 # header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. omx-contract's limits
@@ -167,11 +168,12 @@ deps:
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
 	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
+	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
 
 clean:
 	rm -rf $(BUILD)
