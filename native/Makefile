@@ -126,7 +126,7 @@ $(BUILD)/lv2_measure_path_test: lv2_measure_path.test.c lv2-measure-path.c lv2-m
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror -I. $(LDFLAGS) -o $@ lv2_measure_path.test.c lv2-measure-path.c
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
