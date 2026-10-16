@@ -464,7 +464,7 @@ export interface HostBudget {
 }
 
 /**
- * A HOST PROFILE (`2026-09-25-plugin-qualify.md` §3a; §3b here): the host a verdict was judged
+ * A HOST PROFILE: the host a verdict was judged
  * against — only what differs between hosts. A document carries every profile its verdicts name,
  * in full, so a verdict against a project's own profile is reproducible from the document alone.
  */

@@ -12,7 +12,7 @@
  *                   fails.
  *   leaky-delay.clap built with -DFIXTURE_DELAY=<d>, the gain delayed by d frames the way a
  *                   fractional-delay read lands a whole-frame delay: the arrival at d, and a leak of
- *                   FIXTURE_LEAK one frame ahead of it (omx-pitch's tap at 44.1 kHz, openmixer#1538).
+ *                   FIXTURE_LEAK one frame ahead of it (omx-pitch's tap at 44.1 kHz).
  *                   It declares d through the latency extension.
  *   undeclared-delay.clap the same, built with -DFIXTURE_UNDECLARED too: it declares no latency.
  *

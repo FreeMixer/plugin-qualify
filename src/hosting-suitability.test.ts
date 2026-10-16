@@ -610,7 +610,7 @@ describe("an advisory reason may never disqualify", () => {
 });
 
 /*
- * THE CLAP CELLS (2026-09-26-clap-hosting-path.md §3, §11.4): the SAME verdict over CLAP facts,
+ * THE CLAP CELLS: the SAME verdict over CLAP facts,
  * one assertion per cell BY VALUE — rating, code and params. The positive control comes first:
  * a descriptor carrying measurements that EARN in-process. Everything after it is what does
  * NOT, and the first of those is the one that matters most: a `.clap` nobody qualified reads
@@ -741,7 +741,7 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
 });
 
 /**
- * HOST PROFILES (`2026-09-25-plugin-qualify.md` §3a): the SAME measurements, judged against a
+ * HOST PROFILES: the SAME measurements, judged against a
  * declared host. Each cell holds the plugin fixed and moves only the profile, so the difference
  * in the verdict is the profile's and nothing else's.
  */
