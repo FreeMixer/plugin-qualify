@@ -1,3 +1,14 @@
+plugin-qualify (0.9.1) unstable; urgency=medium
+
+  * The latency check reads a plugin's delay where its impulse response
+    really arrives, the first frame at or above 1/1000 of the peak, instead
+    of the first sample above silence. A plugin whose fractional delay
+    leaks a tiny value one frame early (a pitch shifter, for instance) was
+    refused by one frame although it declared its true latency; it now
+    passes.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Fri, 16 Oct 2026 00:00:00 +0000
+
 plugin-qualify (0.9.0) unstable; urgency=medium
 
   * The LV2 measurer takes its host features and options from the shared

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.9.0
+Version: 0.9.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -66,6 +66,13 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.1-1
+- The latency check reads a plugin's delay where its impulse response
+  really arrives, the first frame at or above 1/1000 of the peak, instead of
+  the first sample above silence. A plugin whose fractional delay leaks a
+  tiny value one frame early (a pitch shifter, for instance) was refused by
+  one frame although it declared its true latency; it now passes
+
 * Thu Oct 15 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.0-1
 - The LV2 measurer takes its host features and options from the shared LV2
   feature provider in omx-clap-core, so a plugin that asks for options,
