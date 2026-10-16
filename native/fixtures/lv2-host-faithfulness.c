@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
-/* Measuring-host fixtures (spec 2026-09-25-plugin-qualify.md §2a). Five plugins, each faithful
+/* Measuring-host fixtures. Five plugins, each faithful
  * to ONE thing a real plugin demands of its host and unable to hide when the host is not:
  *   needs-options  instantiate FAILS without the sampleRate and maxBlockLength options (JUCE)
  *   worker-engine  output is -6 dB once its work() ran and work_response() was delivered

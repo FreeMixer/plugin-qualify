@@ -1095,7 +1095,7 @@ LV2_WORKER_ERR_NO_SPACE = 3
 class WorkerQueue:
     """The host half of `worker:schedule`: jobs are QUEUED, and run between blocks, off `run()`.
 
-    Spec 2a (`2026-09-25-plugin-qualify.md`): a schedule that accepts a job and
+    A schedule that accepts a job and
     drops it measures an UNBUILT plugin — the Hex Chain amp read 0.9 us/sample that way against 5.4
     built. After every block the host calls `pump(interface)`: the plugin's `work()` for each
     queued job, then `work_response()` with whatever it answered, then `end_run()` once every answer

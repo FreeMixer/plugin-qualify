@@ -302,7 +302,7 @@ export function readDimension(value: unknown): MeasurementDimension | undefined 
 export const VERDICT_RATINGS = ["suitable", "conditional", "unknown", "unsuitable"] as const;
 export type VerdictRating = (typeof VERDICT_RATINGS)[number];
 
-/** How a host runs its plugins (`2026-09-25-plugin-qualify.md` §3a). */
+/** How a host runs its plugins. */
 export const HOST_ISOLATIONS = ["in-process", "per-process", "shared-process"] as const;
 export type HostIsolation = (typeof HOST_ISOLATIONS)[number];
 

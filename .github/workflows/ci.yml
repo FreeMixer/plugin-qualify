@@ -33,6 +33,11 @@ jobs:
       - name: Install and build
         run: pnpm install --frozen-lockfile
 
+      # a public repository states facts and points into no private repository; the self-test turns
+      # each kind of pointer red in each kind of file
+      - name: No tracked file points into a private repository
+        run: pnpm run check:private-refs
+
       - uses: ./.github/actions/build-native
 
       - uses: ./.github/actions/install-plugin-hostd
