@@ -54,6 +54,17 @@ export const OMX_CLAP_HOST_EXTENSIONS: readonly string[] = [
   "clap.state",
 ];
 
+/**
+ * The three host extensions omx-clap-host turns on beyond the library's own (omx-clap-core
+ * `src/effects.c` `configure_core`: `preset_load`, `track_info`, `remote_controls`), by the ids
+ * its host object answers (`src/clap_host.c`); the prober offers them with `--offer`.
+ */
+export const OMX_CLAP_HOST_CONFIGURED_EXTENSIONS: readonly string[] = [
+  "clap.preset-load/2",
+  "clap.track-info/1",
+  "clap.remote-controls/2",
+];
+
 /** The LV2 extension namespace the jalv and mod-host lists are spelled in. */
 const LV2_EXT = "http://lv2plug.in/ns/ext/";
 const BUF_SIZE_ALL = ["powerOf2BlockLength", "fixedBlockLength", "boundedBlockLength"].map((f) => `${LV2_EXT}buf-size#${f}`);
@@ -113,8 +124,25 @@ export const MOD_HOST_PROFILE: HostProfile = {
   isolation: "shared-process",
 };
 
+/**
+ * omx-clap-host, alone or as plugin-hostd's CLAP worker: one JACK client per plugin in a host
+ * process that several plugins may share (a plugin-hostd pool), instruments fed through each
+ * client's `midi_in`, latency published on the JACK ports. Its CLAP host object is the library's
+ * plus the three it configures; its LV2 plugins run through the same feature provider as the
+ * console's in-process stage.
+ */
+export const OMX_CLAP_HOST_PROFILE: HostProfile = {
+  id: "omx-clap-host",
+  lv2Features: OMX_INPROCESS_FEATURES,
+  clapExtensions: [...OMX_CLAP_HOST_EXTENSIONS, ...OMX_CLAP_HOST_CONFIGURED_EXTENSIONS],
+  instruments: true,
+  cost: HOST_BUDGETS["omx-clap-host"],
+  latency: "uncompensated",
+  isolation: "shared-process",
+};
+
 /** Every profile the tool ships, by id. */
-export const HOST_PROFILES: readonly HostProfile[] = [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE, MOD_HOST_PROFILE];
+export const HOST_PROFILES: readonly HostProfile[] = [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE];
 
 /** A shipped profile by id, or `undefined`. */
 export function shippedHostProfile(id: string): HostProfile | undefined {

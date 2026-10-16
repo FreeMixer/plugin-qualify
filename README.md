@@ -94,9 +94,17 @@ The prober runs each plugin headless at every `--rates` rate, under an interpose
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
 the file's SHA-256 beside what it measured. The verdict is the real-time-safety one: **suitable**
 only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
-`process()` or `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. `--out` writes one
+`process()` or `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. An instrument is
+quiet until it is played, so a plugin with a note input is also played, at every rate and under a
+count of its own: a chord, the pitch bent and a controller moved, pressure, the chord let go, a
+burst of 32 note ons in one block and their offs, all notes off, in the dialect its note input
+reads (CLAP's, else MIDI's). An allocation, lock or syscall while it plays is **unsuitable**
+(`hosting.rt-safety.violations-under-notes`); an instrument that could not be played under the
+interposer is **unknown** (`hosting.rt-safety.notes-unmeasured`). `--out` writes one
 document per plugin binary and host profile, named `<sha256>.<profile>.rt-safety.json`, so a
-verdict never outlives the bytes it was measured on. Each line also carries the plugin's pin, an
+verdict never outlives the bytes it was measured on. Its schema is `plugin-qualify.rt-safety/2`: `/1` with
+`measured.noteSweep` added and the note sweep's reasons in `verdict`; a plugin with no note input
+reads the same verdict under both. Each line also carries the plugin's pin, an
 `integrity` block: the `.clap`'s SHA-256 by its file name and the parameter-layout fingerprint
 `omx-layout/1:<sha256>`, both computed through plugin-hostd's `pin.h`, which is what a console
 hands plugin-hostd as `pin_set` before it adds the plugin. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
@@ -181,6 +189,7 @@ hosts. Two projects share the measurements and differ only in the profile they c
 ```
 plugin-qualify --host-profile jalv ./my-synth.lv2                  # zynthian: one jalv process per plugin
 plugin-qualify --host-profile mod-host ./my-fx.lv2                 # MOD: one shared mod-host process
+plugin-qualify --host-profile omx-clap-host ./my-synth.clap        # omx-clap-host, alone or under plugin-hostd
 plugin-qualify --host-profile jalv,mod-host,openmixer-console <uri>  # one verdict per profile
 plugin-qualify --host-profile ./my-host.json <uri>                 # your own host
 ```
@@ -190,8 +199,13 @@ plugin-qualify --host-profile ./my-host.json <uri>                 # your own ho
 | `openmixer-console` (default) | in-process (the console's RT thread) | no | the console's in-process table | 0.05 at 96000 / 1024 |
 | `jalv` | per-process | yes | jalv 1.6.8 `src/jalv.c` (zynthian's fork passes the same list) | 0.25 at 48000 / 256 |
 | `mod-host` | shared-process | yes | mod-host f14a230 `src/effects.c` | 0.05 at 48000 / 128 |
+| `omx-clap-host` | shared-process | yes | the console's in-process table (the same LV2 feature provider) | 0.05 at 48000 / 128 |
 
-The `jalv` and `mod-host` budgets are defaults, not a measurement of your board. State your own
+`omx-clap-host` offers a CLAP plugin the console's six host extensions and three more,
+`clap.preset-load/2`, `clap.track-info/1` and `clap.remote-controls/2`. A CLAP plugin judged
+under it is probed again with those three offered, so its verdict holds for the host it runs in.
+
+The `jalv`, `mod-host` and `omx-clap-host` budgets are defaults, not a measurement of your board. State your own
 by writing a profile file. Every field is required; a missing or mistyped field is refused and
 never filled in with a default:
 

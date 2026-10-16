@@ -5,7 +5,7 @@
  * headless at every rate it is given and prints, per plugin, one JSON line of what it MEASURED.
  * It judges nothing: the verdict is plugin-qualify's (`src/clap-qualify.ts`), read from these facts.
  *
- *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] <path.clap> [<id>]
+ *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] <path.clap> [<id>]
  *   clap-qualify --json <path>...      the scan (below), the document the CLAP loader reads
  *
  * Per rate the plugin is activated, its latency read, an impulse run through `process()` to see
@@ -15,9 +15,16 @@
  * nothing. The file's SHA-256 is printed beside the facts, so a verdict is bound to the bytes it
  * was measured on.
  *
+ * A plugin with a note input is then played, at every rate, under a count of its own (the note
+ * sweep): a chord, the pitch bent and a controller moved across a block, pressure, the chord let
+ * go, a burst of note ons in one block and their offs, all notes off, in the dialect its note
+ * port reads. An instrument is quiet and cheap until a voice plays, so what a note on does inside
+ * `process()` is only seen here.
+ *
  * The host offers exactly the extensions in HOST_EXTENSIONS and nothing else, so a plugin that
- * needs more fails headless here rather than on the desk. A plugin calling a main-thread host
- * function from inside `process()` is a thread violation.
+ * needs more fails headless here rather than on the desk; `--offer` adds those of OFFERABLE a
+ * host such as omx-clap-host offers too (their host functions answer nothing). A plugin calling a
+ * main-thread host function from inside `process()` is a thread violation.
  *
  * Exit status: 0 every plugin was measured, 2 usage, or the file or the plugin could not be loaded
  * (the line still prints with what was read).
@@ -70,6 +77,23 @@ static const char *const HOST_EXTENSIONS[] = {
   CLAP_EXT_LOG, CLAP_EXT_THREAD_CHECK, CLAP_EXT_LATENCY, CLAP_EXT_PARAMS, CLAP_EXT_AUDIO_PORTS, CLAP_EXT_STATE,
 };
 #define HOST_EXTENSION_COUNT (sizeof HOST_EXTENSIONS / sizeof HOST_EXTENSIONS[0])
+
+/* what --offer may add, each by its id and the draft id a plugin may still ask for, in the order the document lists them */
+static const struct { const char *id, *compat; } OFFERABLE[] = {
+  { CLAP_EXT_PRESET_LOAD, CLAP_EXT_PRESET_LOAD_COMPAT },
+  { CLAP_EXT_TRACK_INFO, CLAP_EXT_TRACK_INFO_COMPAT },
+  { CLAP_EXT_REMOTE_CONTROLS, CLAP_EXT_REMOTE_CONTROLS_COMPAT },
+};
+#define OFFERABLE_COUNT (sizeof OFFERABLE / sizeof OFFERABLE[0])
+static int g_offered[OFFERABLE_COUNT];
+
+/* the note sweep: a cycle of NOTE_CYCLE blocks (see note_block), a burst of NOTE_BURST note ons in one block */
+#define NOTE_CYCLE 8u
+#define NOTE_BURST 32u
+/* the chord the sweep holds, and the bend's reach in semitones (MIDI's default range) */
+static const int16_t CHORD[] = { 60, 64, 67 };
+#define CHORD_SIZE (sizeof CHORD / sizeof CHORD[0])
+#define BEND_SEMITONES 2.0
 
 static const char *const EVENT_KIND[] = {
   [OMX_RT_MALLOC] = "malloc", [OMX_RT_CALLOC] = "calloc", [OMX_RT_REALLOC] = "realloc", [OMX_RT_FREE] = "free",
@@ -136,6 +160,27 @@ static const clap_host_audio_ports_t g_audio_ports = { host_ports_rescan_support
 static void host_state_mark_dirty(const clap_host_t *h) { (void)h; main_thread_only(); }
 static const clap_host_state_t g_state = { host_state_mark_dirty };
 
+/* the offerable extensions: main-thread host functions that answer nothing */
+static void host_preset_error(const clap_host_t *h, uint32_t kind, const char *location, const char *key, int32_t error,
+                              const char *msg) {
+  (void)h; (void)kind; (void)location; (void)key; (void)error; (void)msg;
+  main_thread_only();
+}
+static void host_preset_loaded(const clap_host_t *h, uint32_t kind, const char *location, const char *key) {
+  (void)h; (void)kind; (void)location; (void)key;
+  main_thread_only();
+}
+static const clap_host_preset_load_t g_preset_load = { host_preset_error, host_preset_loaded };
+
+static bool host_track_info_get(const clap_host_t *h, clap_track_info_t *info) { (void)h; (void)info; main_thread_only(); return false; }
+static const clap_host_track_info_t g_track_info = { host_track_info_get };
+
+static void host_remote_changed(const clap_host_t *h) { (void)h; main_thread_only(); }
+static void host_remote_suggest(const clap_host_t *h, clap_id page) { (void)h; (void)page; main_thread_only(); }
+static const clap_host_remote_controls_t g_remote_controls = { host_remote_changed, host_remote_suggest };
+
+static const void *const OFFERED_OBJECT[OFFERABLE_COUNT] = { &g_preset_load, &g_track_info, &g_remote_controls };
+
 static const void *host_get_extension(const clap_host_t *h, const char *id) {
   (void)h;
   if (!id) return NULL;
@@ -145,6 +190,8 @@ static const void *host_get_extension(const clap_host_t *h, const char *id) {
   if (!strcmp(id, CLAP_EXT_PARAMS)) return &g_params;
   if (!strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &g_audio_ports;
   if (!strcmp(id, CLAP_EXT_STATE)) return &g_state;
+  for (size_t k = 0; k < OFFERABLE_COUNT; k++)
+    if (g_offered[k] && (!strcmp(id, OFFERABLE[k].id) || !strcmp(id, OFFERABLE[k].compat))) return OFFERED_OBJECT[k];
   return NULL;
 }
 static void host_request(const clap_host_t *h) { (void)h; }
@@ -164,8 +211,16 @@ static const clap_host_t g_clap_host = {
 
 /* ---- the events a sweep block carries ---- */
 
+union any_event {
+  clap_event_header_t header;
+  clap_event_param_value_t param;
+  clap_event_note_t note;
+  clap_event_note_expression_t expression;
+  clap_event_midi_t midi;
+};
+
 static struct {
-  clap_event_param_value_t ev[EVENTS_PER_BLOCK];
+  union any_event ev[EVENTS_PER_BLOCK];
   uint32_t count;
 } g_in;
 
@@ -201,6 +256,13 @@ struct facts {
   uint64_t allocations, locks, syscalls;
   struct omx_rt_event events[OMX_RT_EV_MAX];
   int n_events;
+  /* the note sweep: the dialect it spoke (NULL: no note input, or none it speaks), and what it counted */
+  const char *note_dialect;
+  uint32_t note_calls, note_events, note_errors;
+  int note_nonfinite;
+  uint64_t note_allocations, note_locks, note_syscalls;
+  struct omx_rt_event note_rt_events[OMX_RT_EV_MAX];
+  int n_note_rt_events;
 };
 
 static int ports_open(const clap_plugin_t *p, const clap_plugin_audio_ports_t *ext, bool input, uint32_t frames,
@@ -355,7 +417,7 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
   for (uint32_t b = 0; b < blocks; b++) {
     for (uint32_t k = 0; k < n_rows && g_in.count < EVENTS_PER_BLOCK; k++) {
       const double frac = (double)((b * 7u + k * 13u) % 101u) / 100.0;
-      clap_event_param_value_t *e = &g_in.ev[g_in.count++];
+      clap_event_param_value_t *e = &g_in.ev[g_in.count++].param;
       memset(e, 0, sizeof *e);
       e->header.size = sizeof *e;
       e->header.time = 0;
@@ -378,6 +440,145 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
     if (run_block(p, &ins, &outs, frames, &steady, ip) == CLAP_PROCESS_ERROR) f->process_errors++;
     if (!ports_finite(&outs, frames)) f->nonfinite = 1;
     f->process_calls++;
+  }
+  if (p->stop_processing) p->stop_processing(p);
+  p->deactivate(p);
+  ports_close(&ins);
+  ports_close(&outs);
+}
+
+/* ---- the note sweep ---- */
+
+/* one event of a note block, at frame `time`; the caller keeps the block's events in time order */
+static union any_event *note_event(uint32_t time, uint16_t type, uint32_t size) {
+  if (g_in.count >= EVENTS_PER_BLOCK) return NULL;
+  union any_event *e = &g_in.ev[g_in.count++];
+  memset(e, 0, sizeof *e);
+  e->header.size = size;
+  e->header.time = time;
+  e->header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+  e->header.type = type;
+  return e;
+}
+
+static void note_midi(uint32_t time, uint8_t status, uint8_t a, uint8_t b) {
+  union any_event *e = note_event(time, CLAP_EVENT_MIDI, sizeof(clap_event_midi_t));
+  if (!e) return;
+  e->midi.port_index = 0;
+  e->midi.data[0] = status;
+  e->midi.data[1] = a;
+  e->midi.data[2] = b;
+}
+
+/* a note on (velocity above 0) or off, key -1 for every key, in the dialect */
+static void note_key(int clap_dialect, uint32_t time, int on, int16_t key, double velocity) {
+  if (clap_dialect) {
+    union any_event *e = note_event(time, on ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF, sizeof(clap_event_note_t));
+    if (!e) return;
+    e->note.note_id = -1;
+    e->note.port_index = 0;
+    e->note.channel = key < 0 ? -1 : 0;
+    e->note.key = key;
+    e->note.velocity = velocity;
+  } else if (key < 0) {
+    note_midi(time, 0xB0, 123, 0);
+  } else {
+    note_midi(time, on ? 0x90 : 0x80, (uint8_t)key, (uint8_t)(velocity * 127.0 + 0.5));
+  }
+}
+
+/* a channel-wide expression: the pitch bent by `amount` of its reach (-1 to 1), or pressure (0 to 1) */
+static void note_expression(int clap_dialect, uint32_t time, int bend, double amount) {
+  if (clap_dialect) {
+    union any_event *e = note_event(time, CLAP_EVENT_NOTE_EXPRESSION, sizeof(clap_event_note_expression_t));
+    if (!e) return;
+    e->expression.expression_id = bend ? CLAP_NOTE_EXPRESSION_TUNING : CLAP_NOTE_EXPRESSION_PRESSURE;
+    e->expression.note_id = -1;
+    e->expression.port_index = 0;
+    e->expression.channel = 0;
+    e->expression.key = -1;
+    e->expression.value = bend ? amount * BEND_SEMITONES : amount;
+  } else if (bend) {
+    const unsigned v = (unsigned)((amount + 1.0) * 8191.5);
+    note_midi(time, 0xE0, (uint8_t)(v & 0x7f), (uint8_t)(v >> 7 & 0x7f));
+  } else {
+    note_midi(time, 0xD0, (uint8_t)(amount * 127.0 + 0.5), 0);
+  }
+}
+
+/* the events of block b of the note sweep, by b's place in the cycle; a controller only where the port reads MIDI */
+static void note_block(uint32_t b, uint32_t frames, int clap_dialect, int midi_too) {
+  const uint32_t step = frames / 8u ? frames / 8u : 1u;
+  switch (b % NOTE_CYCLE) {
+  case 0:
+    for (uint32_t k = 0; k < CHORD_SIZE; k++) note_key(clap_dialect, 0, 1, CHORD[k], 0.8);
+    break;
+  case 1:
+    for (uint32_t t = 0; t < 8u; t++) {
+      note_expression(clap_dialect, t * step, 1, (double)t / 4.0 - 1.0);
+      if (!clap_dialect || midi_too) note_midi(t * step, 0xB0, 1, (uint8_t)(t * 16u));
+    }
+    break;
+  case 2:
+    for (uint32_t t = 0; t < 8u; t++) note_expression(clap_dialect, t * step, 0, (double)t / 7.0);
+    break;
+  case 3:
+    for (uint32_t k = 0; k < CHORD_SIZE; k++) note_key(clap_dialect, 0, 0, CHORD[k], 0.0);
+    break;
+  case 4:
+  case 5:
+    for (uint32_t k = 0; k < NOTE_BURST; k++)
+      note_key(clap_dialect, k * frames / NOTE_BURST, b % NOTE_CYCLE == 4, (int16_t)(36 + k), 0.25 + 0.5 * (double)k / NOTE_BURST);
+    break;
+  case 6:
+    note_key(clap_dialect, 0, 1, 72, 1.0);
+    note_key(clap_dialect, frames / 2u, 0, -1, 0.0);
+    break;
+  default:
+    break; /* the release tails */
+  }
+}
+
+/* the dialect the note sweep speaks to the plugin's first note input: CLAP's when it reads it, else MIDI's; NULL for none */
+static const char *note_dialect(const clap_plugin_t *p, int *clap_dialect, int *midi_too) {
+  const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
+  clap_note_port_info_t info;
+  memset(&info, 0, sizeof info);
+  if (!notes || notes->count(p, true) == 0 || !notes->get(p, 0, true, &info)) return NULL;
+  *midi_too = (info.supported_dialects & CLAP_NOTE_DIALECT_MIDI) != 0;
+  if (info.supported_dialects & CLAP_NOTE_DIALECT_CLAP) return *clap_dialect = 1, "clap";
+  if (*midi_too) return *clap_dialect = 0, "midi";
+  return NULL;
+}
+
+static void note_sweep_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint32_t blocks, int clap_dialect, int midi_too,
+                            const struct interposer *ip, struct facts *f) {
+  const clap_plugin_audio_ports_t *ports = p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
+  struct port_set ins, outs;
+  uint32_t main_in, main_out, others;
+  if (ports_open(p, ports, true, frames, &ins, &main_in, &others) != 0 || ports_open(p, ports, false, frames, &outs, &main_out, &others) != 0 ||
+      !p->activate(p, rate, frames, frames)) {
+    f->headless_ok = 0;
+    ports_close(&ins);
+    ports_close(&outs);
+    return;
+  }
+  if (p->start_processing && !p->start_processing(p)) {
+    f->headless_ok = 0;
+    p->deactivate(p);
+    ports_close(&ins);
+    ports_close(&outs);
+    return;
+  }
+  if (p->reset) p->reset(p);
+  int64_t steady = 0;
+  ports_fill(&ins, frames, 0.0f);
+  for (uint32_t b = 0; b < blocks; b++) {
+    note_block(b, frames, clap_dialect, midi_too);
+    f->note_events += g_in.count;
+    if (run_block(p, &ins, &outs, frames, &steady, ip) == CLAP_PROCESS_ERROR) f->note_errors++;
+    if (!ports_finite(&outs, frames)) f->note_nonfinite = 1;
+    f->note_calls++;
   }
   if (p->stop_processing) p->stop_processing(p);
   p->deactivate(p);
@@ -452,7 +653,35 @@ static void put_head(const char *id, const char *path, const char *sha256) {
   fprintf(g_out, ",\"sha256\":");
   put_string(sha256);
   fprintf(g_out, "},\"hostExtensions\":");
-  put_strings(HOST_EXTENSIONS, HOST_EXTENSION_COUNT);
+  const char *offered[HOST_EXTENSION_COUNT + OFFERABLE_COUNT + 1];
+  size_t n = 0;
+  for (size_t k = 0; k < HOST_EXTENSION_COUNT; k++) offered[n++] = HOST_EXTENSIONS[k];
+  for (size_t k = 0; k < OFFERABLE_COUNT; k++)
+    if (g_offered[k]) offered[n++] = OFFERABLE[k].id;
+  offered[n] = NULL;
+  put_strings(offered, n);
+}
+
+static const char *event_kind(int k) {
+  return k > 0 && k < (int)(sizeof EVENT_KIND / sizeof EVENT_KIND[0]) ? EVENT_KIND[k] : "unknown";
+}
+
+/* the note sweep's block: not applicable without a note input it can speak to; its counts only under the interposer */
+static void put_note_sweep(const struct facts *f, uint32_t frames) {
+  if (!f->note_dialect) {
+    fprintf(g_out, ",\"noteSweep\":{\"applicable\":false}");
+    return;
+  }
+  fprintf(g_out, ",\"noteSweep\":{\"applicable\":true,\"dialect\":\"%s\",\"blocks\":%u,\"blockFrames\":%u,\"noteEvents\":%u,"
+          "\"processErrors\":%u,\"nonFinite\":%s,\"interposer\":%s", f->note_dialect, f->note_calls, frames, f->note_events,
+          f->note_errors, f->note_nonfinite ? "true" : "false", f->interposer ? "true" : "false");
+  if (f->interposer) {
+    fprintf(g_out, ",\"allocationsInRun\":%llu,\"locksInRun\":%llu,\"syscallsInRun\":%llu,\"events\":[",
+            (unsigned long long)f->note_allocations, (unsigned long long)f->note_locks, (unsigned long long)f->note_syscalls);
+    for (int i = 0; i < f->n_note_rt_events; i++) fprintf(g_out, "%s\"%s\"", i ? "," : "", event_kind(f->note_rt_events[i].kind));
+    fputc_out(']');
+  }
+  fputc_out('}');
 }
 
 static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, uint32_t frames) {
@@ -468,6 +697,7 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
          f->process_errors, f->process_calls, f->nonfinite ? "true" : "false");
   if (!f->interposer) {
     fprintf(g_out, ",\"rtSafety\":{\"interposer\":false}");
+    put_note_sweep(f, frames);
     return;
   }
   fprintf(g_out, ",\"rtSafety\":{\"interposer\":true,\"swept\":%s,\"sweepApplicable\":%s,\"blocks\":%u,\"blockFrames\":%u,"
@@ -479,6 +709,7 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
     fprintf(g_out, "%s\"%s\"", i ? "," : "", k > 0 && k < (int)(sizeof EVENT_KIND / sizeof EVENT_KIND[0]) ? EVENT_KIND[k] : "unknown");
   }
   fprintf(g_out, "]}");
+  put_note_sweep(f, frames);
 }
 
 /* ---- the pin (plugin-qualify spec §11) ---- */
@@ -957,6 +1188,17 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     ip.counts(&f.allocations, &f.locks, &f.syscalls);
     f.n_events = ip.events(f.events, OMX_RT_EV_MAX);
   }
+  int clap_dialect = 0, midi_too = 0;
+  f.note_dialect = f.headless_ok ? note_dialect(p, &clap_dialect, &midi_too) : NULL;
+  if (f.note_dialect) {
+    if (f.interposer) ip.reset();
+    for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++)
+      note_sweep_rate(p, o->rates[r], o->frames, o->blocks, clap_dialect, midi_too, f.interposer ? &ip : NULL, &f);
+    if (f.interposer) {
+      ip.counts(&f.note_allocations, &f.note_locks, &f.note_syscalls);
+      f.n_note_rt_events = ip.events(f.note_rt_events, OMX_RT_EV_MAX);
+    }
+  }
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
@@ -988,9 +1230,23 @@ static int parse_rates(const char *s, struct options *o) {
   return o->n_rates ? 0 : -1;
 }
 
+/* --offer: a comma list of OFFERABLE ids; any other word is a usage error */
+static int parse_offer(const char *s) {
+  char *copy = strdup(s), *save = NULL;
+  int rc = copy ? 0 : -1;
+  for (char *tok = copy ? strtok_r(copy, ",", &save) : NULL; tok && rc == 0; tok = strtok_r(NULL, ",", &save)) {
+    size_t k = 0;
+    while (k < OFFERABLE_COUNT && strcmp(tok, OFFERABLE[k].id)) k++;
+    if (k == OFFERABLE_COUNT) rc = -1;
+    else g_offered[k] = 1;
+  }
+  free(copy);
+  return rc;
+}
+
 static int usage(const char *name) {
   fprintf(stderr,
-          "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] <path.clap> [<id>]\n"
+          "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] <path.clap> [<id>]\n"
           "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n",
           name, name);
   return 2;
@@ -1009,6 +1265,8 @@ int main(int argc, char **argv) {
       if (parse_u32(argv[a + 1], &o.frames) != 0) return usage(argv[0]);
     } else if (!strcmp(argv[a], "--blocks")) {
       if (parse_u32(argv[a + 1], &o.blocks) != 0) return usage(argv[0]);
+    } else if (!strcmp(argv[a], "--offer")) {
+      if (parse_offer(argv[a + 1]) != 0) return usage(argv[0]);
     } else {
       return usage(argv[0]);
     }

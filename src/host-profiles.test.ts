@@ -2,16 +2,21 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * The host profiles as declared: the
- * shipped three, the lists they cite, and the reader a project's own profile file goes through —
+ * shipped four, the lists they cite, and the reader a project's own profile file goes through —
  * which refuses a missing or mistyped field rather than filling in a host it was not told about.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   HOST_PROFILES,
   JALV_LV2_FEATURES,
   JALV_PROFILE,
   MOD_HOST_LV2_FEATURES,
+  OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
   OMX_CLAP_HOST_EXTENSIONS,
+  OMX_CLAP_HOST_PROFILE,
   OMX_INPROCESS_FEATURES,
   OPENMIXER_CONSOLE_PROFILE,
   readHostProfile,
@@ -21,8 +26,8 @@ import * as hosting from "./hosting-suitability.js";
 import { HOST_BUDGETS } from "./qualify-declarations.js";
 
 describe("the shipped profiles", () => {
-  it("are three, by unique id, openmixer-console first", () => {
-    expect(HOST_PROFILES.map((p) => p.id)).toEqual(["openmixer-console", "jalv", "mod-host"]);
+  it("are four, by unique id, openmixer-console first", () => {
+    expect(HOST_PROFILES.map((p) => p.id)).toEqual(["openmixer-console", "jalv", "mod-host", "omx-clap-host"]);
     for (const p of HOST_PROFILES) expect(shippedHostProfile(p.id)).toBe(p);
     expect(shippedHostProfile("ardour")).toBeUndefined();
   });
@@ -45,6 +50,47 @@ describe("the shipped profiles", () => {
     expect(new Set(JALV_LV2_FEATURES).size).toBe(9);
     expect(new Set(MOD_HOST_LV2_FEATURES).size).toBe(13);
     expect(JALV_PROFILE).toMatchObject({ clapExtensions: null, instruments: true, isolation: "per-process" });
+  });
+});
+
+describe("omx-clap-host's profile", () => {
+  // omx-clap-core's own tree: the deps checkout `make -C native deps` fetches (CI), else the installed header
+  const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const DEPS = join(PKG, "native", "deps", "omx-clap-core", "src");
+  const HEADER = [join(DEPS, "clap_host_extensions.h"), "/usr/include/omx-clap-host/clap_host_extensions.h"].find((p) => existsSync(p));
+  const EFFECTS = join(DEPS, "effects.c");
+
+  it("is the console's extensions plus the three omx-clap-host configures, instruments fed", () => {
+    expect(OMX_CLAP_HOST_PROFILE.clapExtensions).toEqual([...OMX_CLAP_HOST_EXTENSIONS, ...OMX_CLAP_HOST_CONFIGURED_EXTENSIONS]);
+    expect(OMX_CLAP_HOST_PROFILE).toMatchObject({ instruments: true, latency: "uncompensated", isolation: "shared-process" });
+    expect(OMX_CLAP_HOST_PROFILE.cost).toBe(HOST_BUDGETS["omx-clap-host"]);
+  });
+
+  it("holds the library's host extensions as omx-clap-core's clap_host_extensions.h lists them", (ctx) => {
+    if (HEADER === undefined) {
+      if (process.env["CI"]) throw new Error("no clap_host_extensions.h: CI fetches it with make -C native deps");
+      return ctx.skip("no clap_host_extensions.h: make -C native deps, or install omx-clap-core-devel");
+    }
+    const init = /#define\s+CLAP_HOST_EXTENSIONS_INIT\s*\{([^}]*)\}/.exec(readFileSync(HEADER, "utf8"));
+    expect(init, HEADER).not.toBeNull();
+    const listed = [...init![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(listed).toEqual(OMX_CLAP_HOST_EXTENSIONS);
+  });
+
+  it("holds the three configured ones as omx-clap-host's configure_core turns them on", (ctx) => {
+    if (!existsSync(EFFECTS)) {
+      if (process.env["CI"]) throw new Error("no omx-clap-core checkout: CI fetches it with make -C native deps");
+      return ctx.skip("no omx-clap-core checkout: make -C native deps");
+    }
+    const configure = /static int configure_core\(void\)\s*\{([\s\S]*?)\n\}/.exec(readFileSync(EFFECTS, "utf8"));
+    expect(configure).not.toBeNull();
+    const on = [...configure![1]!.matchAll(/config\.(preset_load|track_info|remote_controls) = 1;/g)].map((m) => m[1]);
+    const ids: Record<string, string> = {
+      preset_load: "clap.preset-load/2",
+      track_info: "clap.track-info/1",
+      remote_controls: "clap.remote-controls/2",
+    };
+    expect(on.map((k) => ids[k!])).toEqual(OMX_CLAP_HOST_CONFIGURED_EXTENSIONS);
   });
 });
 

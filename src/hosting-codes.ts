@@ -24,6 +24,10 @@ export const HOSTING_CODE = {
   rtSafetyViolations: 'hosting.rt-safety.violations-in-run',
   rtSafetyUnmeasured: 'hosting.rt-safety.unmeasured',
   rtSafetyNotReproducible: 'hosting.rt-safety.not-reproducible',
+  // The note sweep: an instrument played under the interposer, a count of its own.
+  rtSafetyNotesClean: 'hosting.rt-safety.clean-under-notes',
+  rtSafetyNotesViolations: 'hosting.rt-safety.violations-under-notes',
+  rtSafetyNotesUnmeasured: 'hosting.rt-safety.notes-unmeasured',
   featuresProvided: 'hosting.features.all-provided',
   featuresMissing: 'hosting.features.required-not-provided',
   featuresDisqualifying: 'hosting.features.host-not-provided',

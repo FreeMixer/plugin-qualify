@@ -34,7 +34,7 @@ import {
   type PluginStabilityMeasurement,
 } from "./hosting-suitability.js";
 import type { SoakAtRate, SoakReading } from "./measurement/format.js";
-import { JALV_PROFILE, MOD_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { HOST_BUDGETS } from "./qualify-declarations.js";
 
 /** The console's per-instance ceiling, read from the declaration it lives in. */
@@ -884,6 +884,16 @@ describe("host profiles — the CLAP arm", () => {
     const v = classify(synth, { profile: host });
     expect(v.rating).toBe("suitable");
     expect(v.reasons.map((r) => r.code)).toContain(HOSTING_CODE.topologyInstrument);
+  });
+
+  it("a CLAP instrument is suitable under omx-clap-host and unsuitable under openmixer-console", () => {
+    const synth = clapPlugin({ mainInputChannels: 0, noteInputs: 1, features: ["instrument"] });
+    const asHost = classify(synth, { profile: OMX_CLAP_HOST_PROFILE, quantum: OMX_CLAP_HOST_PROFILE.cost.quantum });
+    expect(asHost.rating).toBe("suitable");
+    expect(asHost.reasons.map((r) => r.code)).toContain(HOSTING_CODE.topologyInstrument);
+    const asConsole = classify(synth, { profile: OPENMIXER_CONSOLE_PROFILE });
+    expect(asConsole.rating).toBe("unsuitable");
+    expect(asConsole.reasons.map((r) => r.code)).toContain(HOSTING_CODE.clapNoteInput);
   });
 });
 
