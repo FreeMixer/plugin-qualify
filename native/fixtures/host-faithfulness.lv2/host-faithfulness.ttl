@@ -8,7 +8,7 @@
 @prefix urid: <http://lv2plug.in/ns/ext/urid#> .
 @prefix work: <http://lv2plug.in/ns/ext/worker#> .
 
-# Measuring-host fixtures (2026-09-25-plugin-qualify.md §2a): each plugin
+# Measuring-host fixtures: each plugin
 # refuses to work unless the host is faithful in ONE way, and says so in the audio it produces.
 
 <urn:plugin-qualify:fixture:needs-options> a lv2:Plugin , lv2:UtilityPlugin ;

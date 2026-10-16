@@ -199,12 +199,12 @@ export interface CrashSignature {
   /** The top plugin-owned stack frame, or a host frame that exonerates the plugin. */
   readonly topFrame: string;
   readonly signal?: "SIGSEGV" | "SIGABRT" | "SIGBUS";
-  /** The note that recorded this cluster. Provenance, so a row is never folklore. */
+  /** What was found about this cluster. Provenance, so a row is never folklore. */
   readonly note: string;
 }
 
 /**
- * Seeded from the crash notes of 2026-09-03/04. A raw crash matching NO row is
+ * Seeded from the crashes investigated on 2026-09-03/04. A raw crash matching NO row is
  * `unknown` — the table blames a plugin only where a named investigation did.
  */
 export const CRASH_SIGNATURES: readonly CrashSignature[] = [
@@ -213,26 +213,26 @@ export const CRASH_SIGNATURES: readonly CrashSignature[] = [
     attribution: "host",
     topFrame: "pw_memmap_free",
     signal: "SIGSEGV",
-    note: "2026-09-04-pipewire-jack-client-close-double-free.md",
+    note: "closing a PipeWire JACK client frees a memory map twice; the host crashes, not the plugin",
   },
   {
     id: "pipewire-jack-close-double-free-abort",
     attribution: "host",
     topFrame: "tcache_double_free_verify",
     signal: "SIGABRT",
-    note: "2026-09-04-pipewire-jack-client-close-double-free.md",
+    note: "the same double free in PipeWire's JACK client close, caught by glibc's tcache check as an abort",
   },
   {
     id: "mod-host-effects-remove",
     attribution: "host",
     topFrame: "effects_remove",
-    note: "2026-09-03-mod-host-crash-cluster2-3-investigation.md",
+    note: "mod-host crashes in effects_remove while removing an effect; the host is at fault",
   },
   {
     id: "plugin-instantiate-layout",
     attribution: "plugin",
     topFrame: "lilv_instance_instantiate",
-    note: "2026-09-03-mod-host-crash-cluster2-3-investigation.md",
+    note: "the plugin crashes while lilv instantiates it, on a port layout it cannot host",
   },
 ];
 
@@ -958,7 +958,7 @@ export function classifyPluginHosting(
   // interchange's one door (`measurement-catalog.ts`), whose per-dimension precedence is the
   // only precedence there is. A second "passed measurements win" seam here was how an offline
   // report could agree with itself while every served descriptor read unknown.
-  // The CLAP arm (2026-09-26-clap-hosting-path.md §3): the SAME six dimensions, fed from the
+  // The CLAP arm: the SAME six dimensions, fed from the
   // qualifier's CLAP facts where the LV2 scan's facts do not exist for the format. Stability,
   // the interposer's counts and the cost are format-blind and read unchanged.
   const reasons: HostingReason[] = descriptor.format === "clap"
@@ -1041,7 +1041,7 @@ export interface HostingRealisation {
   readonly inProcessAvailable: boolean;
   /**
    * Whether the plugin is LINKED into the engine (its static-link registry): it needs no verdict
-   * to run in-process (`2026-09-26-clap-hosting-path.md` §7). Absent reads as not linked.
+   * to run in-process. Absent reads as not linked.
    */
   readonly linked?: boolean;
 }

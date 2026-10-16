@@ -68,7 +68,7 @@ _Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every param
 /* the impulse's arrival is the first frame at or above this fraction of the response's own peak
  * magnitude: an absolute floor as low as SILENCE reads the leakage a fractional-delay read puts one
  * frame ahead of the main arrival (omx-pitch at 44.1 kHz: -2.1e-5 at 882, 1.03 at 883) as the onset,
- * and refuses a plugin that declares its true delay by one frame (openmixer#1538). -60 dB below the
+ * and refuses a plugin that declares its true delay by one frame. -60 dB below the
  * peak sits far above that leakage and far below any arrival a plugin means. */
 #define ONSET_OF_PEAK 1e-3f
 

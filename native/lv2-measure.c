@@ -83,7 +83,7 @@
  */
 /*
  * THE MEASURING HOST IS THE HOST THAT WILL RUN THE PLUGIN
- * (`2026-09-25-plugin-qualify.md` §2a). A figure is only as true as the host is faithful, so
+ * A figure is only as true as the host is faithful, so
  * this offers a plugin what a real host does:
  *
  *   options   the provider's table at the rate and block of each instance. An EMPTY
