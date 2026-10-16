@@ -1,0 +1,17 @@
+name: Build the native tools
+description: The CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify.
+
+# Shared by ci.yml and publish.yml. deps/ also holds omx-clap-core's LV2 feature provider at the packages' floor,
+# built for the measurer to link; asan is the measurer under AddressSanitizer, which the leak check runs.
+# src/workflows-agree.test.ts fails if a workflow stops using this action.
+
+runs:
+  using: composite
+  steps:
+    - name: Build
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
+        make -C native deps all asan
