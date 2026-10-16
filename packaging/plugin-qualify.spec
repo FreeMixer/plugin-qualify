@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.9.1
+Version: 0.10.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -66,12 +66,20 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
-* Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.1-1
+* Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.10.0-1
 - The latency check reads a plugin's delay where its impulse response
   really arrives, the first frame at or above 1/1000 of the peak, instead of
   the first sample above silence. A plugin whose fractional delay leaks a
   tiny value one frame early (a pitch shifter, for instance) was refused by
-  one frame although it declared its true latency; it now passes
+  one frame although it declared its true latency; an LV2 or CLAP plugin
+  that declares a delay is now measured correctly
+- plugin-qualify now installs lv2_host_probe beside the measurer. It loads
+  an LV2 plugin through lilv and drives it as a host does, so a console that
+  exports a plugin can test it with the installed tool. The setting
+  OMX_LV2_HOST_PROBE names it, and it exits 2 when the plugin is not in the
+  bundle
+- The repository no longer carries the old copy of the measurer kept for
+  openmixer, nor the test that compared against it
 
 * Thu Oct 15 2026 Pau Aliagas <linuxnow@gmail.com> - 0.9.0-1
 - The LV2 measurer takes its host features and options from the shared LV2
