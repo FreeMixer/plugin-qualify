@@ -14,9 +14,8 @@
 #   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, the
 #                            omx-contract header the LV2 measurer reads its rates from, and omx-clap-core's
 #                            LV2 feature provider (libomx-clap-lv2), built and installed into deps/
-#   build/parity/lv2_measure openmixer's LV2 measurer (parity/openmixer, kept as it was there), built with
-#                            these flags when deps/ holds that header: the parity test runs it beside ours
-#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer and the interposer, for a package
+#   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer, the interposer and the LV2 host
+#                            probe, for a package
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
 # header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. omx-contract's limits
@@ -30,8 +29,8 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.1.4
-# the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so both builds
-# read the same contract. The rates are the same in 2.3.0, which openmixer's copy (parity/openmixer/BLOBS) was built against.
+# the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
+# reads the contract the packages do.
 OMX_CONTRACT_VERSION := 2.10.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
@@ -82,8 +81,6 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so
-	@# asked when the recipe runs, so `make deps all` builds it from what deps just fetched
-	@if [ -f deps/omx-contract/include/omxcontract/omx_contract_limits.h ]; then $(MAKE) --no-print-directory $(BUILD)/parity/lv2_measure; fi
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -94,8 +91,6 @@ $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c
 LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h rt-interpose.h
-# openmixer's copy, as it was taken: its own features unit
-PARITY_SRC := lv2-measure.c lv2-measure-features.c lv2-measure-pin.c
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
@@ -114,12 +109,6 @@ $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-options.c lv2-measure-options.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CLAP_LV2_CFLAGS) $(LV2_CFLAGS) -I. $(LDFLAGS) -o $@ lv2_measure_options.test.c \
 		lv2-measure-options.c $(OMX_CLAP_LV2_LIBS) -ldl -lpthread
-
-# named lv2_measure too: the measurer leaves frames of its own binary, by that name, out of an event's owner
-$(BUILD)/parity/lv2_measure: $(addprefix parity/openmixer/,$(PARITY_SRC)) parity/omx_console_limits.h | $(BUILD)
-	mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off -Iparity -Ideps/omx-contract/include $(PLUGIN_HOSTD_CFLAGS) \
-		$(LILV_CFLAGS) $(LDFLAGS) -o $@ $(addprefix parity/openmixer/,$(PARITY_SRC)) $(LILV_LIBS) -lpthread -lm -ldl
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
@@ -179,11 +168,12 @@ deps:
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
 	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
+	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
 
 clean:
 	rm -rf $(BUILD)

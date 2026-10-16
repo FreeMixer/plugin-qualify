@@ -13,7 +13,7 @@
 # fixture must qualify (exit 0, suitable), the unsafe one must not (exit 1, unsuitable), and the
 # installed prober must print the fixture's integrity pin. The installed lv2-measure.mjs must measure
 # the LV2 fixtures' hosting dimensions through the installed measurer: no allocation in the safe
-# one's run(), some in the unsafe one's, each with its pin.
+# one's run(), some in the unsafe one's, each with its pin. The installed LV2 host probe must run.
 set -euo pipefail
 
 usage="usage: check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>"
@@ -60,3 +60,14 @@ measure=$( (dpkg -L plugin-qualify 2>/dev/null || rpm -ql plugin-qualify) | grep
   fail "lv2-measure.mjs failed on the LV2 fixtures"
 bare node packaging/check-lv2-measurement.mjs "$out/lv2.json" || fail "the LV2 measurement is not the fixtures'"
 echo "check-installed: $dir measures LV2 plugins with no setting"
+
+# the LV2 host probe a console runs on the plugin it exports: installed, and it tells a plugin lilv
+# cannot find (exit 2) from one that failed a claim (exit 1)
+[ -x "$dir/lv2_host_probe" ] || fail "the package installs no lv2_host_probe"
+set +e
+bare "$dir/lv2_host_probe" "$lv2/rt-safe.lv2" urn:plugin-qualify:fixture:no-such-plugin > "$out/probe.txt" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "lv2_host_probe on a plugin the bundle lacks exited $rc, not 2"
+grep -q 'could not find urn:plugin-qualify:fixture:no-such-plugin' "$out/probe.txt" || fail "lv2_host_probe did not name the plugin it could not find"
+echo "check-installed: $dir carries the LV2 host probe"

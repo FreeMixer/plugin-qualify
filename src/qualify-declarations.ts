@@ -82,18 +82,22 @@ export const CLAP_SYSTEM_DIR = "/usr/lib/clap";
 export const CLAP_SCAN_TIMEOUT_S = 300;
 
 /**
- * The CLAP prober (`native/clap-qualify.c`), the LV2 measurer (`native/lv2-measure.c`) and the
- * interposer both run under (`native/rt-interpose.c`): each located by one environment variable, else
- * the package's own build in `native/build/`, else the first of `NATIVE_TOOL_DIRS` that holds it.
+ * The CLAP prober (`native/clap-qualify.c`), the LV2 measurer (`native/lv2-measure.c`), the
+ * interposer both run under (`native/rt-interpose.c`) and the LV2 host probe
+ * (`native/lv2-host-probe.c`, a worker plugin driven through lilv as a host drives it, for a console
+ * that exports an LV2 plugin to test its host-facing half): each located by one environment variable,
+ * else the package's own build in `native/build/`, else the first of `NATIVE_TOOL_DIRS` that holds it.
  */
 export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";
 export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
+export const LV2_HOST_PROBE_TOOL_ENV = "OMX_LV2_HOST_PROBE";
 
 /** The file names of the native tools, in every place they are looked for. */
 export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
 export const LV2_MEASURE_TOOL_NAME = "lv2_measure";
 export const RT_INTERPOSE_NAME = "rt_interpose.so";
+export const LV2_HOST_PROBE_TOOL_NAME = "lv2_host_probe";
 
 /**
  * The ONE list of the native tools the packages install, each with the setting that names it.
@@ -103,6 +107,7 @@ export const NATIVE_TOOLS: readonly { readonly name: string; readonly env: strin
   { name: CLAP_QUALIFY_TOOL_NAME, env: CLAP_QUALIFY_TOOL_ENV },
   { name: LV2_MEASURE_TOOL_NAME, env: LV2_MEASURE_TOOL_ENV },
   { name: RT_INTERPOSE_NAME, env: RT_INTERPOSE_ENV },
+  { name: LV2_HOST_PROBE_TOOL_NAME, env: LV2_HOST_PROBE_TOOL_ENV },
 ];
 
 /**

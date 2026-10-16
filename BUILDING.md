@@ -34,25 +34,21 @@ Its host features are omx-clap-core's LV2 feature provider, the static `libomx-c
 header: `pkg-config omx-clap-lv2` (`omx-clap-lv2-devel`, `libomx-clap-lv2-dev`), else `make deps`
 fetches omx-clap-core at the packages' floor, builds the archive against the fetched CLAP headers and
 installs it into `native/deps/omx-clap-lv2`.
-That header is also what openmixer's copy of the LV2 measurer reads (kept in
-`native/parity/openmixer` as it was at the commit it was taken from, each file's blob id in `BLOBS`),
-so the build carries that copy, `native/build/parity/lv2_measure`, beside ours:
 
 ```
 make -C native deps all   # native/build/clap-qualify, lv2_measure, rt_interpose.so, fixtures/
 ```
 
-The native tests run the build; without it they skip, except on CI, where a missing build fails. The
-parity test runs both LV2 measurers on the fixture bundles and wants the same bytes from each, once
-the three things only ours prints are taken out of its line: the `host` object, the
-`featureOptions` object and the soak's `maxRmsDbfs` (the soak case lifts the sweep's bound, so both
-sweep the same range).
+The native tests run the build; without it they skip, except on CI, where a missing build fails.
 `make -C native asan` builds the measurer under AddressSanitizer, `native/build/asan/lv2_measure`,
 which the leak check runs on every way out of it (a measurement, a soak, a plugin that will not
 instantiate). It is not part of `all`, so a package build needs no libasan.
 
-`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer and the
-interposer (not the fixtures): exactly `NATIVE_TOOLS` in `src/qualify-declarations.ts`. The command
+`make -C native install DESTDIR=... LIBEXECDIR=...` installs the prober, the measurer, the
+interposer and the LV2 host probe (not the fixtures): exactly `NATIVE_TOOLS` in
+`src/qualify-declarations.ts`. The host probe (`lv2_host_probe <bundle> [uri]`) loads a worker plugin
+through lilv and drives it as a host does, so a console that exports an LV2 plugin tests that
+plugin's host-facing half with it. The command
 and `tools/lv2-measure.mjs` look for each by its setting (`OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE`,
 `OMX_RT_INTERPOSE`), then in `native/build/`, then in the directories the packages install into
 (`NATIVE_TOOL_DIRS`). An installed package has no `native/build/`; in a checkout, its own build wins
