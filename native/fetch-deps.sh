@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 #
 # The headers the prober builds against, each at a release tag: the CLAP SDK and plugin-hostd (its pin.h).
-# The omx-contract C header both LV2 measurers (ours and openmixer's copy, parity/openmixer) read their
-# rates from, at the version the packages require, for a build with no omx-contract-devel installed.
+# The omx-contract C header the LV2 measurer reads its rates from, at the version the packages require,
+# for a build with no omx-contract-devel installed.
 # omx-clap-core's LV2 feature provider, the static libomx-clap-lv2 and its header, at the version the
 # packages require, built against the fetched CLAP headers and installed into <dir>/omx-clap-lv2, for a
 # build with no omx-clap-lv2-devel installed.
