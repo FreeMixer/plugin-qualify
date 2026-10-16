@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include <lilv/lilv.h>
+#include <omxdsp/omx_units.h> /* omx_lin_to_db_d */
 #include <lv2/core/lv2.h>
 #include <lv2/worker/worker.h>
 
@@ -85,7 +86,7 @@ static double level_db_at(const float *x, uint32_t from, uint32_t n, double hz) 
     im += (double)x[from + i] * sin(w);
   }
   const double mag = 2.0 * sqrt(re * re + im * im) / (double)n;
-  return 20.0 * log10(mag < 1e-12 ? 1e-12 : mag);
+  return omx_lin_to_db_d(mag, 1e-12);
 }
 
 /* ---- the host's worker ------------------------------------------------------------------
