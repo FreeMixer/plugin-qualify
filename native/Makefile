@@ -36,8 +36,8 @@ OMX_CONTRACT_VERSION := 2.10.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.8.0
-# the omx-dsp headers that omx-clap-core's provider reads, at omx-clap-core's own floor
-OMX_DSP_VERSION := 0.18.0
+# the omx-dsp headers the measurers (omx_lin_to_db_d) and omx-clap-core's provider read: the packages' floor
+OMX_DSP_VERSION := 0.21.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
