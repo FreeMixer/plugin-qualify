@@ -121,7 +121,7 @@ $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-option
 		lv2-measure-options.c $(OMX_CLAP_LV2_LIBS) -ldl -lpthread
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
