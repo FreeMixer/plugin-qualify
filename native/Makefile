@@ -36,8 +36,8 @@ OMX_CONTRACT_VERSION := 2.10.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.8.0
-# the omx-dsp headers that omx-clap-core's provider reads, at omx-clap-core's own floor
-OMX_DSP_VERSION := 0.18.0
+# the omx-dsp headers the measurers (omx_lin_to_db_d) and omx-clap-core's provider read: the packages' floor
+OMX_DSP_VERSION := 0.21.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
@@ -55,6 +55,14 @@ ifeq ($(shell $(PKG_CONFIG) --exists omx-contract && echo true),true)
 OMX_CONTRACT_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags omx-contract)
 else
 OMX_CONTRACT_CFLAGS ?= -Ideps/omx-contract/include
+endif
+
+# omx-dsp's headers, the level conversions the measurers call (omx_lin_to_db_d): the installed omx-dsp-devel /
+# libomxdsp-dev, else the headers `make deps` fetches
+ifeq ($(shell $(PKG_CONFIG) --exists omxdsp && echo true),true)
+OMX_DSP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags omxdsp)
+else
+OMX_DSP_CFLAGS ?= -Ideps/omx-dsp/include
 endif
 
 # the LV2 host features: <omx-clap-lv2/omx_lv2_features.h> and the static libomx-clap-lv2
@@ -96,7 +104,7 @@ LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h rt-interpose.h
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) \
 		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
 
 # the same, under AddressSanitizer: the leak check runs it on every way out of main
@@ -104,7 +112,7 @@ asan: $(BUILD)/asan/lv2_measure
 
 $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) \
 		$(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
 
 # the feature options' oracle, never installed
@@ -113,7 +121,7 @@ $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-option
 		lv2-measure-options.c $(OMX_CLAP_LV2_LIBS) -ldl -lpthread
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
