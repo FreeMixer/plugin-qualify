@@ -38,30 +38,9 @@ jobs:
       - name: No tracked file points into a private repository
         run: pnpm run check:private-refs
 
-      # the CLAP prober, the LV2 measurer, their interposer and the fixture plugins the tests qualify;
-      # deps/ also holds omx-clap-core's LV2 feature provider at the packages' floor, built for the measurer to link
-      # asan: the measurer under AddressSanitizer, which the leak check runs
-      - name: Build the native tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
-          make -C native deps all asan
+      - uses: ./.github/actions/build-native
 
-      # plugin-hostd with pin_file (0.2.0 and after) and its fake worker, from the FreeMixer channel: the pins-file
-      # test starts the real daemon on a qualified pins file. Bookworm is the suite built against the oldest glibc
-      # the channel serves, which the runner's Ubuntu runs; a floor only, no ceiling.
-      - name: Install plugin-hostd and its fake worker
-        run: |
-          set -euo pipefail
-          sudo install -d /etc/apt/keyrings
-          sudo curl -fsSL --retry 5 --retry-all-errors -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
-          echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/bookworm ./" | sudo tee /etc/apt/sources.list.d/freemixer.list
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends plugin-hostd plugin-hostd-tests
-          # apt takes no version relation on the command line: the floor is checked on what it installed
-          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' plugin-hostd)" ge 0.2.0
-          echo "PLUGIN_HOSTD=/usr/bin/plugin-hostd" >> "$GITHUB_ENV"
-          echo "PLUGIN_HOSTD_FAKE_HOST=/usr/libexec/plugin-hostd/tests/fake-host" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/install-plugin-hostd
 
       - name: Type-check
         run: pnpm lint

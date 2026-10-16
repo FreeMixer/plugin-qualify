@@ -52,12 +52,16 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm@10.33.0
 
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # the same two steps ci.yml runs: the suite on a tag needs what the suite on a branch needs
+      - uses: ./.github/actions/build-native
+
+      - uses: ./.github/actions/install-plugin-hostd
+
       - name: Build and test
         run: |
-          pnpm install --frozen-lockfile
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends liblilv-dev lv2-dev
-          make -C native deps all asan
           pnpm lint
           pnpm test
 
