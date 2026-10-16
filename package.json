@@ -1,6 +1,6 @@
 {
   "name": "@openmixer/plugin-qualify",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, a mod-host hosting sweep, and a fail-closed rating.",
   "type": "module",
   "license": "GPL-3.0-or-later",

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.10.0
+Version: 0.10.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -66,6 +66,13 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.10.1-1
+- The npm package can be published again. The publish workflow now installs
+  plugin-hostd the way the CI workflow does, from one shared action, so the
+  package that failed to publish with 0.10.0 goes out with this release
+- A check refuses private citations in the repository, and the text that
+  held some now states the facts instead
+
 * Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.10.0-1
 - The latency check reads a plugin's delay where its impulse response
   really arrives, the first frame at or above 1/1000 of the peak, instead of
