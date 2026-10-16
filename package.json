@@ -81,7 +81,8 @@
     "test": "vitest run src",
     "lint": "tsc -p tsconfig.lint.json",
     "test:py": "python3 -m pytest tools -q",
-    "check:generated": "node tools/gen-python-declarations.mjs --check"
+    "check:generated": "node tools/gen-python-declarations.mjs --check",
+    "check:private-refs": "tools/private-refs-check.sh && tools/private-refs-check.sh --self-test"
   },
   "devDependencies": {
     "@types/node": "^24.9.0",

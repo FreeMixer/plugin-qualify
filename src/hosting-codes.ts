@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The hosting verdict's message codes (2026-09-04-lv2-hosting-path.md). Codes, never prose: the
+ * The hosting verdict's message codes. Codes, never prose: the
  * surface renders the operator's locale.
  *
- * A UNION list file (2026-09-15-no-stored-derivations.md §9): `.gitattributes` marks it
+ * A UNION list file: `.gitattributes` marks it
  * `merge=union`, so two lanes that each add a code merge with both kept. Only the table lives
  * here, one `key: 'code',` per line, with keys and codes unique; the registry-hotspots gate
  * refuses anything else.
@@ -48,7 +48,7 @@ export const HOSTING_CODE = {
   topologyNoAudioOutput: 'hosting.topology.no-audio-output',
   topologyExtraInputs: 'hosting.topology.extra-inputs-fed-silence',
   topologyInstrument: 'hosting.topology.instrument',
-  // The CLAP arm (2026-09-26-clap-hosting-path.md §3): the SAME dimensions fed from CLAP facts,
+  // The CLAP arm: the SAME dimensions fed from CLAP facts,
   // minted here where the LV2 table has no code for the fact.
   topologyWiderThanStrip: 'hosting.topology.wider-than-strip',
   clapLatencyMismatch: 'hosting.clap.latency-mismatch',
@@ -76,6 +76,6 @@ export const HOSTING_CODE = {
   noRealisation: 'hosting.no-realisation',
   realisedInProcess: 'hosting.realised.in-process',
   // A plugin LINKED into the engine (the static-link registry) runs in-process without a
-  // verdict: the library's oracles are its proof (`2026-09-26-clap-hosting-path.md` §7).
+  // verdict: the library's oracles are its proof.
   linked: 'hosting.linked',
 } as const;

@@ -167,7 +167,7 @@ export const DEFAULT_HOSTING_POLICY: HostingPolicy = {
   soakDeadDropDb: 40,
 };
 
-/** What a host spends on one plugin instance (`2026-09-25-plugin-qualify.md` §3a) — the
+/** What a host spends on one plugin instance — the
  *  interchange's shape, since a document carries each profile's budget. */
 import type { HostBudget } from "./measurement/format.js";
 export type { HostBudget };
