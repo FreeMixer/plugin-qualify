@@ -151,7 +151,7 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(doc.measured.rtSafety.events).toContain("malloc");
   });
 
-  live("the arrival is read against the response's peak: a leak one frame ahead of a declared delay is not its onset (openmixer#1538)", () => {
+  live("the arrival is read against the response's peak: a leak one frame ahead of a declared delay is not its onset", () => {
     // 883 frames, with -2.1e-5 at 882: what omx-pitch's fractional read puts out at 44.1 kHz
     const [l] = qualifyClap(join(FIXTURES, "leaky-delay.clap"), undefined, { rates: QUALIFY_RATES });
     const latency = rtSafetyDocument(l!).measured.clap.latency;

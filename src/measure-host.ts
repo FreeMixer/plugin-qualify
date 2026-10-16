@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * Reading what the measuring host (`lv2_measure`) prints and supervising how long it may take
- * (`2026-09-25-plugin-qualify.md` §2a). Pure functions: the runner spawns, these decide.
+ * Reading what the measuring host (`lv2_measure`) prints and supervising how long it may take.
+ * Pure functions: the runner spawns, these decide.
  */
 import { isRecord } from "./measurement/guards.js";
 import { SOAK_SWEEP_DB, SOAK_SWEEP_RATIO, SOAK_TIMEOUT_FLOOR_S, SOAK_TIMEOUT_MARGIN } from "./qualify-declarations.js";

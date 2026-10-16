@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * `plugin-qualify` — the entry point (spec 2026-09-25-plugin-qualify.md §5). Every decision is a
+ * `plugin-qualify` — the entry point. Every decision is a
  * pure function in `src/qualify-cli.ts`; this file only reads argv, prints and exits.
  *
  * CLAP targets are qualified here: the prober (`native/clap-qualify`) runs each under the interposer

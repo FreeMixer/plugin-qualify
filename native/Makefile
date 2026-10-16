@@ -131,7 +131,7 @@ $(BUILD)/fixtures/params-%.clap: fixtures/gain.c | $(BUILD)/fixtures
 $(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_INFO_FAILS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
-# a whole-frame delay read the way omx-pitch lands it at 44.1 kHz (openmixer#1538), declared and not
+# a whole-frame delay read the way omx-pitch lands it at 44.1 kHz, declared and not
 FIXTURE_DELAY = 883
 $(BUILD)/fixtures/leaky-delay.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_DELAY=$(FIXTURE_DELAY) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
