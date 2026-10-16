@@ -342,6 +342,28 @@ export interface PluginClapMeasurement {
   readonly processCalls: number;
 }
 
+/**
+ * The note sweep of a CLAP plugin with a note input (plugin-qualify's prober): the plugin played at
+ * every rate — a chord, bend and a controller, pressure, the chord let go, a burst of note ons and
+ * their offs, all notes off — in the dialect its first note input reads, counted under the
+ * interposer apart from the parameter sweep. `applicable: false` is a plugin the prober could not
+ * play: no note input, or none in a dialect it speaks.
+ */
+export interface PluginNoteSweepMeasurement {
+  readonly applicable: boolean;
+  readonly dialect?: "clap" | "midi";
+  readonly blocks?: number;
+  readonly blockFrames?: number;
+  /** Note, expression and MIDI events the sweep sent. */
+  readonly noteEvents?: number;
+  readonly processErrors?: number;
+  readonly nonFinite?: boolean;
+  readonly interposer?: boolean;
+  readonly allocationsInRun?: number;
+  readonly locksInRun?: number;
+  readonly syscallsInRun?: number;
+}
+
 /** What the classifier is told about the console asking. */
 export interface HostingClassifyOptions {
   /** The LIVE rate. Cost is read here and nowhere else — never projected. */
@@ -886,6 +908,37 @@ export function clapRtReasons(clap: PluginClapMeasurement | undefined): readonly
     out.push(reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.clapProcessError, { errors: clap.processErrors }));
   }
   return out;
+}
+
+/**
+ * The rtSafety reasons of the note sweep, for a plugin with `noteInputs` note inputs: none for a
+ * plugin that takes no notes; `unknown` when it takes notes and was not played under the
+ * interposer (an instrument is cheap and clean at rest, so the parameter sweep alone says nothing
+ * about a voice); `unsuitable` on any allocation, lock or syscall while it was played, or a process
+ * error; `suitable` on a clean count.
+ */
+export function noteSweepReasons(sweep: PluginNoteSweepMeasurement | undefined, noteInputs: number): readonly HostingReason[] {
+  if (noteInputs === 0) return [];
+  if (sweep === undefined || !sweep.applicable || sweep.interposer !== true || !sweep.blocks ||
+      sweep.allocationsInRun === undefined || sweep.locksInRun === undefined || sweep.syscallsInRun === undefined) {
+    return [reason("rtSafety", "objective", "unknown", HOSTING_CODE.rtSafetyNotesUnmeasured)];
+  }
+  const out: HostingReason[] = [];
+  if (sweep.allocationsInRun + sweep.locksInRun + sweep.syscallsInRun > 0) {
+    out.push(
+      reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.rtSafetyNotesViolations, {
+        allocations: sweep.allocationsInRun,
+        syscalls: sweep.syscallsInRun,
+        locks: sweep.locksInRun,
+      }),
+    );
+  }
+  if ((sweep.processErrors ?? 0) > 0) {
+    out.push(reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.clapProcessError, { errors: sweep.processErrors ?? 0 }));
+  }
+  return out.length > 0
+    ? out
+    : [reason("rtSafety", "objective", "suitable", HOSTING_CODE.rtSafetyNotesClean, { blocks: sweep.blocks, events: sweep.noteEvents ?? 0 })];
 }
 
 /**

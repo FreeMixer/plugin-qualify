@@ -24,12 +24,19 @@ import {
   HOSTING_CODE,
   clapRtReasons,
   contributedHostingRating,
+  noteSweepReasons,
   rtSafetyReasons,
   type HostingReason,
   type PluginClapMeasurement,
+  type PluginNoteSweepMeasurement,
   type PluginRtSafetyMeasurement,
 } from "./hosting-suitability.js";
-import { OPENMIXER_CONSOLE_PROFILE, type HostProfile } from "./host-profiles.js";
+import {
+  OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
+  OMX_CLAP_HOST_EXTENSIONS,
+  OPENMIXER_CONSOLE_PROFILE,
+  type HostProfile,
+} from "./host-profiles.js";
 import type { PluginTarget } from "./loader.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
@@ -51,6 +58,12 @@ export interface ClapRtSafetyReading extends PluginRtSafetyMeasurement {
   readonly events?: readonly string[];
 }
 
+/** What the note sweep counted; `applicable: false` is a plugin the prober did not play. */
+export interface ClapNoteSweepReading extends PluginNoteSweepMeasurement {
+  /** The first events the interposer recorded inside `process()` while the plugin was played. */
+  readonly events?: readonly string[];
+}
+
 /** The CLAP facts as the prober printed them: the measurement, and whether any output was not finite. */
 export interface ClapProbedFacts extends PluginClapMeasurement {
   readonly nonFinite: boolean;
@@ -65,6 +78,8 @@ export interface ClapQualifyLine {
   readonly hostExtensions: readonly string[];
   readonly clap: ClapProbedFacts;
   readonly rtSafety: ClapRtSafetyReading;
+  /** The note sweep: the plugin played through its note input, counted apart. */
+  readonly noteSweep: ClapNoteSweepReading;
   /**
    * The pin (spec §11): the `.clap`'s digest by its name in its directory and the layout fingerprint
    * the prober computed through plugin-hostd's `pin.h`, or the reason it took none.
@@ -143,6 +158,31 @@ function readRtSafety(v: unknown): ClapRtSafetyReading {
   };
 }
 
+function readNoteSweep(v: unknown): ClapNoteSweepReading {
+  if (!isRecord(v)) return bad("no noteSweep");
+  if (!bool(v, "applicable", "noteSweep")) return { applicable: false };
+  const dialect = str(v, "dialect", "noteSweep");
+  if (dialect !== "clap" && dialect !== "midi") return bad(`noteSweep dialect ${dialect}`);
+  const played = {
+    applicable: true,
+    dialect,
+    blocks: count(v, "blocks", "noteSweep"),
+    blockFrames: count(v, "blockFrames", "noteSweep"),
+    noteEvents: count(v, "noteEvents", "noteSweep"),
+    processErrors: count(v, "processErrors", "noteSweep"),
+    nonFinite: bool(v, "nonFinite", "noteSweep"),
+  } as const;
+  if (!bool(v, "interposer", "noteSweep")) return { ...played, interposer: false };
+  return {
+    ...played,
+    interposer: true,
+    allocationsInRun: count(v, "allocationsInRun", "noteSweep"),
+    locksInRun: count(v, "locksInRun", "noteSweep"),
+    syscallsInRun: count(v, "syscallsInRun", "noteSweep"),
+    events: strings(v, "events", "noteSweep"),
+  };
+}
+
 /** One line of the prober's stdout, or a {@link ClapQualifyError} saying how it differs. */
 export function parseClapQualifyLine(text: string): ClapQualifyLine {
   let v: unknown;
@@ -167,6 +207,7 @@ export function parseClapQualifyLine(text: string): ClapQualifyLine {
     hostExtensions: strings(v, "hostExtensions", "the line"),
     clap: readClap(v["clap"]),
     rtSafety: readRtSafety(v["rtSafety"]),
+    noteSweep: readNoteSweep(v["noteSweep"]),
     integrity: readIntegrity(v["integrity"]) ?? bad("no integrity"),
   };
 }
@@ -178,8 +219,13 @@ export function parseClapQualifyOutput(stdout: string): ClapQualifyLine[] {
 
 // --- the verdict document ------------------------------------------------------------------------
 
-/** The document's schema name; a reader refuses any other. */
-export const RT_SAFETY_DOCUMENT_SCHEMA = "plugin-qualify.rt-safety/1";
+/**
+ * The document's schema name; a reader refuses any other it does not know. `/2` is `/1` with
+ * `measured.noteSweep` added and the note sweep's reasons folded into `verdict` (a plugin with no
+ * note input gets none, so its `/2` verdict is its `/1` verdict); every `/1` field is unchanged, so
+ * a `/1` reader of `verdict.rating` and `verdict.rtSafe` reads a `/2` document right.
+ */
+export const RT_SAFETY_DOCUMENT_SCHEMA = "plugin-qualify.rt-safety/2";
 
 /**
  * The RT-safety verdict of one plugin binary for one console: keyed by the binary's SHA-256 and
@@ -207,6 +253,7 @@ export interface RtSafetyDocument {
     readonly hostExtensions: readonly string[];
     readonly clap: ClapProbedFacts;
     readonly rtSafety: ClapRtSafetyReading;
+    readonly noteSweep: ClapNoteSweepReading;
     readonly integrity: IntegrityMeasurement;
   };
 }
@@ -225,7 +272,7 @@ export function rtSafetyDocument(line: ClapQualifyLine, profile: HostProfile = O
     offered === null
       ? [{ dimension: "rtSafety", kind: "objective", rating: "unknown", code: HOSTING_CODE.clapFormatNotHosted, params: {} }]
       : offeredAsProfile
-        ? [...rtSafetyReasons(line.rtSafety), ...clapRtReasons(line.clap)]
+        ? [...rtSafetyReasons(line.rtSafety), ...clapRtReasons(line.clap), ...noteSweepReasons(line.noteSweep, line.clap.noteInputs)]
         : [
             {
               dimension: "rtSafety",
@@ -244,7 +291,13 @@ export function rtSafetyDocument(line: ClapQualifyLine, profile: HostProfile = O
     plugin: { uri: line.uri, format: "clap", binary: line.binary },
     console: profile.id,
     verdict: { rating, rtSafe: rating === "suitable", ...(rating === "suitable" || deciding === undefined ? {} : { deciding }), reasons },
-    measured: { hostExtensions: line.hostExtensions, clap: line.clap, rtSafety: line.rtSafety, integrity: line.integrity },
+    measured: {
+      hostExtensions: line.hostExtensions,
+      clap: line.clap,
+      rtSafety: line.rtSafety,
+      noteSweep: line.noteSweep,
+      integrity: line.integrity,
+    },
   };
 }
 
@@ -303,6 +356,8 @@ export interface ClapQualifyOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Whether a file exists; the default asks the filesystem. */
   readonly exists?: (path: string) => boolean;
+  /** The host extensions the prober offers beyond the console's, each one of {@link OMX_CLAP_HOST_CONFIGURED_EXTENSIONS}. */
+  readonly offer?: readonly string[];
 }
 
 /**
@@ -341,6 +396,7 @@ export function qualifyClap(binaryPath: string, id: string | undefined, options:
     String(CLAP_SWEEP_FRAMES),
     "--blocks",
     String(CLAP_SWEEP_BLOCKS),
+    ...(options.offer === undefined || options.offer.length === 0 ? [] : ["--offer", options.offer.join(",")]),
     binaryPath,
     ...(id === undefined ? [] : [id]),
   ];
@@ -364,9 +420,24 @@ export interface ClapQualifyPass {
 }
 
 /**
- * Qualify every CLAP target, one prober run per target (a crash takes only that plugin), and judge
- * each line under every host profile. A target without a binary path (a bare `urn:clap:` id) has
- * nothing to load and is a failure, never a pass.
+ * What the prober must offer beyond the console's extensions to measure for `profile`: the extra
+ * extensions of its list, when the prober can offer each and the list holds the console's; `undefined`
+ * for a profile the prober cannot stand in for (no CLAP path, or an extension it cannot offer), which
+ * is judged from the console's run and reads `unknown` there.
+ */
+export function proberOffer(profile: HostProfile): readonly string[] | undefined {
+  const wanted = profile.clapExtensions;
+  if (wanted === null || !OMX_CLAP_HOST_EXTENSIONS.every((e) => wanted.includes(e))) return undefined;
+  const extra = wanted.filter((e) => !OMX_CLAP_HOST_EXTENSIONS.includes(e));
+  if (!extra.every((e) => OMX_CLAP_HOST_CONFIGURED_EXTENSIONS.includes(e))) return undefined;
+  return OMX_CLAP_HOST_CONFIGURED_EXTENSIONS.filter((e) => extra.includes(e));
+}
+
+/**
+ * Qualify every CLAP target, one prober run per target and set of offered extensions (a crash takes
+ * only that plugin), and judge each line under every host profile, from the run that offered that
+ * profile's extensions. A target without a binary path (a bare `urn:clap:` id) has nothing to load
+ * and is a failure, never a pass.
  */
 export function qualifyClapTargets(
   targets: readonly PluginTarget[],
@@ -378,10 +449,16 @@ export function qualifyClapTargets(
   const failures: { uri: string; problem: string }[] = [];
   for (const target of targets) {
     const id = target.uri.startsWith("urn:clap:") ? target.uri.slice("urn:clap:".length) : undefined;
-    let lines: ClapQualifyLine[];
+    // one run per distinct offer, the console's (none) for a profile the prober cannot stand in for
+    const offers = new Map<string, readonly string[]>();
+    for (const profile of profiles) {
+      const offer = proberOffer(profile) ?? [];
+      offers.set(offer.join(","), offer);
+    }
+    const runs = new Map<string, ClapQualifyLine[]>();
     try {
       if (target.binaryPath === undefined) throw new ClapQualifyError(`${target.uri}: no .clap to load; name the file or a directory holding it`);
-      lines = qualifyClap(target.binaryPath, id, options);
+      for (const [key, offer] of offers) runs.set(key, qualifyClap(target.binaryPath, id, { ...options, offer }));
     } catch (e) {
       if (!(e instanceof ClapQualifyError)) throw e;
       failures.push({ uri: target.uri, problem: e.message });
@@ -390,8 +467,8 @@ export function qualifyClapTargets(
       }
       continue;
     }
-    for (const line of lines) {
-      for (const profile of profiles) {
+    for (const profile of profiles) {
+      for (const line of runs.get((proberOffer(profile) ?? []).join(","))!) {
         const doc = rtSafetyDocument(line, profile);
         documents.push(doc);
         verdicts.push(rtSafetyVerdict(doc));

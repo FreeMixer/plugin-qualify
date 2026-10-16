@@ -178,10 +178,13 @@ export type { HostBudget };
  * so it gets the same per-instance share, at 48 kHz / 128 frames. `jalv` gives each plugin its own
  * process and client, so a quarter core per instance, at 48 kHz / 256 frames. The last two are
  * declared defaults, not a measurement of anyone's board — a project brings its own profile file.
+ * `omx-clap-host` runs its plugins one JACK client each, called in turn on the server's one cycle,
+ * so it gets mod-host's share and pair.
  */
 export const HOST_BUDGETS = {
   "openmixer-console": { coreFractionCeiling: 0.05, rate: COST_REFERENCE_RATE, quantum: QUANTUM_FRAMES },
   jalv: { coreFractionCeiling: 0.25, rate: MEASURE_BASE_RATE, quantum: 256 },
   "mod-host": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128 },
+  "omx-clap-host": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128 },
 } as const satisfies Readonly<Record<string, HostBudget>>;
 

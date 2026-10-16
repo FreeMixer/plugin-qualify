@@ -19,6 +19,7 @@ import {
   ClapQualifyError,
   RT_SAFETY_DOCUMENT_SCHEMA,
   clapQualifyTools,
+  proberOffer,
   parseClapQualifyLine,
   parseClapQualifyOutput,
   qualifyClap,
@@ -29,7 +30,13 @@ import {
   type ClapQualifyRun,
 } from "./clap-qualify.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
-import { OMX_CLAP_HOST_EXTENSIONS, OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
+import {
+  OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
+  OMX_CLAP_HOST_EXTENSIONS,
+  OMX_CLAP_HOST_PROFILE,
+  OPENMIXER_CONSOLE_PROFILE,
+  shippedHostProfile,
+} from "./host-profiles.js";
 import {
   CLAP_QUALIFY_TOOL_ENV,
   CLAP_QUALIFY_TOOL_NAME,
@@ -47,9 +54,12 @@ const FIXTURES = join(PKG, "native", "build", "fixtures");
 const SAFE = join(FIXTURES, "rt-safe.clap");
 const UNSAFE = join(FIXTURES, "rt-unsafe.clap");
 const CONTROLS = join(FIXTURES, "controls.clap");
+const SYNTH = join(FIXTURES, "synth.clap");
+const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
+const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE].every((p) => existsSync(p));
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI].every((p) => existsSync(p));
 
 const scratch = mkdtempSync(join(tmpdir(), "clap-qualify-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -68,7 +78,9 @@ function live(name: string, body: () => void): void {
 const sha256 = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 /** A prober line as the tool prints it, with `patch` merged over the facts. */
-function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string[]; integrity?: object | null } = {}): string {
+function line(
+  patch: { rtSafety?: object; clap?: object; hostExtensions?: string[]; integrity?: object | null; noteSweep?: object } = {},
+): string {
   return JSON.stringify({
     uri: `urn:clap:${SAFE_ID}`,
     format: "clap",
@@ -101,6 +113,7 @@ function line(patch: { rtSafety?: object; clap?: object; hostExtensions?: string
       events: [],
       ...patch.rtSafety,
     },
+    noteSweep: patch.noteSweep ?? { applicable: false },
     ...(patch.integrity === null
       ? {}
       : {
@@ -260,6 +273,70 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
   });
 });
 
+describe("clap-qualify, live — an instrument is played: the note sweep", () => {
+  live("a clean synth is suitable: the parameter sweep and the note sweep both count nothing", () => {
+    const [l] = qualifyClap(SYNTH, undefined, { rates: QUALIFY_RATES });
+    expect(l!.clap.noteInputs).toBe(1);
+    expect(l!.noteSweep).toMatchObject({ applicable: true, dialect: "clap", interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
+    expect(l!.noteSweep.blocks).toBe(CLAP_SWEEP_BLOCKS * QUALIFY_RATES.length);
+    expect(l!.noteSweep.noteEvents).toBeGreaterThan(l!.noteSweep.blocks!);
+    const doc = rtSafetyDocument(l!);
+    expect(doc.verdict).toMatchObject({ rating: "suitable", rtSafe: true });
+    expect(doc.verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean, HOSTING_CODE.rtSafetyNotesClean]);
+    expect(doc.measured.noteSweep).toEqual(l!.noteSweep);
+  });
+
+  live("a synth that allocates on note on is clean at rest and unsuitable once played", () => {
+    const [l] = qualifyClap(SYNTH_ALLOC, undefined, { rates: QUALIFY_RATES });
+    // the parameter sweep plays no note: it sees nothing
+    expect(l!.rtSafety).toMatchObject({ allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
+    expect(l!.noteSweep.allocationsInRun).toBeGreaterThan(0);
+    expect(l!.noteSweep.events).toContain("malloc");
+    const doc = rtSafetyDocument(l!);
+    expect(doc.verdict).toMatchObject({ rating: "unsuitable", rtSafe: false });
+    expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyNotesViolations);
+  });
+
+  live("a synth that reads only MIDI is played in MIDI's dialect", () => {
+    const [l] = qualifyClap(SYNTH_MIDI, undefined, { rates: [QUALIFY_RATES[0]!] });
+    expect(l!.noteSweep).toMatchObject({ applicable: true, dialect: "midi", allocationsInRun: 0 });
+    expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
+  });
+
+  live("an effect is not played: its note sweep is not applicable and adds no reason", () => {
+    const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
+    expect(l!.noteSweep).toEqual({ applicable: false });
+    expect(rtSafetyDocument(l!).verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
+  });
+
+  live("without the interposer the note sweep counts nothing, and an instrument's verdict is unknown", () => {
+    const r = spawnSync(clapQualifyToolPath(), ["--rates", String(QUALIFY_RATES[0]), "--blocks", "16", SYNTH_ALLOC], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const [l] = parseClapQualifyOutput(r.stdout);
+    expect(l!.noteSweep).toMatchObject({ applicable: true, interposer: false });
+    expect(l!.noteSweep.allocationsInRun).toBeUndefined();
+    expect(rtSafetyDocument(l!).verdict.rating).toBe("unknown");
+  });
+
+  live("--offer adds omx-clap-host's three extensions, and the synth is suitable under its profile", () => {
+    const offer = proberOffer(OMX_CLAP_HOST_PROFILE)!;
+    expect(offer).toEqual(OMX_CLAP_HOST_CONFIGURED_EXTENSIONS);
+    const [l] = qualifyClap(SYNTH, undefined, { rates: [QUALIFY_RATES[0]!], offer });
+    expect(l!.hostExtensions).toEqual([...OMX_CLAP_HOST_EXTENSIONS, ...OMX_CLAP_HOST_CONFIGURED_EXTENSIONS]);
+    expect(rtSafetyDocument(l!, OMX_CLAP_HOST_PROFILE).verdict.rating).toBe("suitable");
+    // the console's run is not omx-clap-host's measurement, nor the other way round
+    const [base] = qualifyClap(SYNTH, undefined, { rates: [QUALIFY_RATES[0]!] });
+    expect(rtSafetyDocument(base!, OMX_CLAP_HOST_PROFILE).verdict.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
+    expect(rtSafetyDocument(l!, OPENMIXER_CONSOLE_PROFILE).verdict.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
+  });
+
+  live("an extension the prober cannot offer is a usage error, not an offer", () => {
+    const r = spawnSync(clapQualifyToolPath(), ["--rates", "48000", "--offer", "clap.gui", SYNTH], { encoding: "utf8" });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+  });
+});
+
 describe("plugin-qualify --all, live — the standard CLAP search path", () => {
   live("a .clap only on CLAP_PATH is found by --all and qualified, with ~/.clap empty", () => {
     const onPath = join(scratch, "clap-path");
@@ -365,6 +442,78 @@ describe("rtSafetyDocument — the rtSafety dimension's verdict, and nothing els
     const jalv = shippedHostProfile("jalv")!;
     expect(rtSafetyDocumentName(rtSafetyDocument(l))).toBe(`${"a".repeat(64)}.${OPENMIXER_CONSOLE_PROFILE.id}.rt-safety.json`);
     expect(rtSafetyDocument(l, jalv).console).toBe(jalv.id);
+  });
+});
+
+describe("the note sweep in the line and the document", () => {
+  const played = { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 6000, processErrors: 0, nonFinite: false,
+    interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0, events: [] };
+  const instrument = { noteInputs: 1, mainInputChannels: 0, features: ["instrument"] };
+
+  it("reads a played sweep, and refuses one that is not the prober's", () => {
+    expect(parseClapQualifyLine(line({ noteSweep: played, clap: instrument })).noteSweep).toEqual(played);
+    expect(() => parseClapQualifyLine(line({ noteSweep: { ...played, dialect: "midi2" } }))).toThrow(/dialect/);
+    expect(() => parseClapQualifyLine(line({ noteSweep: { ...played, allocationsInRun: -1 } }))).toThrow(/allocationsInRun/);
+    expect(() => parseClapQualifyLine(JSON.stringify({ ...JSON.parse(line()), noteSweep: undefined }))).toThrow(/noteSweep/);
+  });
+
+  it("an allocation, a lock or a syscall while played is unsuitable, under its own code", () => {
+    for (const patch of [{ allocationsInRun: 2 }, { locksInRun: 1 }, { syscallsInRun: 1 }]) {
+      const doc = rtSafetyDocument(parseClapQualifyLine(line({ noteSweep: { ...played, ...patch }, clap: instrument })));
+      expect(doc.verdict.rating).toBe("unsuitable");
+      expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyNotesViolations);
+    }
+    const errors = rtSafetyDocument(parseClapQualifyLine(line({ noteSweep: { ...played, processErrors: 1 }, clap: instrument })));
+    expect(errors.verdict.deciding?.code).toBe(HOSTING_CODE.clapProcessError);
+  });
+
+  it("an instrument the prober could not play, or played with no interposer, is unknown, never clean", () => {
+    for (const sweep of [{ applicable: false }, { ...played, interposer: false, allocationsInRun: undefined, locksInRun: undefined, syscallsInRun: undefined, events: undefined }]) {
+      const doc = rtSafetyDocument(parseClapQualifyLine(line({ noteSweep: sweep, clap: instrument })));
+      expect(doc.verdict.rating).toBe("unknown");
+      expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyNotesUnmeasured);
+    }
+  });
+
+  it("a plugin with no note input gets no note reason: its verdict is the one /1 gave", () => {
+    const doc = rtSafetyDocument(parseClapQualifyLine(line()));
+    expect(doc.schema).toBe("plugin-qualify.rt-safety/2");
+    expect(doc.verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
+    expect(doc.measured.noteSweep).toEqual({ applicable: false });
+  });
+});
+
+describe("proberOffer — the run that stands in for a profile", () => {
+  it("the console needs no offer, omx-clap-host its three, and a host the prober cannot stand in for none", () => {
+    expect(proberOffer(OPENMIXER_CONSOLE_PROFILE)).toEqual([]);
+    expect(proberOffer(OMX_CLAP_HOST_PROFILE)).toEqual(OMX_CLAP_HOST_CONFIGURED_EXTENSIONS);
+    expect(proberOffer(shippedHostProfile("jalv")!)).toBeUndefined();
+    expect(proberOffer({ ...OPENMIXER_CONSOLE_PROFILE, clapExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] })).toBeUndefined();
+    expect(proberOffer({ ...OPENMIXER_CONSOLE_PROFILE, clapExtensions: ["clap.log"] })).toBeUndefined();
+  });
+
+  it("qualifyClapTargets runs the prober once per offer, and judges each profile from its own run", () => {
+    const seen: (readonly string[])[] = [];
+    const run: ClapQualifyRun = (_tool, args) => {
+      seen.push(args);
+      const at = args.indexOf("--offer");
+      const offered = at < 0 ? [] : args[at + 1]!.split(",");
+      return { status: 0, signal: null, stdout: line({ hostExtensions: [...OMX_CLAP_HOST_EXTENSIONS, ...offered] }) };
+    };
+    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
+    const pass = qualifyClapTargets([{ format: "clap", uri: `urn:clap:${SAFE_ID}`, binaryPath: "/p/x.clap" }], {
+      rates: [48000],
+      run,
+      env,
+      exists: () => true,
+      profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, shippedHostProfile("jalv")!],
+    });
+    expect(seen.map((a) => a.includes("--offer"))).toEqual([false, true]);
+    expect(pass.verdicts.map((v) => [v.host, v.rating])).toEqual([
+      ["openmixer-console", "suitable"],
+      ["omx-clap-host", "suitable"],
+      ["jalv", "unknown"],
+    ]);
   });
 });
 
