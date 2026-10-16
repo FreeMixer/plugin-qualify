@@ -1,3 +1,13 @@
+plugin-qualify (0.10.1) unstable; urgency=medium
+
+  * The npm package can be published again. The publish workflow now installs
+    plugin-hostd the way the CI workflow does, from one shared action, so the
+    package that failed to publish with 0.10.0 goes out with this release.
+  * A check refuses private citations in the repository, and the text that
+    held some now states the facts instead.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Fri, 16 Oct 2026 15:00:00 +0200
+
 plugin-qualify (0.10.0) unstable; urgency=medium
 
   * The latency check reads a plugin's delay where its impulse response
