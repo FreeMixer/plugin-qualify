@@ -263,11 +263,13 @@ describe("the real tool", () => {
   it("scans a .clap and says what the golden says — a stale golden fails here", (ctx) => {
     const tool = builtTool();
     if (tool === undefined) {
+      if (process.env["CI"]) throw new Error(`omx-clap-scan not found on CI: .github/actions/install-scanners installs it and sets ${CLAP_SCAN_TOOL_ENV}`);
       ctx.skip(`omx-clap-scan not found: set ${CLAP_SCAN_TOOL_ENV} to the binary built by omx-clap-host (make omx-clap-scan)`);
       return;
     }
     const fake = process.env["OMX_CLAP_FAKE"];
     if (fake === undefined) {
+      if (process.env["CI"]) throw new Error("OMX_CLAP_FAKE is not set on CI: .github/actions/install-scanners sets it");
       ctx.skip("OMX_CLAP_FAKE not set: name omx-clap-host's built tests/fake.clap to run the live scan");
       return;
     }

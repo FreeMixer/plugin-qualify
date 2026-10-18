@@ -60,6 +60,8 @@ jobs:
 
       - uses: ./.github/actions/install-plugin-hostd
 
+      - uses: ./.github/actions/install-scanners
+
       - name: Build and test
         run: |
           pnpm lint
