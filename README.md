@@ -37,7 +37,7 @@ npm install -g @openmixer/plugin-qualify
 
 The npm package ships the TypeScript command only, not the native tools. The CLAP prober, the LV2 measurer and
 the interposer come with the RPM or DEB, or from `make -C native` in a checkout; with the npm package alone,
-point `OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` at them, or CLAP qualification and the LV2
+point `OMX_CLAP_QUALIFY`, `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` at them (the probe runner is plugin-hostd's, `OMX_PROBE_RUNNER`), or CLAP qualification and the LV2
 hosting dimensions refuse with "no CLAP prober at ...".
 
 The GitHub release also carries the packed tarball, `openmixer-plugin-qualify-<version>.tgz`. To run from a
@@ -68,7 +68,9 @@ plugin-qualify --help                         # every option and its default
 `--no-host-sweep` measures offline only, without mod-host. The `Containerfile` builds an image
 with lilv, mod-host and the ASan mod-host, if you do not want to install them yourself.
 
-Exit code: `0` every plugin qualified, `1` some did not, `2` something could not be measured.
+A named LV2 plugin is measured the same way as a CLAP one: through the probe runner, then judged from the probe
+output it writes (`plugin-qualify judge` below). Exit code: `0` every plugin qualified, `1` some did not, `2`
+something could not be measured.
 
 ## CLAP plugins: the RT-safety verdict
 
@@ -81,6 +83,11 @@ plugin-qualify ./my-fx.clap                   # every plugin in the file
 plugin-qualify --out ./out ./my-fx.clap       # and its RT-safety documents
 CLAP_PATH=~/my-clap plugin-qualify --all      # every CLAP on the search path
 ```
+
+Each plugin is measured by plugin-hostd's probe runner, `plugin-hostd-probe` (from the `plugin-hostd` package;
+`OMX_PROBE_RUNNER` names it when it is not on `PATH`). The runner starts the prober under limits (a wall clock
+that kills the whole process tree, CPU time, memory, files), and plugin-qualify waits for the runner and reads
+the document it writes, the probe output. Nothing in plugin-qualify times a prober out on its own any more.
 
 `--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
 names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
@@ -100,15 +107,43 @@ count of its own: a chord, the pitch bent and a controller moved, pressure, the 
 burst of 32 note ons in one block and their offs, all notes off, in the dialect its note input
 reads (CLAP's, else MIDI's). An allocation, lock or syscall while it plays is **unsuitable**
 (`hosting.rt-safety.violations-under-notes`); an instrument that could not be played under the
-interposer is **unknown** (`hosting.rt-safety.notes-unmeasured`). `--out` writes one
-document per plugin binary and host profile, named `<sha256>.<profile>.rt-safety.json`, so a
-verdict never outlives the bytes it was measured on. Its schema is `plugin-qualify.rt-safety/2`: `/1` with
-`measured.noteSweep` added and the note sweep's reasons in `verdict`; a plugin with no note input
-reads the same verdict under both. Each line also carries the plugin's pin, an
-`integrity` block: the `.clap`'s SHA-256 by its file name and the parameter-layout fingerprint
-`omx-layout/1:<sha256>`, both computed through plugin-hostd's `pin.h`, which is what a console
+interposer is **unknown** (`hosting.rt-safety.notes-unmeasured`). `--out` writes the qualification records and the probe outputs they judged (see
+"Judging a probe output" below), one pair per plugin binary and offered host extensions. Each plugin's pin is
+an `integrity` block in the probe output: the `.clap`'s SHA-256 by its file name and the parameter-layout
+fingerprint `omx-layout/1:<sha256>`, both computed through plugin-hostd's `pin.h`, which is what a console
 hands plugin-hostd as `pin_set` before it adds the plugin. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
-name the prober and the interposer when they are not the installed ones or the checkout's own build.
+name the prober and the interposer the runner starts when they are not the installed ones or the checkout's
+own build.
+
+## Judging a probe output
+
+The probe output is the document `plugin-hostd-probe run` writes: one binary and one offer, the steps the
+prober reached and how each ended, and the figures per rate and quantum, with no verdict in it. plugin-qualify
+reads it with `readProbeOutput`, which refuses a document of a major version it does not know
+(`probe.format.major-unknown`), a document that carries a verdict, and a document whose derived fields disagree
+with the fields they are computed from (`probe.format.derived-mismatch`): `machine.class.cstatesLimited` and
+`machine.profile.meetsProtocol` are recomputed from `cpuidle[]`, the governor and `unmet[]`, never trusted.
+
+```
+plugin-hostd-probe run --out out/plate.probe.json ./example-plate.clap org.example.plate
+plugin-qualify judge --host-profile omx-clap-host --qualification-dir ./qualification out/plate.probe.json
+```
+
+`judge` writes, into the qualification directory (`--qualification-dir`, else `$XDG_STATE_HOME/omx/qualification`,
+else `~/.local/state/omx/qualification`), the qualification record `<id>@<version>-<sha256 first 12>.<offer>.qualification.json`
+and, beside it, a byte copy of the probe output it judged, `<same name>.probe.json`, because the probe directory
+may be wiped. The record names that copy and its SHA-256 in `probe`, with the run's protocol, reason and machine
+class, so a reference figure and a local one are told apart. The record holds, for each host profile, the verdict
+(`rating`, `hosting`, the deciding reason code and every reason) and the cost reasons at that profile's rate and
+quantum, and the figures as measured. Exit `0` every plugin qualified, `1` some did not, `2` something could not
+be read or judged.
+
+The verdict is the same one `plugin-qualify` gives CLAP plugins today, the real-time-safety one, now for LV2 as
+well; cost is reported beside it, not folded into it. Cost is read at the profile's rate AND quantum: a pair the
+document does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`, and two quanta of one plugin that cost
+differently give two different cost reasons. Only a measurement of the old format, which keeps one figure per
+rate, is read per rate. A run that did not end `probe.ok` is `unknown`, with the run's outcome code as the reason.
+
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
