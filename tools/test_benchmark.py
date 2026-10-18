@@ -1160,6 +1160,67 @@ class Lv2benchCrossCheck(unittest.TestCase):
         self.assertEqual(by_uri["urn:z"]["reason"], "only in ours")
 
 
+
+class TestWorkerInterfaceNonconforming(unittest.TestCase):
+    """A plugin whose LV2_Worker_Interface has a NULL `work` or `work_response` is refused with a
+    verdict code, never called: calling a NULL function pointer through ctypes kills the process.
+    Each case runs in a child so a crash is a failed test, not a dead test run."""
+
+    SCRIPT = textwrap.dedent("""
+        import ctypes, json, sys
+        sys.path.insert(0, %(tools)r)
+        import benchmark as b
+        null = set(json.loads(sys.argv[1]))
+        respond_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+        work_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, respond_fn, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+        resp_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+        end_fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+        calls = []
+        keep = [work_fn(lambda h, r, rh, n, d: calls.append("work") or 0),
+                resp_fn(lambda h, n, d: calls.append("work_response") or 0),
+                end_fn(lambda h: calls.append("end_run") or 0)]
+        table = (ctypes.c_void_p * 3)()
+        for i, name in enumerate(("work", "work_response", "end_run")):
+            table[i] = None if name in null else ctypes.cast(keep[i], ctypes.c_void_p).value
+        class World:
+            def new_uri(self, u): return u
+        class Inst:
+            def get_extension_data(self, u): return ctypes.addressof(table)
+            def get_handle(self): return 1
+        host = b._Host.__new__(b._Host)
+        host.world = World()
+        try:
+            iface = host.worker_interface(Inst())
+            q = b.WorkerQueue(); q.schedule(b"x"); q.pump(iface)
+            print(json.dumps({"ok": True, "calls": calls}))
+        except Exception as e:
+            print(json.dumps({"refused": str(e), "type": type(e).__name__}))
+    """)
+
+    def run_with(self, null):
+        r = subprocess.run([sys.executable, "-c", self.SCRIPT % {"tools": os.path.dirname(os.path.abspath(__file__))}, json.dumps(null)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, f"the process died ({r.returncode}): {r.stderr[-300:]}")
+        return json.loads(r.stdout)
+
+    def test_a_conforming_interface_is_driven_in_order(self):
+        out = self.run_with([])
+        self.assertTrue(out["ok"])
+
+    def test_a_missing_end_run_is_allowed(self):
+        self.assertTrue(self.run_with(["end_run"])["ok"])
+
+    def test_a_null_work_response_is_refused_with_the_code(self):
+        out = self.run_with(["work_response"])
+        self.assertEqual(out["type"], "WorkerInterfaceError")
+        self.assertTrue(out["refused"].startswith(b.WORKER_NONCONFORMING), out)
+        self.assertIn("work_response", out["refused"])
+
+    def test_a_null_work_is_refused_with_the_code(self):
+        out = self.run_with(["work"])
+        self.assertEqual(out["type"], "WorkerInterfaceError")
+        self.assertTrue(out["refused"].startswith(b.WORKER_NONCONFORMING), out)
+
 class WorkerQueueTests(unittest.TestCase):
     """Spec 2a: the measuring host runs the plugin's worker. 2026-10-01: a schedule that accepted
     and dropped measured Hex Chain's amp unbuilt (0.9 us/sample against 5.4 built)."""
