@@ -209,6 +209,31 @@ describe("qualifyTargets: a pass over the targets", () => {
     ]);
   });
 
+  it("a target whose second offer's run fails leaves no run and no document of its first one", () => {
+    const perOfferRun = perOffer().run;
+    let n = 0;
+    const run: ProbeRun = (tool, args, env) => (n++ === 1 ? { status: 2, stderr: "no limits" } : perOfferRun(tool, args, env));
+    // the same plugin id in two files: the first one's second run fails, the second file measures whole
+    const pass = qualifyTargets([target, { ...target, binaryPath: "/p/b.clap" }], {
+      rates: [48000],
+      run,
+      env: TOOLS,
+      exists,
+      profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE],
+    });
+    expect(n).toBe(4);
+    expect(pass.failures).toEqual([{ uri: "urn:clap:org.example.fx", problem: expect.stringContaining("exited 2") }]);
+    expect(pass.verdicts.map((v) => [v.host, v.measured])).toEqual([
+      ["openmixer-console", false],
+      ["omx-clap-host", false],
+      ["openmixer-console", true],
+      ["omx-clap-host", true],
+    ]);
+    // only the second file's two runs and two documents: the failed target's first run counts for nothing
+    expect(pass.runs.map((r) => r.judgment.hosts.map((h) => h.verdict.host))).toEqual([["openmixer-console"], ["omx-clap-host"]]);
+    expect(pass.documents.map((d) => d.console)).toEqual(["openmixer-console", "omx-clap-host"]);
+  });
+
   it("an LV2 plugin is run once for every profile, through the runner, and judged on its counts", () => {
     const doc = fixtureJson("success-msi");
     doc.plugin = { format: "lv2", id: LV2.uri };

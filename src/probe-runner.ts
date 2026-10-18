@@ -216,12 +216,14 @@ export function qualifyTargets(
       byOffer.set(key, entry);
     }
     const judged = new Map<string, QualifyVerdict>();
+    // a target's runs and documents count only when every one of its runs gave a probe output: one that
+    // failed leaves the target not measured, and then nothing of it is recorded or pinned
+    const targetRuns: { bytes: Buffer; judgment: Judgment }[] = [];
     try {
       for (const { offer, profiles: forOffer } of byOffer.values()) {
         const probed = probeTarget(target, { ...options, offer });
         const judgment = judgeProbeOutput(probed.output, forOffer);
-        runs.push({ bytes: probed.bytes, judgment });
-        documents.push(...judgment.documents);
+        targetRuns.push({ bytes: probed.bytes, judgment });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);
       }
     } catch (e) {
@@ -231,6 +233,10 @@ export function qualifyTargets(
         verdicts.push({ uri: target.uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: "not-measured" });
       }
       continue;
+    }
+    for (const r of targetRuns) {
+      runs.push(r);
+      documents.push(...r.judgment.documents);
     }
     for (const profile of profiles) verdicts.push(judged.get(profile.id)!);
   }
