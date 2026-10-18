@@ -15,5 +15,5 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "exclude": ["**/*.test.ts", "**/__fixtures__/**"]
+  "exclude": ["**/*.test.ts", "**/*.support.ts", "**/__fixtures__/**"]
 }

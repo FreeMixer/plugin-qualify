@@ -107,6 +107,11 @@ export function buildQualificationRecord(judgment: Judgment, copy: { file: strin
   };
 }
 
+/** The record of a judgment, with the copy fields taken from the bytes that were judged. */
+export function qualificationRecordOf(probeBytes: Uint8Array, judgment: Judgment): QualificationRecord {
+  return buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(probeBytes), bytes: probeBytes.length });
+}
+
 /** A file whole or not at all: written beside its name and renamed over it. */
 function writeWhole(path: string, bytes: string | Uint8Array): void {
   const pending = `${path}.new`;
