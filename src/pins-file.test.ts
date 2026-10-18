@@ -16,7 +16,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { qualifyClapTargets, type RtSafetyDocument } from "./clap-qualify.js";
+import type { RtSafetyDocument } from "./clap-qualify.js";
+import { qualifyClapTargets } from "./direct-prober.support.js";
 import { OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import {
   clapPinEntries,

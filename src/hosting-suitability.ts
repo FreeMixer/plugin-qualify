@@ -52,9 +52,17 @@ export interface QualifiedPlugin {
     readonly scalingClass?: string;
     readonly paramSweep?: unknown;
   };
-  /** Measured cost per rate (Hz as a string key). */
+  /** Measured cost: per rate (Hz as a string key), or per rate AND quantum. */
   readonly cpuCost?: {
+    /** One figure per rate, at the block the prober ran: the old format. Read only when `perRateQuantum` is absent. */
     readonly perRate?: Readonly<
+      Record<string, { readonly coreFractionP95: number; readonly nsPerSampleMedian: number; readonly nsPerSampleP95: number }>
+    >;
+    /**
+     * One figure per rate and quantum, keyed by {@link costPointKey}: a probe output's grid. When this is
+     * present it is the only cost there is, so a pair it lacks is unmeasured, never read from `perRate`.
+     */
+    readonly perRateQuantum?: Readonly<
       Record<string, { readonly coreFractionP95: number; readonly nsPerSampleMedian: number; readonly nsPerSampleP95: number }>
     >;
   };
@@ -306,7 +314,7 @@ export type PluginLv2Features = Omit<FeaturesMeasurement, "unmeasuredReason" | "
 
 export { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
 import { DEFAULT_HOSTING_POLICY, type HostingPolicy } from "./qualify-declarations.js";
-import { costFieldsMissing } from "./cost-fields.js";
+import { costFieldsMissing, costPointKey } from "./cost-fields.js";
 
 /** One declared rate's latency reading from the CLAP qualifier (CLAP spec §3, latency). */
 export interface ClapLatencyAtRate {
@@ -700,7 +708,13 @@ export function hostingCostReasons(
   options: HostingClassifyOptions,
   policy: HostingPolicy,
 ): readonly HostingReason[] {
-  const perRate = descriptor.cpuCost?.perRate?.[String(options.rate)];
+  const grid = descriptor.cpuCost?.perRateQuantum;
+  const perRate =
+    grid === undefined
+      ? descriptor.cpuCost?.perRate?.[String(options.rate)]
+      : options.quantum === undefined
+        ? undefined
+        : grid[costPointKey(options.rate, options.quantum)];
   if (perRate === undefined) {
     return [
       reason("cost", "objective", "unknown", HOSTING_CODE.costUnmeasured, {
