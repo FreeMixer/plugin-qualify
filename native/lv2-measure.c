@@ -53,6 +53,7 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <dirent.h>
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -63,6 +64,7 @@
 #include <lilv/lilv.h>
 #include "rt-interpose.h"
 #include "lv2-measure-options.h"
+#include "lv2-measure-path.h"
 #include "lv2-measure-pin.h"
 #include <omxcontract/omx_contract_limits.h>
 #include <lv2/atom/atom.h>
@@ -704,6 +706,11 @@ static void usage(FILE *out, const char *self) {
 }
 
 int main(int argc, char **argv) {
+  /* lilv refuses a relative LV2_PATH segment and the world it leaves is a null dereference: resolve them first. */
+  if (lv2_path_resolve_env() != 0) {
+    fprintf(stderr, "lv2-measure: cannot resolve LV2_PATH against the working directory: %s\n", strerror(errno));
+    return 1;
+  }
   /* The flags anywhere on the line, the positionals in their order. */
   const char *pos[5] = {NULL};
   int npos = 0, pin = 0;
