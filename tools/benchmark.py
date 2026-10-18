@@ -1086,6 +1086,14 @@ OPTIONS = "http://lv2plug.in/ns/ext/options#"
 BUFSZ = "http://lv2plug.in/ns/ext/buf-size#"
 PARAMS = "http://lv2plug.in/ns/ext/parameters#"
 WORKER = "http://lv2plug.in/ns/ext/worker#"
+# The refusal's code: the LV2 worker spec does not make `work` or `work_response` optional, so a plugin
+# whose interface leaves either NULL is not hostable (end_run may be NULL).
+WORKER_NONCONFORMING = "hosting.worker.nonconforming"
+
+
+class WorkerInterfaceError(Exception):
+    """The plugin's LV2_Worker_Interface is incomplete; the message starts with WORKER_NONCONFORMING."""
+
 
 
 LV2_WORKER_SUCCESS = 0
@@ -1261,6 +1269,10 @@ class _Host:
             handle = ctypes.c_void_p(instance.get_handle())
         except (AttributeError, TypeError, ValueError):
             return None
+        # calling a NULL function pointer through ctypes kills the process: refuse before anything is called
+        for name in ("work", "work_response"):
+            if not getattr(iface, name):
+                raise WorkerInterfaceError(f"{WORKER_NONCONFORMING}: LV2_Worker_Interface.{name} is NULL")
 
         def keep(buf):
             return ctypes.create_string_buffer(bytes(buf), len(buf))
