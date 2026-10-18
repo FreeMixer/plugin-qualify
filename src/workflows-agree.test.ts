@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string): string => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-const SHARED = ['build-native', 'install-plugin-hostd'] as const;
+const SHARED = ['build-native', 'install-plugin-hostd', 'install-scanners'] as const;
 const WORKFLOWS = ['ci.yml', 'publish.yml'] as const;
 
 /** The `uses:` lines of a workflow, in order, and the index of the step that runs the suite. */
@@ -42,6 +42,7 @@ describe('ci.yml and publish.yml prepare the runner alike', () => {
       expect(text).not.toMatch(/apt-get install[^\n]*plugin-hostd/);
       expect(text).not.toMatch(/make -C native deps/);
       expect(text).not.toMatch(/PLUGIN_HOSTD/);
+      expect(text).not.toMatch(/python3-lilv|omx-clap-host/);
     });
   }
 
@@ -52,6 +53,12 @@ describe('ci.yml and publish.yml prepare the runner alike', () => {
       expect(action).toContain(`echo "${variable}=`);
     }
     expect(action).toMatch(/dpkg --compare-versions .* ge 0\.2\.0/);
+  });
+
+  it('the scanners action sets what the live scan tests ask for', () => {
+    const action = read('.github/actions/install-scanners/action.yml');
+    for (const variable of ['OMX_CLAP_SCAN', 'OMX_CLAP_FAKE', 'PYTHONPATH']) expect(action).toContain(`echo "${variable}=`);
+    expect(action).toMatch(/apt-get install[^\n]*python3-lilv[^\n]*omx-clap-host-tests/);
   });
 
   it('publish.yml publishes by OIDC: no token, no secret', () => {

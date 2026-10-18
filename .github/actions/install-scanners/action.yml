@@ -1,0 +1,27 @@
+name: Install the scanners the tests read real plugins with
+description: python3-lilv, omx-clap-scan with omx-clap-host's fake plugin, and two LV2 plugin packages, so the scanner goldens run on CI and never skip there.
+
+# Shared by ci.yml and publish.yml, after install-plugin-hostd (which adds the FreeMixer channel to apt).
+# src/workflows-agree.test.ts fails if a workflow stops using this action. The lilv binding is pure ctypes, so the
+# distribution's python3-lilv serves the setup-python interpreter too: its module file is copied to a directory
+# PYTHONPATH names (not the whole system dist-packages, which carries modules built for another interpreter).
+
+runs:
+  using: composite
+  steps:
+    - name: Install from the distribution and the FreeMixer channel
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends python3-lilv zam-plugins calf-plugins omx-clap-host omx-clap-host-tests
+        test -x /usr/bin/omx-clap-scan
+        test -f /usr/libexec/omx-clap-host/tests/fake.clap
+        py="$RUNNER_TEMP/pylilv"
+        mkdir -p "$py"
+        cp "$(dpkg -L python3-lilv | grep -m1 '/lilv\.py$')" "$py/lilv.py"
+        {
+          echo "OMX_CLAP_SCAN=/usr/bin/omx-clap-scan"
+          echo "OMX_CLAP_FAKE=/usr/libexec/omx-clap-host/tests/fake.clap"
+          echo "PYTHONPATH=$py"
+        } >> "$GITHUB_ENV"

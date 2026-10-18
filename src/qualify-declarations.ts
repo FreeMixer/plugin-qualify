@@ -79,6 +79,8 @@ export const CLAP_SCAN_TOOL_DEFAULT = "omx-clap-scan";
 export const CLAP_PATH_ENV = "CLAP_PATH";
 export const CLAP_USER_DIR = ".clap";
 export const CLAP_SYSTEM_DIR = "/usr/lib/clap";
+/** Names a directory to read in place of `CLAP_SYSTEM_DIR`: a package root, or a test that must not see what the host installed there. */
+export const CLAP_SYSTEM_DIR_ENV = "OMX_CLAP_SYSTEM_DIR";
 
 /** Seconds one run of the CLAP scanner may take over everything it was pointed at. */
 export const CLAP_SCAN_TIMEOUT_S = 300;
