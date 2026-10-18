@@ -17,13 +17,14 @@ const BUILD = join(NATIVE, "build");
 const MEASURE = join(BUILD, "lv2_measure");
 const MEASURE_ASAN = join(BUILD, "asan", "lv2_measure");
 const ORACLE = join(BUILD, "lv2_measure_options_test");
+const PATH_ORACLE = join(BUILD, "lv2_measure_path_test");
 const INTERPOSER = join(BUILD, "rt_interpose.so");
 // liblilv's own world leak (native/lsan.supp) is not ours; every other leak still fails
 const LSAN_SUPPRESSIONS = join(NATIVE, "lsan.supp");
 const LV2_FIXTURES = join(BUILD, "fixtures", "lv2");
 const SAFE = "urn:plugin-qualify:fixture:lv2-rt-safe";
 const UNSAFE = "urn:plugin-qualify:fixture:lv2-rt-unsafe";
-const BUILT = [MEASURE, ORACLE, INTERPOSER, join(LV2_FIXTURES, "rt-safe.lv2", "gain.so")].every((p) => existsSync(p));
+const BUILT = [MEASURE, ORACLE, PATH_ORACLE, INTERPOSER, join(LV2_FIXTURES, "rt-safe.lv2", "gain.so")].every((p) => existsSync(p));
 
 function live(name: string, body: () => void): void {
   it(name, (ctx) => {
@@ -50,6 +51,12 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(r.status).toBe(0);
   });
 
+  live("the LV2 search path oracle passes: a relative segment becomes absolute, nothing else moves", () => {
+    const r = spawnSync(PATH_ORACLE, [], { cwd: NATIVE, encoding: "utf8" });
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
   live("counts no allocation in the safe fixture's run(), and every block's in the unsafe one's", () => {
     const safe = measure(SAFE, "48000", "64", "3", "2");
     const unsafe = measure(UNSAFE, "48000", "64", "3", "2");
@@ -69,6 +76,34 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     const pin = measure("--pin", SAFE);
     expect(pin.status).toBe(0);
     expect(pin.line["integrity"]).toEqual(line["integrity"]);
+  });
+
+  // lilv refuses a relative segment ("attempt to map invalid URI") and left the measurer a null world to
+  // dereference: a SIGSEGV, exit 139. A segment is resolved against the working directory.
+  live("a relative LV2_PATH segment is resolved against the working directory, never a crash", () => {
+    const run = (cwd: string, lv2Path: string, ...args: string[]) => {
+      const r = spawnSync(MEASURE, args, { cwd, encoding: "utf8", env: { PATH: process.env["PATH"], LV2_PATH: lv2Path, LD_PRELOAD: INTERPOSER } });
+      return { status: r.status, signal: r.signal, stderr: r.stderr, line: JSON.parse(r.stdout || "{}") as Record<string, unknown> };
+    };
+    // one level up from the fixtures, down by a relative name; and the same as a bare relative directory
+    for (const [cwd, lv2Path] of [
+      [BUILD, join("fixtures", "lv2")],
+      [join(BUILD, "fixtures"), "lv2"],
+      [join(BUILD, "fixtures", "lv2"), "."],
+      [BUILD, `no-such-dir:${join("fixtures", "lv2")}`],
+    ] as const) {
+      const r = run(cwd, lv2Path, SAFE, "48000", "64", "1", "1");
+      expect(r.signal, `LV2_PATH=${lv2Path} from ${cwd}: ${r.stderr}`).toBeNull();
+      expect(r.status, `LV2_PATH=${lv2Path} from ${cwd}: ${r.stderr}`).toBe(0);
+      expect(r.line["rtSafety"]).toMatchObject({ allocationsInRun: 0 });
+    }
+    const pin = run(BUILD, join("fixtures", "lv2"), "--pin", SAFE);
+    expect([pin.signal, pin.status]).toEqual([null, 0]);
+    expect(pin.line).toMatchObject({ uri: SAFE, found: true });
+    // a relative path that holds nothing is simply no plugin: exit 3, as for any plugin it cannot find
+    const none = run(BUILD, "no-such-dir", SAFE, "48000", "64", "1", "1");
+    expect([none.signal, none.status]).toEqual([null, 3]);
+    expect(none.line).toEqual({ uri: SAFE, found: false });
   });
 
   live("a plugin it cannot find exits 3, said as not found", () => {
