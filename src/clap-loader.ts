@@ -25,6 +25,7 @@ import {
   CLAP_SCAN_TOOL_DEFAULT,
   CLAP_SCAN_TOOL_ENV,
   CLAP_SYSTEM_DIR,
+  CLAP_SYSTEM_DIR_ENV,
   CLAP_USER_DIR,
 } from "./qualify-declarations.js";
 
@@ -428,11 +429,11 @@ export function clapLoader(options: ClapLoaderOptions = {}): PluginLoader {
 
 /**
  * The directories `--all` walks, in order and once each: every non-empty entry of `CLAP_PATH`, then
- * `~/.clap`, then `/usr/lib/clap`.
+ * `~/.clap`, then `/usr/lib/clap` (or the directory `OMX_CLAP_SYSTEM_DIR` names).
  */
 export function clapSearchPath(env: Readonly<Record<string, string | undefined>>, home: string): string[] {
   const named = (env[CLAP_PATH_ENV] ?? "").split(":").filter((d) => d !== "");
-  return [...new Set([...named, join(home, CLAP_USER_DIR), CLAP_SYSTEM_DIR].map((d) => resolve(d)))];
+  return [...new Set([...named, join(home, CLAP_USER_DIR), env[CLAP_SYSTEM_DIR_ENV] || CLAP_SYSTEM_DIR].map((d) => resolve(d)))];
 }
 
 export interface ClapDiscoverOptions extends ClapLoaderOptions {
