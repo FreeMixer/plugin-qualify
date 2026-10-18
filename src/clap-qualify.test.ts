@@ -41,6 +41,7 @@ import {
   CLAP_QUALIFY_TOOL_ENV,
   CLAP_QUALIFY_TOOL_NAME,
   CLAP_SCAN_TOOL_ENV,
+  CLAP_SYSTEM_DIR_ENV,
   CLAP_SWEEP_BLOCKS,
   NATIVE_TOOL_DIRS,
   QUALIFY_RATES,
@@ -348,7 +349,7 @@ describe("plugin-qualify --all, live — the standard CLAP search path", () => {
     const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(QUALIFY_RATES[0])], {
       encoding: "utf8",
       // the prober is the scanner here too, so the walk reads the real file
-      env: { ...process.env, HOME: home, CLAP_PATH: onPath, LV2_PATH: join(scratch, "no-lv2"), [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath() },
+      env: { ...process.env, HOME: home, CLAP_PATH: onPath, LV2_PATH: join(scratch, "no-lv2"), [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath(), [CLAP_SYSTEM_DIR_ENV]: join(scratch, "no-system-clap") },
     });
     expect(r.stderr).toContain(`target urn:clap:${SAFE_ID} (${onPath})`);
     expect(r.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));

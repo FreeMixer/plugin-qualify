@@ -19,6 +19,7 @@ import {
   CLAP_SCAN_TIMEOUT_S,
   CLAP_SCAN_TOOL_DEFAULT,
   CLAP_SCAN_TOOL_ENV,
+  CLAP_SYSTEM_DIR_ENV,
   CLAP_SYSTEM_DIR,
 } from "./qualify-declarations.js";
 import {
@@ -37,6 +38,10 @@ import { resolveTargets } from "./qualify-cli.js";
 import { clapQualifyToolPath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+/** The plugins of omx-clap-host 0.10.0's fake.clap, in the order its scan lists them. */
+const FAKE_NAMES = ["wide", "sidechain", "notes", "passthrough", "widen", "auxout"];
+/** A system CLAP directory that does not exist: a host with plugins in /usr/lib/clap (omx-clap-host installs some) must not change what a test finds. */
+const NO_SYSTEM = { [CLAP_SYSTEM_DIR_ENV]: "/nonexistent/omx-no-system-clap" };
 const FAKE_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "fake.json"), "utf8");
 const MIXED_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "mixed.json"), "utf8");
 const ZERO_PATH_BUNDLE = join(PKG, "fixtures", "zero-path.lv2");
@@ -65,14 +70,14 @@ function answering(stdout: string, status = 0): { run: ClapScanRun; calls: strin
 }
 
 describe("parseClapScan — the tool's document, refused when it is not one", () => {
-  it("the real fake.clap golden: one file, the four plugins, one parameter each", () => {
+  it("the real fake.clap golden: one file, the six plugins", () => {
     const doc = parseClapScan(FAKE_JSON);
     expect(doc.files).toHaveLength(1);
     const file = doc.files[0]!;
     expect("plugins" in file && file.plugins.map((p) => p.id)).toEqual(
-      ["wide", "sidechain", "notes", "passthrough"].map((n) => `${FAKE_ID}.${n}`),
+      FAKE_NAMES.map((n) => `${FAKE_ID}.${n}`),
     );
-    expect("plugins" in file && file.plugins.every((p) => "params" in p && p.params.length === 1)).toBe(true);
+    expect("plugins" in file && file.plugins.every((p) => "params" in p && p.params.map((q) => q.name).join() === "latency,activations,process calls,host preset-load")).toBe(true);
   });
 
   it("refuses what is not the scanner's document, naming the way it differs", () => {
@@ -88,7 +93,7 @@ describe("clapScanDescriptors — the interchange rows", () => {
   const byId = (id: string) => rows.find((r) => r.uri === `urn:clap:${FAKE_ID}.${id}`)!;
 
   it("a plugin is `urn:clap:<id>`, format clap, its binary path resolved", () => {
-    expect(rows.map((r) => r.uri)).toEqual(["wide", "sidechain", "notes", "passthrough"].map((n) => `urn:clap:${FAKE_ID}.${n}`));
+    expect(rows.map((r) => r.uri)).toEqual(FAKE_NAMES.map((n) => `urn:clap:${FAKE_ID}.${n}`));
     expect(rows.every((r) => r.format === "clap" && r.binaryPath.endsWith("/fake.clap") && r.binaryPath.startsWith("/"))).toBe(true);
   });
 
@@ -143,7 +148,7 @@ describe("clapLoader — the seam", () => {
     const { run, calls } = answering(FAKE_JSON);
     const targets = clapLoader({ run, env: {} }).resolve(file);
     expect(calls).toEqual([[CLAP_SCAN_TOOL_DEFAULT, "--json", file]]);
-    expect(targets?.map((t) => t.uri)).toEqual(["wide", "sidechain", "notes", "passthrough"].map((n) => `urn:clap:${FAKE_ID}.${n}`));
+    expect(targets?.map((t) => t.uri)).toEqual(FAKE_NAMES.map((n) => `urn:clap:${FAKE_ID}.${n}`));
     expect(targets?.[0]).toMatchObject({ format: "clap", binary: "fake.clap" });
     expect(targets?.[0]?.binaryPath?.endsWith("/fake.clap")).toBe(true);
   });
@@ -152,7 +157,7 @@ describe("clapLoader — the seam", () => {
     const withClap = join(scratch, "tree");
     touch("tree/sub/deep/x.clap");
     const { run, calls } = answering(FAKE_JSON);
-    expect(clapLoader({ run, env: {} }).resolve(withClap)).toHaveLength(4);
+    expect(clapLoader({ run, env: {} }).resolve(withClap)).toHaveLength(FAKE_NAMES.length);
     expect(calls).toEqual([[CLAP_SCAN_TOOL_DEFAULT, "--json", withClap]]);
     touch("empty/readme.txt");
     const none = answering(FAKE_JSON);
@@ -202,7 +207,7 @@ describe("clapLoader — the seam", () => {
     touch("seam/y.clap");
     const loaders = [clapLoader({ run: answering(FAKE_JSON).run, env: {} }), lv2Loader];
     const clap = resolveTargets([join(scratch, "seam")], loaders);
-    expect(clap.ok && clap.plugins.map((p) => p.format)).toEqual(["clap", "clap", "clap", "clap"]);
+    expect(clap.ok && clap.plugins.map((p) => p.format)).toEqual(FAKE_NAMES.map(() => "clap"));
     const lv2 = resolveTargets([ZERO_PATH_BUNDLE], loaders);
     expect(lv2.ok && lv2.plugins.map((p) => p.format)).toEqual(["lv2"]);
   });
@@ -236,7 +241,7 @@ describe("the one declared setting", () => {
     chmodSync(stub, 0o755);
     const file = touch("stub/s.clap");
     const targets = clapLoader({ env: { [CLAP_SCAN_TOOL_ENV]: stub } }).resolve(file);
-    expect(targets).toHaveLength(4);
+    expect(targets).toHaveLength(FAKE_NAMES.length);
     expect(readFileSync(record, "utf8").trim()).toBe(`--json ${file}`);
   });
 
@@ -278,7 +283,7 @@ describe("the real tool", () => {
     const run = spawnSync(tool, ["--json", fake], { encoding: "utf8" });
     const [liveRows, goldenRows] = [clapScanDescriptors(parseClapScan(run.stdout)), clapScanDescriptors(parseClapScan(FAKE_JSON))];
     expect(liveRows.map(({ binaryPath: _b, ...row }) => row)).toEqual(goldenRows.map(({ binaryPath: _b, ...row }) => row));
-    expect(liveRows.length).toBe(4);
+    expect(liveRows.length).toBe(FAKE_NAMES.length);
   });
 });
 
@@ -346,6 +351,8 @@ describe("--all — the standard CLAP search path", () => {
   it("CLAP_PATH's entries first, in order, then ~/.clap, then /usr/lib/clap, once each", () => {
     expect(clapSearchPath({ [CLAP_PATH_ENV]: "/a::/b:/a" }, "/home/u")).toEqual(["/a", "/b", "/home/u/.clap", CLAP_SYSTEM_DIR]);
     expect(clapSearchPath({}, "/home/u")).toEqual(["/home/u/.clap", "/usr/lib/clap"]);
+    // the system directory can be named instead, so a test or a package root does not read the host's
+    expect(clapSearchPath({ [CLAP_PATH_ENV]: "/a", [CLAP_SYSTEM_DIR_ENV]: "/srv/root/usr/lib/clap" }, "/home/u")).toEqual(["/a", "/home/u/.clap", "/srv/root/usr/lib/clap"]);
   });
 
   it("a .clap only on CLAP_PATH is scanned and found, through the same loader a named directory uses", () => {
@@ -356,9 +363,9 @@ describe("--all — the standard CLAP search path", () => {
     const doc = JSON.parse(FAKE_JSON);
     doc.files[0].path = plugin;
     const { run, calls } = answering(JSON.stringify(doc));
-    const targets = discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: onPath, [CLAP_SCAN_TOOL_ENV]: "scan" }, home });
+    const targets = discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: onPath, [CLAP_SCAN_TOOL_ENV]: "scan", ...NO_SYSTEM }, home });
     expect(calls[0]).toEqual(["scan", "--json", onPath]);
-    expect(targets.map((t) => t.uri)).toEqual(["wide", "sidechain", "notes", "passthrough"].map((n) => `urn:clap:${FAKE_ID}.${n}`));
+    expect(targets.map((t) => t.uri)).toEqual(FAKE_NAMES.map((n) => `urn:clap:${FAKE_ID}.${n}`));
     expect(targets.every((t) => t.binaryPath === plugin && t.bundle === onPath)).toBe(true);
   });
 
@@ -367,7 +374,7 @@ describe("--all — the standard CLAP search path", () => {
     mkdirSync(empty, { recursive: true });
     const nowhere = join(scratch, "nowhere");
     const { run, calls } = answering('{"scanner":"omx-clap-scan","version":"0","files":[]}');
-    discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: `${nowhere}:${empty}` }, home: empty });
+    discoverClapTargets({ run, env: { [CLAP_PATH_ENV]: `${nowhere}:${empty}`, ...NO_SYSTEM }, home: empty });
     expect(calls.map((c) => c[2])).not.toContain(nowhere);
     expect(calls.map((c) => c[2])).not.toContain(empty);
   });
@@ -382,7 +389,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     touch("both/clap/x.clap");
     mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
     const { run, calls } = answering(none);
-    const env = { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir };
+    const env = { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir, ...NO_SYSTEM };
     expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(ClapScanError);
     expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(/1 LV2 bundle.*gain\.lv2/);
     expect(calls).toEqual([]);
@@ -394,7 +401,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     touch("only-clap/clap/x.clap");
     mkdirSync(lv2Dir, { recursive: true });
     const { run, calls } = answering(none);
-    expect(discoverAllTargets({ run, env: { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir }, home: lv2Dir })).toEqual([]);
+    expect(discoverAllTargets({ run, env: { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir, ...NO_SYSTEM }, home: lv2Dir })).toEqual([]);
     expect(calls.map((c) => c[2])).toEqual([clapDir]);
   });
 
@@ -405,7 +412,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
     const r = spawnSync(process.execPath, [bin, "--all"], {
       encoding: "utf8",
-      env: { ...process.env, HOME: join(scratch, "cli", "home"), LV2_PATH: lv2Dir, CLAP_PATH: join(scratch, "cli", "none") },
+      env: { ...process.env, HOME: join(scratch, "cli", "home"), LV2_PATH: lv2Dir, CLAP_PATH: join(scratch, "cli", "none"), ...NO_SYSTEM },
     });
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/LV2 bundle/);
@@ -419,7 +426,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     chmodSync(sub, 0o000);
     try {
       const { run } = answering(none);
-      const env = { [CLAP_PATH_ENV]: top, LV2_PATH: join(scratch, "locked", "nolv2") };
+      const env = { [CLAP_PATH_ENV]: top, LV2_PATH: join(scratch, "locked", "nolv2"), ...NO_SYSTEM };
       expect(() => discoverClapTargets({ run, env, home: top })).toThrow(ClapScanError);
       expect(() => discoverClapTargets({ run, env, home: top })).toThrow(new RegExp(`cannot read ${sub}: EACCES`));
     } finally {
@@ -432,7 +439,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     mkdirSync(top, { recursive: true });
     symlinkSync(top, join(top, "again"));
     const { run } = answering(none);
-    const env = { [CLAP_PATH_ENV]: top };
+    const env = { [CLAP_PATH_ENV]: top, ...NO_SYSTEM };
     expect(() => discoverClapTargets({ run, env, home: top })).toThrow(ClapScanError);
     expect(() => discoverClapTargets({ run, env, home: top })).toThrow(/cannot read .*again.*: (ELOOP|ENAMETOOLONG)/);
   });
