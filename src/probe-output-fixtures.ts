@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { ClapQualifyLine } from "./clap-qualify.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "probe-output");
@@ -28,4 +29,66 @@ export function readFixture(name: string): ProbeOutput {
   const r = readProbeOutput(fixtureText(name));
   if (!r.ok) throw new Error(`${name}: ${r.code}: ${r.problem}`);
   return r.output;
+}
+
+/**
+ * The probe output that carries what a prober line carries, for the proofs that a verdict read from a
+ * probe output equals the verdict read from today's document. Built on the success fixture, so its machine,
+ * limits and run are a real document's.
+ *
+ * What the line holds and a probe output cannot is not encoded: the port layout and the features (no
+ * verdict reads them), the note sweep's process errors and non-finite flag, and a block count apart
+ * from the sweep's (the probe output has one, the blocks the sweep processed, which is `processCalls`).
+ */
+export function probeOutputOfLine(line: ClapQualifyLine): Record<string, any> {
+  const doc = fixtureJson("success-msi");
+  const rt = line.rtSafety;
+  const note = line.noteSweep;
+  const pin = line.integrity;
+  const rates = Object.keys(line.clap.latency);
+  const quantum = rt.blockFrames ?? 512;
+  doc["plugin"] = { format: "clap", id: line.id, ...(pin.version === undefined ? {} : { version: pin.version }) };
+  doc["binary"] = {
+    path: line.binary.path,
+    sha256: line.binary.sha256,
+    files: pin.files ?? [],
+    ...(pin.layout === undefined ? {} : { layout: pin.layout }),
+    ...(pin.unmeasuredReason === undefined ? {} : { unpinnable: pin.unmeasuredDetail ?? pin.unmeasuredReason }),
+  };
+  delete doc["descriptor"];
+  doc["offer"] = { id: "default", clapExtensions: [...line.hostExtensions], realtime: "none" };
+  doc["steps"] = [{ step: "hash", outcome: "probe.ok", elapsedMs: 1 }, { step: "instantiate", outcome: "probe.ok", elapsedMs: 1 }];
+  const first: Record<string, unknown> = {};
+  if (rt.interposer) {
+    Object.assign(first, {
+      rtSafety: {
+        interposer: true,
+        swept: rt.swept,
+        sweepApplicable: rt.sweepApplicable,
+        blocks: line.clap.processCalls,
+        allocations: rt.allocationsInRun,
+        locks: rt.locksInRun,
+        syscalls: rt.syscallsInRun,
+        threadViolations: line.clap.threadViolations,
+        processErrors: line.clap.processErrors,
+        events: rt.events ?? [],
+      },
+    });
+  } else first["rtSafety"] = { interposer: false };
+  if (note.applicable) {
+    first["noteSweep"] = {
+      applicable: true,
+      ...(note.dialect === undefined ? {} : { dialect: note.dialect }),
+      ...(note.interposer === true ? { allocations: note.allocationsInRun, locks: note.locksInRun, syscalls: note.syscallsInRun } : {}),
+    };
+  }
+  const at = rates.length > 0 ? rates : ["48000"];
+  doc["grid"] = at.map((rate, i) => ({
+    rate: Number(rate),
+    quantum,
+    outcome: "probe.ok",
+    ...(line.clap.latency[rate] === undefined ? {} : { latency: { ...line.clap.latency[rate], method: "impulse-onset" } }),
+    ...(i === 0 ? first : {}),
+  }));
+  return doc;
 }
