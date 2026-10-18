@@ -67,6 +67,7 @@
 #include "lv2-measure-path.h"
 #include "lv2-measure-pin.h"
 #include <omxcontract/omx_contract_limits.h>
+#include <omxdsp/omx_units.h> /* omx_lin_to_db_d */
 #include <lv2/atom/atom.h>
 
 /*
@@ -884,7 +885,7 @@ int main(int argc, char **argv) {
         if (rms < min_rms) min_rms = rms;
         if (rms > max_rms) max_rms = rms;
         /* Dead relative to what this plugin was doing at the start: a ratio. */
-        if (first_rms > 0 && rms > 0 && 20.0 * log10(rms / first_rms) < -40.0) silent_windows++;
+        if (first_rms > 0 && rms > 0 && omx_lin_to_db_d(rms / first_rms, 0.0) < -40.0) silent_windows++;
         else if (first_rms > 0 && rms == 0.0) silent_windows++;
         const long r = rss_kb();
         if (r > rss_max) rss_max = r;
@@ -902,10 +903,10 @@ int main(int argc, char **argv) {
            ",\"firstRmsDbfs\":%.2f,\"lastRmsDbfs\":%.2f,\"minRmsDbfs\":%.2f,\"maxRmsDbfs\":%.2f"
            ",\"rssStartKb\":%ld,\"rssMaxKb\":%ld,\"rssGrowthKb\":%ld}",
            soak_s, rate, block, windows, nonfinite_windows, silent_windows,
-           first_rms > 0 ? 20.0 * log10(first_rms) : -999.0,
-           last_rms > 0 ? 20.0 * log10(last_rms) : -999.0,
-           min_rms < 1e29 && min_rms > 0 ? 20.0 * log10(min_rms) : -999.0,
-           max_rms > 0 ? 20.0 * log10(max_rms) : -999.0,
+           first_rms > 0 ? omx_lin_to_db_d(first_rms, 0.0) : -999.0,
+           last_rms > 0 ? omx_lin_to_db_d(last_rms, 0.0) : -999.0,
+           min_rms < 1e29 && min_rms > 0 ? omx_lin_to_db_d(min_rms, 0.0) : -999.0,
+           max_rms > 0 ? omx_lin_to_db_d(max_rms, 0.0) : -999.0,
            rss_start, rss_max, rss_max - rss_start);
     emit_host_facts(H);
     emit_feature_options();
@@ -1128,7 +1129,7 @@ int main(int argc, char **argv) {
            "\"rms\":%.9g,\"rmsDbfs\":%.2f}",
            ri ? "," : "", r, ok ? "true" : "false",
            nonfinite ? "true" : "false", lat_frames, rms_out,
-           rms_out > 0 ? 20.0 * log10(rms_out) : -999.0);
+           rms_out > 0 ? omx_lin_to_db_d(rms_out, 0.0) : -999.0);
   }
   fprintf(jout, "}");
   emit_host_facts(H);
