@@ -213,6 +213,15 @@ describe("absence is never a pass — every unmeasured dimension isolates", () =
     expect(v.rating).toBe("unknown");
   });
 
+  it("a latency refused for a nonconforming worker interface is unsuitable by its own code, not merely unmeasured", () => {
+    const v = classify(
+      measured({ latency: { unmeasurable: "probe error: hosting.worker.nonconforming: LV2_Worker_Interface.work_response is NULL" } } as Partial<PluginDescriptor>),
+    );
+    expect(v.rating).toBe("unsuitable");
+    expect(v.reasons.map((r) => r.code)).toContain(HOSTING_CODE.workerNonconforming);
+    expect(v.reasons.map((r) => r.code)).not.toContain(HOSTING_CODE.latencyUnmeasured);
+  });
+
   it("rt-safety that disagreed between repeats is not reproducible, so unknown", () => {
     const v = classify(measured({}, { rtSafety: { variable: true } }));
     expect(v.rating).toBe("unknown");
