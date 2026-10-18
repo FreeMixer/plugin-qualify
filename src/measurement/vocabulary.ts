@@ -113,6 +113,13 @@ export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
       "not about the plugin — another host may well have it.",
   },
   {
+    code: "worker-nonconforming",
+    kind: "probe-failed",
+    description:
+      "The plugin's LV2_Worker_Interface leaves work or work_response NULL, which the LV2 worker " +
+      "specification does not allow: it was refused before any call, not measured.",
+  },
+  {
     code: "probe-error",
     kind: "probe-failed",
     description:

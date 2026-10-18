@@ -93,5 +93,8 @@
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "dependencies": {
+    "@openmixer/omx-contract": "^2.16.0"
   }
 }
