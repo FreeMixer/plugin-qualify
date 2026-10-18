@@ -1,0 +1,236 @@
+{
+  "format": "plugin-hostd.probe-output",
+  "formatVersion": "1.0",
+  "run": {
+    "id": "r1-20261017T231004Z-0b858f1",
+    "startedAt": "2026-10-17T23:10:04+02:00",
+    "elapsedMs": 6120,
+    "complete": false,
+    "outcome": "probe.crashed",
+    "reason": "add",
+    "protocol": {
+      "name": "plugin-hostd.probe-protocol",
+      "version": 1
+    },
+    "tools": {
+      "runner": "plugin-hostd-probe 0.1.0",
+      "child": "plugin-hostd-probe-lv2 0.1.0",
+      "clapCore": "0.9.0",
+      "interposer": "rt-interpose 1"
+    },
+    "via": "daemon"
+  },
+  "plugin": {
+    "format": "lv2",
+    "id": "urn:example:zero-path",
+    "name": "zero-path",
+    "version": "0.0"
+  },
+  "binary": {
+    "path": "/home/op/.lv2/zero-path.lv2",
+    "sha256": "0b858f1f53d802872c1b34d298b0ae4c81f5c1b51f5488f72a673fca54afeeb5",
+    "files": [
+      {
+        "path": "manifest.ttl",
+        "sha256": "13038d7cea17afef4cfe3833884c73a0db990a60d35b49cf2589f8f139f00cbc"
+      },
+      {
+        "path": "zero-path.so",
+        "sha256": "0b858f1f53d802872c1b34d298b0ae4c81f5c1b51f5488f72a673fca54afeeb5"
+      },
+      {
+        "path": "zero-path.ttl",
+        "sha256": "a364f60c8ef436a160fc139c1575435d5653f70a4267bd08feb4f36782b61535"
+      }
+    ],
+    "layout": {
+      "scheme": "omx-layout/1",
+      "sha256": "8a66be4f19b6e12130e4a9f314b11a8485a5a9c4b7ef3d3b4117a176cde89f0e"
+    }
+  },
+  "machine": {
+    "class": {
+      "arch": "x86_64",
+      "family": "amd",
+      "coreBand": "9-16",
+      "clockBand": "3.5-4.5GHz",
+      "preemptRt": false,
+      "cstatesLimited": false
+    },
+    "profile": {
+      "governor": "powersave",
+      "turbo": true,
+      "smt": true,
+      "preempt": "PREEMPT_DYNAMIC",
+      "cpuidle": [
+        {
+          "cpu": 11,
+          "state": "POLL",
+          "latencyUs": 0,
+          "disabled": false,
+          "usageDelta": 3
+        },
+        {
+          "cpu": 11,
+          "state": "C1_ACPI",
+          "latencyUs": 1,
+          "disabled": false,
+          "usageDelta": 812
+        },
+        {
+          "cpu": 11,
+          "state": "C2_ACPI",
+          "latencyUs": 127,
+          "disabled": false,
+          "usageDelta": 95
+        }
+      ],
+      "meetsProtocol": false,
+      "unmet": [
+        "probe.profile.governor",
+        "probe.profile.deep-idle-entered"
+      ]
+    },
+    "pinnedCpus": "11",
+    "local": {
+      "hostname": "studio",
+      "kernel": "7.2.9-201.fc44.x86_64"
+    }
+  },
+  "offer": {
+    "id": "omx-console-lv2",
+    "lv2Features": [
+      "http://lv2plug.in/ns/ext/urid#map",
+      "http://lv2plug.in/ns/ext/urid#unmap",
+      "http://lv2plug.in/ns/ext/options#options",
+      "http://lv2plug.in/ns/ext/buf-size#boundedBlockLength",
+      "http://lv2plug.in/ns/ext/worker#schedule",
+      "http://lv2plug.in/ns/ext/log#log"
+    ],
+    "realtime": "none"
+  },
+  "limits": {
+    "set": "default",
+    "applied": [
+      {
+        "limit": "wall-clock",
+        "value": 600,
+        "unit": "s",
+        "by": "supervisor"
+      },
+      {
+        "limit": "cpu-time",
+        "value": 540,
+        "unit": "s",
+        "by": "rlimit"
+      },
+      {
+        "limit": "memory",
+        "value": 2147483648,
+        "unit": "bytes",
+        "by": "cgroup"
+      },
+      {
+        "limit": "tasks",
+        "value": 64,
+        "unit": "count",
+        "by": "cgroup"
+      },
+      {
+        "limit": "core-dump",
+        "value": 0,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "cpus",
+        "value": "11",
+        "by": "affinity"
+      },
+      {
+        "limit": "no-new-privs",
+        "by": "prctl"
+      },
+      {
+        "limit": "network",
+        "value": "none",
+        "by": "netns"
+      },
+      {
+        "limit": "filesystem",
+        "value": "read-only except probe_dir",
+        "by": "landlock"
+      }
+    ],
+    "unavailable": []
+  },
+  "steps": [
+    {
+      "step": "hash",
+      "outcome": "probe.ok",
+      "elapsedMs": 2
+    },
+    {
+      "step": "instantiate",
+      "outcome": "probe.ok",
+      "elapsedMs": 12
+    },
+    {
+      "step": "lifecycle",
+      "outcome": "probe.ok",
+      "elapsedMs": 940
+    },
+    {
+      "step": "latency",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 88
+    },
+    {
+      "step": "rt-safety",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.crashed",
+      "elapsedMs": 41,
+      "signal": "SIGSEGV",
+      "detail": "died during the control sweep, control 'path'"
+    }
+  ],
+  "grid": [
+    {
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.crashed",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 0,
+        "method": "impulse-onset"
+      }
+    }
+  ],
+  "behaviour": {
+    "lifecycle": {
+      "cycles": 30,
+      "instantiated": 30,
+      "failed": 0
+    },
+    "threads": {
+      "before": 2,
+      "afterFirstInstantiate": 2,
+      "afterAllFreed": 2
+    }
+  },
+  "crash": {
+    "signal": "SIGSEGV",
+    "frameObject": "zero-path.so"
+  },
+  "logs": [
+    {
+      "name": "stderr",
+      "path": "probes/urn_example_zero-path@0.0-0b858f1f53d8.stderr.log",
+      "sha256": "73aaa5071d9f861550d51469cbd89e0a6e5371486fd94c9675281d1cefbd5117",
+      "bytes": 1840
+    }
+  ]
+}

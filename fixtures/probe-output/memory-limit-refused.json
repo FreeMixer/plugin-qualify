@@ -1,0 +1,190 @@
+{
+  "format": "plugin-hostd.probe-output",
+  "formatVersion": "1.0",
+  "run": {
+    "id": "r1-20261017T232540Z-652b62e",
+    "startedAt": "2026-10-17T23:25:40+02:00",
+    "elapsedMs": 2310,
+    "complete": false,
+    "outcome": "probe.memory-limit",
+    "reason": "add",
+    "protocol": {
+      "name": "plugin-hostd.probe-protocol",
+      "version": 1
+    },
+    "tools": {
+      "runner": "plugin-hostd-probe 0.1.0",
+      "child": "plugin-hostd-probe-clap 0.1.0",
+      "clapCore": "0.9.0",
+      "interposer": "rt-interpose 1"
+    },
+    "via": "daemon"
+  },
+  "plugin": {
+    "format": "clap",
+    "id": "org.example.big-sampler",
+    "name": "Big Sampler",
+    "vendor": "Example",
+    "version": "3.0.1"
+  },
+  "binary": {
+    "path": "/home/op/.clap/big-sampler.clap",
+    "sha256": "652b62e0660ed65b624e9ef595a10ed43bd19021ed5a455d6f948f1308f1c849",
+    "files": [
+      {
+        "path": "big-sampler.clap",
+        "sha256": "652b62e0660ed65b624e9ef595a10ed43bd19021ed5a455d6f948f1308f1c849"
+      }
+    ],
+    "layout": {
+      "scheme": "omx-layout/1",
+      "sha256": "37da45a15b9e009c001c4110c32fc534cfd1e7e4b5dd81d8de1ac6c53d8af4b0"
+    }
+  },
+  "machine": {
+    "class": {
+      "arch": "x86_64",
+      "family": "amd",
+      "coreBand": "9-16",
+      "clockBand": "3.5-4.5GHz",
+      "preemptRt": false,
+      "cstatesLimited": true
+    },
+    "profile": {
+      "governor": "performance",
+      "turbo": true,
+      "smt": true,
+      "preempt": "PREEMPT_DYNAMIC",
+      "cpuidle": [
+        {
+          "cpu": 11,
+          "state": "POLL",
+          "latencyUs": 0,
+          "disabled": false,
+          "usageDelta": 0
+        },
+        {
+          "cpu": 11,
+          "state": "C1_ACPI",
+          "latencyUs": 1,
+          "disabled": false,
+          "usageDelta": 9
+        },
+        {
+          "cpu": 11,
+          "state": "C2_ACPI",
+          "latencyUs": 127,
+          "disabled": true,
+          "usageDelta": 0
+        }
+      ],
+      "meetsProtocol": true
+    },
+    "pinnedCpus": "11"
+  },
+  "offer": {
+    "id": "omx-clap-host",
+    "clapExtensions": [
+      "clap.audio-ports",
+      "clap.latency",
+      "clap.log",
+      "clap.params",
+      "clap.state",
+      "clap.thread-check",
+      "clap.preset-load/2",
+      "clap.track-info/1",
+      "clap.remote-controls/2"
+    ],
+    "realtime": "none"
+  },
+  "limits": {
+    "set": "default",
+    "applied": [
+      {
+        "limit": "wall-clock",
+        "value": 600,
+        "unit": "s",
+        "by": "supervisor"
+      },
+      {
+        "limit": "cpu-time",
+        "value": 540,
+        "unit": "s",
+        "by": "rlimit"
+      },
+      {
+        "limit": "memory",
+        "value": 2147483648,
+        "unit": "bytes",
+        "by": "cgroup"
+      },
+      {
+        "limit": "tasks",
+        "value": 64,
+        "unit": "count",
+        "by": "cgroup"
+      },
+      {
+        "limit": "core-dump",
+        "value": 0,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "cpus",
+        "value": "11",
+        "by": "affinity"
+      },
+      {
+        "limit": "no-new-privs",
+        "by": "prctl"
+      },
+      {
+        "limit": "network",
+        "value": "none",
+        "by": "netns"
+      }
+    ],
+    "unavailable": [
+      {
+        "limit": "filesystem",
+        "code": "probe.limit.landlock-absent"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "step": "hash",
+      "outcome": "probe.ok",
+      "elapsedMs": 9
+    },
+    {
+      "step": "instantiate",
+      "outcome": "probe.memory-limit",
+      "elapsedMs": 2280,
+      "signal": "SIGKILL",
+      "limit": "memory",
+      "detail": "memory.events oom_kill 0 -> 1 while init() ran"
+    }
+  ],
+  "behaviour": {
+    "memory": {
+      "rssStartKb": 8800,
+      "peakBytes": 2147479552
+    }
+  },
+  "logs": [
+    {
+      "name": "stderr",
+      "path": "probes/org.example.big-sampler@3.0.1-652b62e0660e.stderr.log",
+      "sha256": "f25743e01a8d2faa127a86adc728bf034cb23a158ec792ee9a43c5c2cfad4aab",
+      "bytes": 96
+    },
+    {
+      "name": "memory.events",
+      "path": "probes/org.example.big-sampler@3.0.1-652b62e0660e.memory.events",
+      "sha256": "fb7a4ca6b19e56a9d72a8e3a411fac55c0adc0963466e6c29f0b89319eb4795c",
+      "bytes": 84
+    }
+  ]
+}
