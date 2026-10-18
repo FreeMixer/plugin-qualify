@@ -16,6 +16,8 @@ const BOTH = ["latency", "cost"] as const;
 
 describe("mapping the prober's words", () => {
   it("passes the structural reasons through unchanged", () => {
+    expect(probeReasonCode("probe error: hosting.worker.nonconforming: LV2_Worker_Interface.work is NULL")).toBe("worker-nonconforming");
+    expect(probeReasonCode("cost error: hosting.worker.nonconforming: LV2_Worker_Interface.work_response is NULL")).toBe("worker-nonconforming");
     expect(probeReasonCode("no-audio-in")).toBe("no-audio-in");
     expect(probeReasonCode("no-audio-out")).toBe("no-audio-out");
     expect(probeReasonCode("silent-output")).toBe("silent-output");
@@ -144,5 +146,14 @@ describe("converting a prober descriptor", () => {
   it("reads a whole prober array, skipping what it cannot read", () => {
     expect(measuredPluginsFromProbeOutput([entry, { uri: "urn:broken" }, null], BOTH)).toHaveLength(1);
     expect(measuredPluginsFromProbeOutput("not an array", BOTH)).toEqual([]);
+  });
+});
+
+describe("the worker refusal's code is one string in both languages", () => {
+  it("tools/benchmark.py WORKER_NONCONFORMING is HOSTING_CODE.workerNonconforming", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { HOSTING_CODE } = await import("../hosting-codes.js");
+    const py = readFileSync(new URL("../../tools/benchmark.py", import.meta.url), "utf8");
+    expect(/^WORKER_NONCONFORMING = "([^"]+)"/m.exec(py)?.[1]).toBe(HOSTING_CODE.workerNonconforming);
   });
 });

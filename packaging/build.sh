@@ -25,5 +25,10 @@ npm pack --ignore-scripts --pack-destination "$work" >/dev/null
 target=$dest$libdir/node_modules/@openmixer/plugin-qualify
 mkdir -p "$target" "$dest/usr/bin" "$dest/usr/share/man/man1"
 tar -xzf "$work"/openmixer-plugin-qualify-*.tgz -C "$target" --strip-components=1
+# the one runtime dependency, @openmixer/omx-contract (the declared rates and quanta), beside it: Node resolves it
+# from <libdir>/node_modules, the directory above the package
+dep=$dest$libdir/node_modules/@openmixer/omx-contract
+mkdir -p "$dep"
+cp -rL node_modules/@openmixer/omx-contract/. "$dep"/
 install -m 0644 packaging/plugin-qualify.1 "$dest/usr/share/man/man1/"
 ln -sfn "$libdir/node_modules/@openmixer/plugin-qualify/bin/plugin-qualify.mjs" "$dest/usr/bin/plugin-qualify"
