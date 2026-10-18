@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+import { ORACLE_FLOOR_RATES, RT_HARD_TARGET } from "@openmixer/omx-contract";
+
 /**
  * EVERY NUMBER plugin-qualify uses, declared once. The CLI's defaults and `--help`, the rating, and the Python tools (through the generated
  * `tools/_declarations.py`) all READ these; a consumer holding its own copy is what the package's
@@ -26,11 +28,11 @@ export const MEASURE_BASE_RATE = 48000;
  */
 export const OPERATIONAL_RATE_FLOOR = 48000;
 
-/** The rates a run measures when `--rates` is not given — recorded in `run.rates`. */
-export const QUALIFY_RATES: readonly number[] = [44100, MEASURE_BASE_RATE, COST_REFERENCE_RATE, 192000];
+/** The rates a run measures when `--rates` is not given — recorded in `run.rates`: omx-contract's ORACLE_FLOOR_RATES. */
+export const QUALIFY_RATES: readonly number[] = ORACLE_FLOOR_RATES;
 
-/** The quanta (frames) a run rates cost at when `--quanta` is not given. */
-export const QUALIFY_QUANTA: readonly number[] = [128, 256, 512, QUANTUM_FRAMES];
+/** The quanta (frames) a run rates cost at when `--quanta` is not given: the contract's hard-target quantum, then 256, 512 and the reference. */
+export const QUALIFY_QUANTA: readonly number[] = [RT_HARD_TARGET.quantum, 256, 512, QUANTUM_FRAMES];
 
 /** Seconds one plugin's offline pass may take before its worker is killed and it reads as a timeout. */
 export const PLUGIN_TIMEOUT_S = 15;
