@@ -11,7 +11,7 @@
  * `--all` finds the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
  * `/usr/lib/clap`). `plugin-qualify judge` judges probe outputs already written.
  */
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
 import {
@@ -19,6 +19,11 @@ import {
   EXIT_CODE,
   clapLoader,
   clapPinEntries,
+  defaultQualificationDir,
+  judgeExitCode,
+  judgeFiles,
+  judgeHelpText,
+  parseJudgeArgs,
   discoverAllTargets,
   exitCodeFor,
   helpText,
@@ -55,6 +60,33 @@ function writePins(path, file) {
   }
   renameSync(`${path}.new`, path);
   process.stderr.write(`plugin-qualify: ${file.written.length} pin${file.written.length === 1 ? "" : "s"} written to ${path}\n`);
+}
+
+if (process.argv[2] === "judge") {
+  const j = parseJudgeArgs(process.argv.slice(3));
+  if (!j.ok) {
+    process.stderr.write(`plugin-qualify judge: ${j.error}\n\n${judgeHelpText()}`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  if (j.args.help) {
+    process.stdout.write(judgeHelpText());
+    process.exit(EXIT_CODE.allQualified);
+  }
+  const hosts = resolveHostProfiles(j.args.hostProfiles);
+  if (!hosts.ok) {
+    for (const r of hosts.refused) process.stderr.write(`plugin-qualify judge: --host-profile ${r.spec}: ${r.problem}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  const dir = j.args.qualificationDir ?? defaultQualificationDir(process.env);
+  const result = judgeFiles(j.args.files, { profiles: hosts.profiles, dir });
+  for (const f of result.failures) process.stderr.write(`plugin-qualify judge: ${f.file}: ${f.problem}\n`);
+  for (const r of result.records) process.stderr.write(`plugin-qualify judge: record ${r.recordPath}\n`);
+  process.stdout.write(
+    j.args.format === "json"
+      ? `${JSON.stringify(result.records.map((r) => JSON.parse(readFileSync(r.recordPath, "utf8"))), null, 2)}\n`
+      : textTable(result.verdicts),
+  );
+  process.exit(judgeExitCode(result));
 }
 
 const parsed = parseQualifyArgs(process.argv.slice(2));
