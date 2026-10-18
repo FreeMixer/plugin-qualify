@@ -22,13 +22,11 @@ import {
   proberOffer,
   parseClapQualifyLine,
   parseClapQualifyOutput,
-  qualifyClap,
-  qualifyClapTargets,
   rtSafetyDocument,
   rtSafetyDocumentName,
   rtSafetyVerdict,
-  type ClapQualifyRun,
 } from "./clap-qualify.js";
+import { qualifyClap } from "./direct-prober.support.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import {
   OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
@@ -43,6 +41,7 @@ import {
   CLAP_SCAN_TOOL_ENV,
   CLAP_SWEEP_BLOCKS,
   NATIVE_TOOL_DIRS,
+  PROBE_RUNNER_ENV,
   QUALIFY_RATES,
   RT_INTERPOSE_ENV,
   RT_INTERPOSE_NAME,
@@ -76,6 +75,14 @@ function live(name: string, body: () => void): void {
 }
 
 const sha256 = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+/** A `plugin-hostd-probe` for the command-line tests: the real prober behind the runner's arguments (src/fake-probe-runner.support.mjs). */
+function standInRunner(): string {
+  const path = join(scratch, "plugin-hostd-probe");
+  writeFileSync(path, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(PKG, "src", "fake-probe-runner.support.mjs"))} "$@"\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
 
 /** A prober line as the tool prints it, with `patch` merged over the facts. */
 function line(
@@ -260,13 +267,22 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     const run = (target: string, out: string) =>
       spawnSync(process.execPath, [bin, "--rates", String(QUALIFY_RATES[0]), "--out", out, target], {
         encoding: "utf8",
-        env: { ...process.env, [CLAP_SCAN_TOOL_ENV]: stub },
+        env: { ...process.env, [CLAP_SCAN_TOOL_ENV]: stub, [PROBE_RUNNER_ENV]: standInRunner() },
       });
     const safeOut = join(scratch, "safe");
     const safe = run(SAFE, safeOut);
     expect(safe.status).toBe(0);
     expect(safe.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));
-    expect(readdirSync(safeOut)).toEqual([`${sha256(SAFE)}.${OPENMIXER_CONSOLE_PROFILE.id}.rt-safety.json`]);
+    const written = readdirSync(safeOut).sort();
+    expect(written).toHaveLength(2);
+    const [recordName, copyName] = [written.find((f) => f.endsWith(".qualification.json"))!, written.find((f) => f.endsWith(".probe.json"))!];
+    expect(recordName.startsWith(`${SAFE_ID}@`)).toBe(true);
+    expect(recordName).toContain(`-${sha256(SAFE).slice(0, 12)}.`);
+    const record = JSON.parse(readFileSync(join(safeOut, recordName), "utf8"));
+    expect(record.probe.file).toBe(copyName);
+    expect(record.probe.sha256).toBe(sha256(join(safeOut, copyName)));
+    expect(record.binary.sha256).toBe(sha256(SAFE));
+    expect(record.verdicts.map((v: { host: string; rating: string }) => [v.host, v.rating])).toEqual([[OPENMIXER_CONSOLE_PROFILE.id, "suitable"]]);
     const unsafe = run(UNSAFE, join(scratch, "unsafe"));
     expect(unsafe.status).toBe(1);
     expect(unsafe.stdout).toContain(HOSTING_CODE.rtSafetyViolations);
@@ -348,7 +364,14 @@ describe("plugin-qualify --all, live — the standard CLAP search path", () => {
     const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(QUALIFY_RATES[0])], {
       encoding: "utf8",
       // the prober is the scanner here too, so the walk reads the real file
-      env: { ...process.env, HOME: home, CLAP_PATH: onPath, LV2_PATH: join(scratch, "no-lv2"), [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath() },
+      env: {
+        ...process.env,
+        HOME: home,
+        CLAP_PATH: onPath,
+        LV2_PATH: join(scratch, "no-lv2"),
+        [CLAP_SCAN_TOOL_ENV]: clapQualifyToolPath(),
+        [PROBE_RUNNER_ENV]: standInRunner(),
+      },
     });
     expect(r.stderr).toContain(`target urn:clap:${SAFE_ID} (${onPath})`);
     expect(r.stdout).toMatch(new RegExp(`urn:clap:${SAFE_ID.replace(/\./g, "\\.")}\\s+suitable`));
@@ -491,54 +514,9 @@ describe("proberOffer — the run that stands in for a profile", () => {
     expect(proberOffer({ ...OPENMIXER_CONSOLE_PROFILE, clapExtensions: [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"] })).toBeUndefined();
     expect(proberOffer({ ...OPENMIXER_CONSOLE_PROFILE, clapExtensions: ["clap.log"] })).toBeUndefined();
   });
-
-  it("qualifyClapTargets runs the prober once per offer, and judges each profile from its own run", () => {
-    const seen: (readonly string[])[] = [];
-    const run: ClapQualifyRun = (_tool, args) => {
-      seen.push(args);
-      const at = args.indexOf("--offer");
-      const offered = at < 0 ? [] : args[at + 1]!.split(",");
-      return { status: 0, signal: null, stdout: line({ hostExtensions: [...OMX_CLAP_HOST_EXTENSIONS, ...offered] }) };
-    };
-    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
-    const pass = qualifyClapTargets([{ format: "clap", uri: `urn:clap:${SAFE_ID}`, binaryPath: "/p/x.clap" }], {
-      rates: [48000],
-      run,
-      env,
-      exists: () => true,
-      profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, shippedHostProfile("jalv")!],
-    });
-    expect(seen.map((a) => a.includes("--offer"))).toEqual([false, true]);
-    expect(pass.verdicts.map((v) => [v.host, v.rating])).toEqual([
-      ["openmixer-console", "suitable"],
-      ["omx-clap-host", "suitable"],
-      ["jalv", "unknown"],
-    ]);
-  });
 });
 
-describe("qualifyClap — the run, fail closed", () => {
-  const answering = (stdout: string, extra: { status?: number; signal?: string } = {}): { run: ClapQualifyRun; calls: unknown[] } => {
-    const calls: unknown[] = [];
-    return { calls, run: (tool, args, env) => (calls.push({ tool, args, preload: env["LD_PRELOAD"] }), { status: extra.status ?? 0, signal: extra.signal ?? null, stdout }) };
-  };
-  const exists = () => true;
-
-  it("runs the named prober under the named interposer, at the rates asked", () => {
-    const { run, calls } = answering(line());
-    const env = { [CLAP_QUALIFY_TOOL_ENV]: "/t/clap-qualify", [RT_INTERPOSE_ENV]: "/t/rt.so" };
-    qualifyClap("/p/x.clap", SAFE_ID, { rates: [44100, 48000], run, env, exists });
-    expect(calls).toEqual([
-      { tool: "/t/clap-qualify", args: ["--rates", "44100,48000", "--block", "512", "--blocks", "512", "/p/x.clap", SAFE_ID], preload: "/t/rt.so" },
-    ]);
-  });
-
-  it("an absent prober or interposer is refused, naming the setting", () => {
-    const { run } = answering(line());
-    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: (p) => !p.endsWith(".so") })).toThrow(new RegExp(RT_INTERPOSE_ENV));
-    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run, env: {}, exists: () => false })).toThrow(new RegExp(CLAP_QUALIFY_TOOL_ENV));
-  });
-
+describe("clapQualifyTools — the prober and the interposer a run uses", () => {
   it("unset, the prober and the interposer are the package's own build, then the installed ones", () => {
     const own = [clapQualifyToolPath(), rtInterposePath()];
     const installed = NATIVE_TOOL_DIRS.map((d) => [join(d, CLAP_QUALIFY_TOOL_NAME), join(d, RT_INTERPOSE_NAME)]);
@@ -580,26 +558,5 @@ describe("qualifyClap — the run, fail closed", () => {
     expect(() => clapQualifyTools({}, () => false)).toThrow(
       new RegExp([clapQualifyToolPath(), ...NATIVE_TOOL_DIRS.map((d) => join(d, CLAP_QUALIFY_TOOL_NAME))].join(", ")),
     );
-  });
-
-  it("a crash, a failed load or silence is no measurement", () => {
-    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering("", { signal: "SIGSEGV", status: null as never }).run, env: {}, exists })).toThrow(/SIGSEGV/);
-    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering(line(), { status: 2 }).run, env: {}, exists })).toThrow(/exited 2/);
-    expect(() => qualifyClap("/p/x.clap", undefined, { rates: [48000], run: answering("").run, env: {}, exists })).toThrow(/nothing/);
-  });
-
-  it("a target that cannot be measured reads unknown, unmeasured, under every profile", () => {
-    const pass = qualifyClapTargets([{ format: "clap", uri: `urn:clap:${SAFE_ID}` }], {
-      rates: [48000],
-      env: {},
-      exists,
-      profiles: [OPENMIXER_CONSOLE_PROFILE, shippedHostProfile("jalv")!],
-    });
-    expect(pass.documents).toEqual([]);
-    expect(pass.failures).toHaveLength(1);
-    expect(pass.verdicts.map((v) => [v.host, v.measured, v.rating])).toEqual([
-      [OPENMIXER_CONSOLE_PROFILE.id, false, "unknown"],
-      ["jalv", false, "unknown"],
-    ]);
   });
 });

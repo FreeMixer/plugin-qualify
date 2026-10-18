@@ -80,6 +80,14 @@ export const CLAP_PATH_ENV = "CLAP_PATH";
 export const CLAP_USER_DIR = ".clap";
 export const CLAP_SYSTEM_DIR = "/usr/lib/clap";
 
+/**
+ * The ONE setting that locates plugin-hostd's probe runner: the environment variable that names the
+ * `plugin-hostd-probe` binary, and what is run when it is unset (looked up on `PATH`). The runner is
+ * plugin-hostd's, not a tool of this package, so it is not one of `NATIVE_TOOLS`.
+ */
+export const PROBE_RUNNER_ENV = "OMX_PROBE_RUNNER";
+export const PROBE_RUNNER_DEFAULT = "plugin-hostd-probe";
+
 /** Seconds one run of the CLAP scanner may take over everything it was pointed at. */
 export const CLAP_SCAN_TIMEOUT_S = 300;
 

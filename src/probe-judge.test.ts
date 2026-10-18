@@ -18,82 +18,32 @@ import {
 } from "./host-profiles.js";
 import { clapLineFromProbeOutput, judgeProbeOutput } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
-import { fixtureJson, probeOutputOfLine, readFixture } from "./probe-output-fixtures.js";
-
-const PIN = {
-  version: "1",
-  files: [{ path: "rt-safe.clap", sha256: "a".repeat(64) }],
-  layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) },
-};
-
-/** A prober line, with `patch` merged over a clean effect. */
-function lineOf(patch: {
-  rtSafety?: object;
-  clap?: object;
-  hostExtensions?: string[];
-  noteSweep?: object;
-  integrity?: object;
-} = {}): ClapQualifyLine {
-  return {
-    uri: "urn:clap:org.example.fx",
-    id: "org.example.fx",
-    binary: { path: "/x/rt-safe.clap", sha256: "a".repeat(64) },
-    hostExtensions: patch.hostExtensions ?? [...OMX_CLAP_HOST_EXTENSIONS],
-    clap: {
-      mainInputChannels: 2,
-      mainOutputChannels: 2,
-      sidechainInputs: 0,
-      features: ["audio-effect"],
-      headlessOk: true,
-      noteInputs: 0,
-      latency: { "48000": { declaredFrames: 0, measuredFrames: 0 }, "96000": { declaredFrames: 4, measuredFrames: 4 } },
-      threadViolations: 0,
-      processErrors: 0,
-      processCalls: 512,
-      nonFinite: false,
-      ...patch.clap,
-    },
-    rtSafety: {
-      interposer: true,
-      swept: true,
-      sweepApplicable: true,
-      blocks: 512,
-      blockFrames: 512,
-      allocationsInRun: 0,
-      locksInRun: 0,
-      syscallsInRun: 0,
-      events: [],
-      ...patch.rtSafety,
-    },
-    noteSweep: { applicable: false, ...patch.noteSweep },
-    integrity: { ...PIN, ...patch.integrity },
-  };
-}
+import { clapLineFixture, fixtureJson, probeOutputOfLine, readFixture } from "./probe-output-fixtures.js";
 
 const withGui = [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"];
 const OWN_GUI: HostProfile = { ...OPENMIXER_CONSOLE_PROFILE, id: "own-gui", clapExtensions: withGui };
 
 /** Every shape of line the existing tests of the CLAP arm exercise, each with the profiles it is judged under. */
 const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; expected: string }[] = [
-  { name: "a clean effect", line: lineOf(), profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, JALV_PROFILE, OWN_GUI], expected: "suitable" },
-  { name: "an allocation", line: lineOf({ rtSafety: { allocationsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a lock", line: lineOf({ rtSafety: { locksInRun: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a syscall", line: lineOf({ rtSafety: { syscallsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a thread violation", line: lineOf({ clap: { threadViolations: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a process error", line: lineOf({ clap: { processErrors: 2 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a sweep that ran nothing", line: lineOf({ clap: { processCalls: 0 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "no interposer", line: lineOf({ rtSafety: { interposer: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "controls not swept", line: lineOf({ rtSafety: { swept: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "a plugin with no parameter", line: lineOf({ rtSafety: { swept: false, sweepApplicable: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "suitable" },
+  { name: "a clean effect", line: clapLineFixture(), profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, JALV_PROFILE, OWN_GUI], expected: "suitable" },
+  { name: "an allocation", line: clapLineFixture({ rtSafety: { allocationsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "a lock", line: clapLineFixture({ rtSafety: { locksInRun: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "a syscall", line: clapLineFixture({ rtSafety: { syscallsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "a thread violation", line: clapLineFixture({ clap: { threadViolations: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "a process error", line: clapLineFixture({ clap: { processErrors: 2 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "a sweep that ran nothing", line: clapLineFixture({ clap: { processCalls: 0 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
+  { name: "no interposer", line: clapLineFixture({ rtSafety: { interposer: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
+  { name: "controls not swept", line: clapLineFixture({ rtSafety: { swept: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
+  { name: "a plugin with no parameter", line: clapLineFixture({ rtSafety: { swept: false, sweepApplicable: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "suitable" },
   {
     name: "other host extensions than the profile's",
-    line: lineOf({ hostExtensions: withGui }),
+    line: clapLineFixture({ hostExtensions: withGui }),
     profiles: [OPENMIXER_CONSOLE_PROFILE, OWN_GUI],
     expected: "unknown",
   },
   {
     name: "a played instrument, clean",
-    line: lineOf({
+    line: clapLineFixture({
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0, events: [] },
     }),
@@ -102,7 +52,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
   },
   {
     name: "a played instrument that allocates, in the midi dialect",
-    line: lineOf({
+    line: clapLineFixture({
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 5, locksInRun: 0, syscallsInRun: 0, events: [] },
     }),
@@ -111,7 +61,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
   },
   {
     name: "an instrument played with a syscall",
-    line: lineOf({
+    line: clapLineFixture({
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 2, events: [] },
     }),
@@ -120,13 +70,13 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
   },
   {
     name: "an instrument that could not be played",
-    line: lineOf({ clap: { noteInputs: 1 }, noteSweep: { applicable: false } }),
+    line: clapLineFixture({ clap: { noteInputs: 1 }, noteSweep: { applicable: false } }),
     profiles: [OPENMIXER_CONSOLE_PROFILE],
     expected: "unknown",
   },
   {
     name: "an instrument played with no interposer",
-    line: lineOf({
+    line: clapLineFixture({
       clap: { noteInputs: 1 },
       rtSafety: { interposer: false },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: false },
@@ -166,7 +116,7 @@ describe("verdicts from a probe output equal verdicts from today's documents", (
   });
 
   it("a probe output with the counts changed gives the changed verdict (the proof can fail)", () => {
-    const line = lineOf();
+    const line = clapLineFixture();
     const doc = probeOutputOfLine(line);
     doc["grid"][0]["rtSafety"]["allocations"] = 1;
     const read = readProbeOutput(JSON.stringify(doc));
@@ -179,7 +129,7 @@ describe("verdicts from a probe output equal verdicts from today's documents", (
 
 describe("the line a probe output stands for", () => {
   it("sums the interposer's counts over the points that carry them and reads a missing count as unmeasured", () => {
-    const doc = probeOutputOfLine(lineOf());
+    const doc = probeOutputOfLine(clapLineFixture());
     doc["grid"][1]["rtSafety"] = { ...doc["grid"][0]["rtSafety"], allocations: 2, blocks: 100, threadViolations: 1 };
     const read = readProbeOutput(JSON.stringify(doc));
     if (!read.ok) throw new Error(read.problem);
@@ -195,7 +145,7 @@ describe("the line a probe output stands for", () => {
   });
 
   it("reads the interposer as absent when any counting point ran without it", () => {
-    const doc = probeOutputOfLine(lineOf());
+    const doc = probeOutputOfLine(clapLineFixture());
     doc["grid"][1]["rtSafety"] = { interposer: false };
     const read = readProbeOutput(JSON.stringify(doc));
     if (!read.ok) throw new Error(read.problem);
@@ -203,7 +153,7 @@ describe("the line a probe output stands for", () => {
   });
 
   it("takes note inputs from the descriptor's fact when given, else from the note sweep", () => {
-    const withNotes = probeOutputOfLine(lineOf({ clap: { noteInputs: 1 }, noteSweep: { applicable: true, dialect: "clap", interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 } }));
+    const withNotes = probeOutputOfLine(clapLineFixture({ clap: { noteInputs: 1 }, noteSweep: { applicable: true, dialect: "clap", interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 } }));
     const read = readProbeOutput(JSON.stringify(withNotes));
     if (!read.ok) throw new Error(read.problem);
     expect(clapLineFromProbeOutput(read.output).clap.noteInputs).toBe(1);

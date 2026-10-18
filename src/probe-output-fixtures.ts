@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ClapQualifyLine } from "./clap-qualify.js";
+import { OMX_CLAP_HOST_EXTENSIONS } from "./host-profiles.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "probe-output");
@@ -92,3 +93,54 @@ export function probeOutputOfLine(line: ClapQualifyLine): Record<string, any> {
   }));
   return doc;
 }
+
+const PIN = {
+  version: "1",
+  files: [{ path: "rt-safe.clap", sha256: "a".repeat(64) }],
+  layout: { scheme: "omx-layout/1", sha256: "b".repeat(64) },
+};
+
+/** A prober line for a clean stereo effect, with `patch` merged over it. */
+export function clapLineFixture(patch: {
+  rtSafety?: object;
+  clap?: object;
+  hostExtensions?: string[];
+  noteSweep?: object;
+  integrity?: object;
+} = {}): ClapQualifyLine {
+  return {
+    uri: "urn:clap:org.example.fx",
+    id: "org.example.fx",
+    binary: { path: "/x/rt-safe.clap", sha256: "a".repeat(64) },
+    hostExtensions: patch.hostExtensions ?? [...OMX_CLAP_HOST_EXTENSIONS],
+    clap: {
+      mainInputChannels: 2,
+      mainOutputChannels: 2,
+      sidechainInputs: 0,
+      features: ["audio-effect"],
+      headlessOk: true,
+      noteInputs: 0,
+      latency: { "48000": { declaredFrames: 0, measuredFrames: 0 }, "96000": { declaredFrames: 4, measuredFrames: 4 } },
+      threadViolations: 0,
+      processErrors: 0,
+      processCalls: 512,
+      nonFinite: false,
+      ...patch.clap,
+    },
+    rtSafety: {
+      interposer: true,
+      swept: true,
+      sweepApplicable: true,
+      blocks: 512,
+      blockFrames: 512,
+      allocationsInRun: 0,
+      locksInRun: 0,
+      syscallsInRun: 0,
+      events: [],
+      ...patch.rtSafety,
+    },
+    noteSweep: { applicable: false, ...patch.noteSweep },
+    integrity: { ...PIN, ...patch.integrity },
+  };
+}
+

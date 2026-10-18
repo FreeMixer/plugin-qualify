@@ -23,3 +23,4 @@ export * from "./cost-fields.js";
 export * from "./probe-output.js";
 export * from "./probe-judge.js";
 export * from "./qualification-record.js";
+export * from "./probe-runner.js";
