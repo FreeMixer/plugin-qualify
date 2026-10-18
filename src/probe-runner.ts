@@ -102,7 +102,7 @@ export function clapRunnerArgs(
 
 /**
  * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by the runner's own LV2
- * child. The runner of plugin-hostd 0.3 starts a CLAP prober only (plugin-hostd#76 adds the LV2 child), so
+ * child. The runner of plugin-hostd 0.4.0 starts a CLAP prober only (the LV2 child, plugin-hostd#76, is in no release yet), so
  * against it this run ends with the runner's own refusal, which {@link runOne} reports.
  */
 export function lv2RunnerArgs(options: { rates: readonly number[]; out: string; log: string }, uri: string): string[] {

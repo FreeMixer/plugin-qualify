@@ -28,6 +28,8 @@ BuildRequires: pkgconfig(omxdsp) >= 0.18.0
 Requires: nodejs >= 18
 Requires: python3
 Requires: python3-lilv
+# plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
+Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified
 Recommends: omx-clap-host

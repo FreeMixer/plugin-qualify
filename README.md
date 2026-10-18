@@ -84,7 +84,8 @@ plugin-qualify --out ./out ./my-fx.clap       # and its RT-safety documents
 CLAP_PATH=~/my-clap plugin-qualify --all      # every CLAP on the search path
 ```
 
-Each plugin is measured by plugin-hostd's probe runner, `plugin-hostd-probe` (from the `plugin-hostd` package;
+Each plugin is measured by plugin-hostd's probe runner, `plugin-hostd-probe` (from the `plugin-hostd` package, 0.4.0 or later, which
+the RPM and DEB require;
 `OMX_PROBE_RUNNER` names it when it is not on `PATH`). The runner starts the prober under limits (a wall clock
 that kills the whole process tree, CPU time, memory, files), and plugin-qualify waits for the runner and reads
 the document it writes, the probe output. Nothing in plugin-qualify times a prober out on its own any more.
