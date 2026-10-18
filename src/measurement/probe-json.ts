@@ -55,6 +55,7 @@ export const PROBE_REASON_RULES: readonly ReasonRule[] = [
   { match: /^no-audio-in$/, code: "no-audio-in" },
   { match: /^no-audio-out$/, code: "no-audio-out" },
   { match: /^silent-output$/, code: "silent-output" },
+  { match: /hosting\.worker\.nonconforming/, code: "worker-nonconforming" },
   { match: /worker crashed|worker desync|worker unavailable/, code: "probe-crashed" },
   { match: /timed out|timeout/, code: "probe-timeout" },
   { match: /non-finite/, code: "non-finite-output" },
