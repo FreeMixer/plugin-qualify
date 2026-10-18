@@ -22,3 +22,4 @@ export * from "./measure-host.js";
 export * from "./cost-fields.js";
 export * from "./probe-output.js";
 export * from "./probe-judge.js";
+export * from "./qualification-record.js";
