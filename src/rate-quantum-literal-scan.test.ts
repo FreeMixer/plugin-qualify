@@ -110,3 +110,23 @@ describe("the rate and quantum are declared exactly once", () => {
     for (const rel of Object.keys(ALLOWED)) expect(() => readFileSync(join(PKG, rel), "utf8"), rel).not.toThrow();
   });
 });
+
+describe("the default rates and quanta are omx-contract's, not a restatement", () => {
+  it("QUALIFY_RATES is ORACLE_FLOOR_RATES and the first quantum is RT_HARD_TARGET's", async () => {
+    const contract = await import("@openmixer/omx-contract");
+    const decl = await import("./qualify-declarations.js");
+    expect([...decl.QUALIFY_RATES]).toEqual([...contract.ORACLE_FLOOR_RATES]);
+    expect(decl.QUALIFY_QUANTA[0]).toBe(contract.RT_HARD_TARGET.quantum);
+  });
+
+  it("the two default lists spell no 44100, 192000 or 128 literal", () => {
+    const text = readFileSync(join(PKG, "src", "qualify-declarations.ts"), "utf8")
+      .split("\n")
+      .filter((l) => /^export const QUALIFY_(RATES|QUANTA)\b/.test(l))
+      .join("\n");
+    expect(text).toContain("QUALIFY_RATES");
+    expect(text).not.toMatch(/(?<![\d.])(?:44100|192000|128)(?![\d.])/);
+    // positive control: the pattern sees a restated list
+    expect("[44100, 48000, 96000, 192000]").toMatch(/(?<![\d.])(?:44100|192000|128)(?![\d.])/);
+  });
+});
