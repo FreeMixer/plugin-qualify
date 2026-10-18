@@ -21,6 +21,15 @@ TAL = "urn:juce:TalReverb2"
 ZAMVERB = "urn:zamaudio:ZamVerb"
 
 
+class LilvOnCI(unittest.TestCase):
+    """CI installs python3-lilv (.github/actions/install-scanners): the real scan must run there, not skip."""
+
+    def test_lilv_imports_where_ci_installed_it(self):
+        if not os.environ.get("CI"):
+            self.skipTest("not on CI")
+        self.assertTrue(HAVE_LILV, "lilv is not importable on CI")
+
+
 def installed(bundle):
     return any(os.path.isdir(os.path.join(d, bundle))
                for d in ("/usr/lib64/lv2", "/usr/lib/lv2"))
