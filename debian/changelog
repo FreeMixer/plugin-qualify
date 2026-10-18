@@ -1,3 +1,23 @@
+plugin-qualify (0.11.0) unstable; urgency=medium
+
+  * The default rates and quanta of a qualification now come from omx-contract
+    instead of a copy kept here.
+  * A worker interface whose work or work_response is NULL is refused, and the
+    refusal is reported as hosting.worker.nonconforming.
+  * The LV2 measurer resolves a relative LV2_PATH entry before lilv reads it.
+  * CI installs the LV2 scanner and two LV2 plugin packages, so the scanner
+    tests run instead of being skipped.
+  * The LV2 measurer and the host probe take their dB readings from omx-dsp's
+    omx_lin_to_db_d instead of a hand-written 20 * log10, and need omx-dsp
+    0.21.0 or later to build. A NaN level in the host probe stays NaN and
+    fails its claim instead of reading as silence.
+  * Plugins are measured through the probe runner, CLAP and LV2 alike, and
+    judged from its output. Each judgment is written as a qualification record
+    beside a byte copy of the probe output it judged. plugin-qualify now
+    requires plugin-hostd 0.4.0.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sun, 18 Oct 2026 23:15:08 +0200
+
 plugin-qualify (0.10.1) unstable; urgency=medium
 
   * The npm package can be published again. The publish workflow now installs
