@@ -761,6 +761,10 @@ export function hostingLatencyReasons(
   // one the benchmark declared unmeasurable, has not been judged and does not pass by
   // default. The oracle's first fixture omitted latency and still expected `suitable`,
   // which is how this branch was missing — a self-consistent suite proving nothing.
+  // A plugin whose worker interface was refused is not unmeasured by accident: it is not hostable.
+  if (typeof latency?.unmeasurable === "string" && latency.unmeasurable.includes(HOSTING_CODE.workerNonconforming)) {
+    return [reason("latency", "objective", "unsuitable", HOSTING_CODE.workerNonconforming)];
+  }
   if (latency === undefined || latency.unmeasurable !== undefined) {
     return [reason("latency", "objective", "unknown", HOSTING_CODE.latencyUnmeasured)];
   }
