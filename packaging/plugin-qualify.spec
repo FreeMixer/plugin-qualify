@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.10.1
+Version: 0.11.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -66,6 +66,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sun Oct 18 2026 Pau Aliagas <linuxnow@gmail.com> - 0.11.0-1
+- The default rates and quanta of a qualification now come from omx-contract
+  instead of a copy kept here
+- A worker interface whose work or work_response is NULL is refused, and the
+  refusal is reported as hosting.worker.nonconforming
+- The LV2 measurer resolves a relative LV2_PATH entry before lilv reads it
+- CI installs the LV2 scanner and two LV2 plugin packages, so the scanner
+  tests run instead of being skipped
+
 * Fri Oct 16 2026 Pau Aliagas <linuxnow@gmail.com> - 0.10.1-1
 - The npm package can be published again. The publish workflow now installs
   plugin-hostd the way the CI workflow does, from one shared action, so the

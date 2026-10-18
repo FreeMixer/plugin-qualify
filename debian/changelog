@@ -1,3 +1,15 @@
+plugin-qualify (0.11.0) unstable; urgency=medium
+
+  * The default rates and quanta of a qualification now come from omx-contract
+    instead of a copy kept here.
+  * A worker interface whose work or work_response is NULL is refused, and the
+    refusal is reported as hosting.worker.nonconforming.
+  * The LV2 measurer resolves a relative LV2_PATH entry before lilv reads it.
+  * CI installs the LV2 scanner and two LV2 plugin packages, so the scanner
+    tests run instead of being skipped.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sun, 18 Oct 2026 23:15:08 +0200
+
 plugin-qualify (0.10.1) unstable; urgency=medium
 
   * The npm package can be published again. The publish workflow now installs
