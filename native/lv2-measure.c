@@ -8,7 +8,8 @@
  * this program's whole job to replace it with numbers. It reports, per plugin:
  *
  *   features   required/optional LV2 features and CV ports, read from the bundle
- *   rtSafety   allocations, locks and syscalls counted INSIDE run(), under a sweep
+ *   rtSafety   allocations, locks and syscalls counted INSIDE run(), under a sweep; for a plugin
+ *              with a MIDI input, the same counted apart while it is played (the note sweep)
  *   stability  instantiate/destroy lifecycles, and threads the plugin leaves behind
  *
  * WHY A REAL HOST. `lv2-host-probe.c` beside this one exists because a plugin's
@@ -24,6 +25,13 @@
  * figure describes the plugin as an operator will drive it. rtSafety measured
  * without the sweep is reported as unswept and the classifier treats it as
  * unmeasured.
+ *
+ * AN INSTRUMENT IS PLAYED. A synth is quiet and clean until a voice plays, so a plugin whose atom
+ * input takes midi:MidiEvent is also run through the note sweep, counted apart from the control
+ * sweep: the CLAP prober's pattern (native/clap-qualify.c, note_block, in MIDI's dialect) of a
+ * chord, the pitch bent and a controller moved across a block, pressure, the chord let go, a burst
+ * of 32 note ons in one block and their offs, a note and all notes off, written into the MIDI
+ * sequence each block. The record's rtSafety block carries it as `noteSweep`.
  *
  * THE HOST IS THE HOST THAT WILL RUN THE PLUGIN (plugin-qualify spec §2a): the options table
  * (sample rate, block lengths), a REAL worker (work() between blocks, answers
@@ -102,6 +110,7 @@
  * the interposer counts.
  */
 #include <lv2/atom/forge.h>
+#include <lv2/midi/midi.h>
 #include <lv2/parameters/parameters.h>
 #include <lv2/patch/patch.h>
 #include <lv2/units/units.h>
@@ -139,13 +148,14 @@ struct host {
   struct param params[MAX_PARAMS];
   int n_params;
   int patch_port; /* the atom input that takes patch:Set, or -1 */
+  int midi_port;  /* the atom input that takes midi:MidiEvent, or -1 */
   LV2_URID_Map map; /* the provider's one URI table, for the forge */
   LV2_URID u_float, u_int, u_bool, u_long, u_double;
-  LV2_URID u_chunk, u_sequence, u_patch_set, u_patch_prop, u_patch_val;
+  LV2_URID u_chunk, u_sequence, u_patch_set, u_patch_prop, u_patch_val, u_midi;
   double sweep_db, sweep_ratio;
   LV2_Atom_Forge forge;
   /* What the host did, reported so a measurement can prove the injection landed. */
-  long worker_jobs, worker_responses, worker_dropped, patch_sets;
+  long worker_jobs, worker_responses, worker_dropped, patch_sets, note_events;
   int worker_interface;
   /* The feature options every instance is built under, the plugin's lv2:requiredFeature list
    * (NULL-terminated), and the first of them a strict host refused it for. */
@@ -174,6 +184,8 @@ struct rig {
   int jh, jt, rh, rt;
   double pvals[MAX_PARAMS];
   int patch_live, pcursor;
+  /* the note sweep's block this block plays, or -1 for none */
+  int note_block;
 };
 
 static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle handle, uint32_t size, const void *data) {
@@ -228,9 +240,11 @@ static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin)
   h->u_patch_set = omx_lv2_urid_map(LV2_PATCH__Set);
   h->u_patch_prop = omx_lv2_urid_map(LV2_PATCH__property);
   h->u_patch_val = omx_lv2_urid_map(LV2_PATCH__value);
+  h->u_midi = omx_lv2_urid_map(LV2_MIDI__MidiEvent);
   h->sweep_db = env_or("OMX_SWEEP_DB", SWEEP_DB_DEFAULT);
   h->sweep_ratio = env_or("OMX_SWEEP_RATIO", SWEEP_RATIO_DEFAULT);
   h->patch_port = -1;
+  h->midi_port = -1;
   lv2_atom_forge_init(&h->forge, &h->map);
 
   LilvNode *audio_class = lilv_new_uri(world, LV2_CORE__AudioPort);
@@ -242,6 +256,7 @@ static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin)
   LilvNode *unit_pred = lilv_new_uri(world, LV2_UNITS__unit);
   LilvNode *db_unit = lilv_new_uri(world, LV2_UNITS__db);
   LilvNode *patch_msg = lilv_new_uri(world, LV2_PATCH__Message);
+  LilvNode *midi_event = lilv_new_uri(world, LV2_MIDI__MidiEvent);
 
   h->n_ports = lilv_plugin_get_num_ports(plugin);
   h->pk = calloc(h->n_ports, 1);
@@ -277,6 +292,9 @@ static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin)
       if (in && h->patch_port < 0 && lilv_port_is_a(plugin, port, atom_class) &&
           lilv_port_supports_event(plugin, port, patch_msg))
         h->patch_port = (int)i;
+      if (in && h->midi_port < 0 && lilv_port_is_a(plugin, port, atom_class) &&
+          lilv_port_supports_event(plugin, port, midi_event))
+        h->midi_port = (int)i;
     }
   }
 
@@ -319,6 +337,7 @@ static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin)
   lilv_node_free(max_p);
   lilv_node_free(def_p);
   lilv_node_free(patch_msg);
+  lilv_node_free(midi_event);
   lilv_node_free(db_unit);
   lilv_node_free(unit_pred);
   lilv_node_free(atom_class);
@@ -383,6 +402,7 @@ static struct rig *rig_open(struct host *h, double rate, uint32_t block, int bin
   r->wk = lilv_instance_get_extension_data(r->inst, LV2_WORKER__interface);
   if (r->wk != NULL) h->worker_interface = 1;
   for (int i = 0; i < h->n_params; i++) r->pvals[i] = h->params[i].def;
+  r->note_block = -1;
   if (!bind) return r;
 
   r->audio_slots = (size_t)h->n_audio_in + h->n_audio_out + h->n_cv + 2;
@@ -467,13 +487,10 @@ static int rig_sweep(struct rig *r, float t, int bounded) {
   return moved;
 }
 
-static void rig_send_patch(struct rig *r) {
+/* patch:Set for the next PATCH_SETS_PER_BLOCK writable parameters, at frame 0, into the open sequence */
+static void forge_patch(struct rig *r) {
   struct host *h = r->h;
-  if (!r->patch_live || h->patch_port < 0 || h->n_params == 0) return;
   LV2_Atom_Forge *f = &h->forge;
-  lv2_atom_forge_set_buffer(f, r->atoms[h->patch_port], PATCH_CAP);
-  LV2_Atom_Forge_Frame seq;
-  lv2_atom_forge_sequence_head(f, &seq, 0);
   const int n = h->n_params;
   const int count = n < PATCH_SETS_PER_BLOCK ? n : PATCH_SETS_PER_BLOCK;
   for (int k = 0; k < count; k++) {
@@ -494,15 +511,84 @@ static void rig_send_patch(struct rig *r) {
     h->patch_sets++;
   }
   r->pcursor = (r->pcursor + count) % n;
+}
+
+/* ---- the note sweep: the CLAP prober's pattern (clap-qualify.c note_block), in MIDI's dialect ---- */
+
+#define NOTE_CYCLE 8u
+#define NOTE_BURST 32u
+static const uint8_t CHORD[] = { 60, 64, 67 };
+#define CHORD_SIZE (sizeof CHORD / sizeof CHORD[0])
+
+static void forge_midi(struct rig *r, uint32_t time, uint8_t status, uint8_t a, uint8_t b) {
+  struct host *h = r->h;
+  const uint8_t msg[3] = { status, a, b };
+  lv2_atom_forge_frame_time(&h->forge, time);
+  lv2_atom_forge_atom(&h->forge, sizeof msg, h->u_midi);
+  lv2_atom_forge_write(&h->forge, msg, sizeof msg);
+  h->note_events++;
+}
+
+static uint8_t velocity(double v) { return (uint8_t)(v * 127.0 + 0.5); }
+
+/* the MIDI events of block b of the note sweep, by b's place in the cycle, in time order */
+static void forge_note_block(struct rig *r, uint32_t b, uint32_t frames) {
+  const uint32_t step = frames / 8u ? frames / 8u : 1u;
+  switch (b % NOTE_CYCLE) {
+  case 0:
+    for (uint32_t k = 0; k < CHORD_SIZE; k++) forge_midi(r, 0, 0x90, CHORD[k], velocity(0.8));
+    break;
+  case 1:
+    for (uint32_t t = 0; t < 8u; t++) {
+      const unsigned v = (unsigned)(((double)t / 4.0 - 1.0 + 1.0) * 8191.5);
+      forge_midi(r, t * step, 0xE0, (uint8_t)(v & 0x7f), (uint8_t)(v >> 7 & 0x7f));
+      forge_midi(r, t * step, 0xB0, 1, (uint8_t)(t * 16u));
+    }
+    break;
+  case 2:
+    for (uint32_t t = 0; t < 8u; t++) forge_midi(r, t * step, 0xD0, velocity((double)t / 7.0), 0);
+    break;
+  case 3:
+    for (uint32_t k = 0; k < CHORD_SIZE; k++) forge_midi(r, 0, 0x80, CHORD[k], 0);
+    break;
+  case 4:
+  case 5:
+    for (uint32_t k = 0; k < NOTE_BURST; k++)
+      forge_midi(r, k * frames / NOTE_BURST, b % NOTE_CYCLE == 4 ? 0x90 : 0x80, (uint8_t)(36 + k),
+                 velocity(0.25 + 0.5 * (double)k / NOTE_BURST));
+    break;
+  case 6:
+    forge_midi(r, 0, 0x90, 72, 127);
+    forge_midi(r, frames / 2u, 0xB0, 123, 0);
+    break;
+  default:
+    break; /* the release tails */
+  }
+}
+
+/* One atom input's sequence for this block: patch:Set when it takes them and the sweep moved one, then the note
+ * sweep's events when it takes MIDI and the block plays one (the patch events at frame 0 come first). */
+static void forge_port(struct rig *r, int port) {
+  struct host *h = r->h;
+  const int patch = port == h->patch_port && r->patch_live && h->n_params > 0;
+  const int notes = port == h->midi_port && r->note_block >= 0;
+  if (!patch && !notes) return;
+  LV2_Atom_Forge *f = &h->forge;
+  lv2_atom_forge_set_buffer(f, r->atoms[port], atom_cap(h, (uint32_t)port));
+  LV2_Atom_Forge_Frame seq;
+  lv2_atom_forge_sequence_head(f, &seq, 0);
+  if (patch) forge_patch(r);
+  if (notes) forge_note_block(r, (uint32_t)r->note_block, r->block);
   lv2_atom_forge_pop(f, &seq);
 }
 
-/* Before a block: every atom port is a fresh, valid sequence; patch:Set goes in. */
+/* Before a block: every atom port is a fresh, valid sequence; patch:Set and the note sweep's MIDI go in. */
 static void rig_prepare(struct rig *r) {
   struct host *h = r->h;
   for (uint32_t i = 0; i < h->n_ports; i++)
     if (r->atoms[i] != NULL) atom_reset(h, r->atoms[i], i);
-  rig_send_patch(r);
+  if (h->patch_port >= 0) forge_port(r, h->patch_port);
+  if (h->midi_port >= 0 && h->midi_port != h->patch_port) forge_port(r, h->midi_port);
 }
 
 /* After a block, between blocks and OFF run(): the plugin's work(), then its answers through
@@ -638,6 +724,29 @@ static int pin_only(const char *uri) {
 static FILE *jout;
 
 /* The facts about what the host did, so a measurement can prove the injection landed. */
+/* The first events, attributed. Deduplicated by (kind, module, symbol) so a plugin that mallocs 600 000 times
+ * reports one line, and one that does three different things reports three. */
+static void emit_rt_events(const struct omx_rt_event *seen, int n_seen) {
+  const char *dk[OMX_RT_EV_MAX], *dm[OMX_RT_EV_MAX], *ds[OMX_RT_EV_MAX];
+  int nd = 0;
+  for (int i = 0; i < n_seen; i++) {
+    const char *mod, *sym;
+    rt_owner(&seen[i], &mod, &sym);
+    const char *kind = rt_kind_name(seen[i].kind);
+    int dup = 0;
+    for (int j = 0; j < nd; j++)
+      if (!strcmp(dk[j], kind) && !strcmp(dm[j], mod) && !strcmp(ds[j], sym)) { dup = 1; break; }
+    if (dup) continue;
+    dk[nd] = kind; dm[nd] = mod; ds[nd] = sym;
+    fprintf(jout, "%s{\"kind\":\"%s\",\"module\":", nd ? "," : "", kind);
+    json_str(jout, mod);
+    fprintf(jout, ",\"symbol\":");
+    json_str(jout, sym);
+    fprintf(jout, "}");
+    nd++;
+  }
+}
+
 static void emit_host_facts(const struct host *h) {
   fprintf(jout, ",\"host\":{\"options\":true,\"workerInterface\":%s,\"workerJobs\":%ld,"
                 "\"workerResponses\":%ld,\"workerDropped\":%ld,\"patchParams\":%d,"
@@ -1002,6 +1111,48 @@ int main(int argc, char **argv) {
   if (locks_min == UINT64_MAX) locks_min = 0;
   if (syscalls_min == UINT64_MAX) syscalls_min = 0;
 
+  /* ---- the note sweep: a plugin with a MIDI input, played, counted apart ---- */
+  struct {
+    int played, nonfinite, n_seen;
+    long events;
+    uint64_t allocs, locks, syscalls;
+    struct omx_rt_event seen[OMX_RT_EV_MAX];
+  } ns = {0};
+  if (H->midi_port >= 0) {
+    struct rig *ni = rig_open(H, rate, block, 1);
+    if (ni != NULL) {
+      fill_input(ni, &rng, use_noise, block, rate, 0);
+      lilv_instance_activate(ni->inst);
+      for (int b = 0; b < warmup_blocks; b++) {
+        rig_prepare(ni);
+        lilv_instance_run(ni->inst, block);
+        rig_after(ni);
+      }
+      const long before = H->note_events;
+      if (rt_reset) rt_reset();
+      for (int b = 0; b < measured_blocks; b++) {
+        ni->note_block = b;
+        rig_prepare(ni);
+        if (rt_begin) rt_begin();
+        lilv_instance_run(ni->inst, block);
+        if (rt_end) rt_end();
+        rig_after(ni);
+        if (n_audio_out > 0) {
+          const float *o = rig_out(ni);
+          for (uint32_t f = 0; f < block; f++)
+            if (!isfinite(o[f])) ns.nonfinite = 1;
+        }
+      }
+      ns.events = H->note_events - before;
+      if (rt_counts) rt_counts(&ns.allocs, &ns.locks, &ns.syscalls);
+      if (rt_events) ns.n_seen = rt_events(ns.seen, OMX_RT_EV_MAX);
+      ns.played = 1;
+      lilv_instance_deactivate(ni->inst);
+      lilv_instance_free(ni->inst);
+      rig_close(ni);
+    }
+  }
+
   /* A plugin with no sweepable control was still measured; saying it was swept would
    * be a lie the classifier would act on. Report what happened. */
   const int sweep_applicable = n_control_in > 0 || H->n_params > 0;
@@ -1048,30 +1199,25 @@ int main(int argc, char **argv) {
          (allocs != allocs_min || locks != locks_min || syscalls != syscalls_min) ? "true" : "false",
          (unsigned long long)locks, (unsigned long long)locks_min,
          (unsigned long long)syscalls, (unsigned long long)syscalls_min);
-  /* The first events, attributed. Deduplicated by (kind, module, symbol) so a plugin that
-   * mallocs 600 000 times reports one line, and one that does three different things
-   * reports three. */
-  {
-    const char *dk[OMX_RT_EV_MAX], *dm[OMX_RT_EV_MAX], *ds[OMX_RT_EV_MAX];
-    int nd = 0;
-    for (int i = 0; i < n_seen; i++) {
-      const char *mod, *sym;
-      rt_owner(&seen[i], &mod, &sym);
-      const char *kind = rt_kind_name(seen[i].kind);
-      int dup = 0;
-      for (int j = 0; j < nd; j++)
-        if (!strcmp(dk[j], kind) && !strcmp(dm[j], mod) && !strcmp(ds[j], sym)) { dup = 1; break; }
-      if (dup) continue;
-      dk[nd] = kind; dm[nd] = mod; ds[nd] = sym;
-      fprintf(jout, "%s{\"kind\":\"%s\",\"module\":", nd ? "," : "", kind);
-      json_str(jout, mod);
-      fprintf(jout, ",\"symbol\":");
-      json_str(jout, sym);
-      fprintf(jout, "}");
-      nd++;
+  emit_rt_events(seen, n_seen);
+  fprintf(jout, "]");
+  /* the note sweep: not applicable without a MIDI input, its counts only under the interposer */
+  if (!ns.played) {
+    fprintf(jout, ",\"noteSweep\":{\"applicable\":false}");
+  } else {
+    const int counted = rt_present && rt_present();
+    fprintf(jout, ",\"noteSweep\":{\"applicable\":true,\"dialect\":\"midi\",\"blocks\":%d,\"blockFrames\":%u,"
+            "\"noteEvents\":%ld,\"processErrors\":0,\"nonFinite\":%s,\"interposer\":%s",
+            measured_blocks, block, ns.events, ns.nonfinite ? "true" : "false", counted ? "true" : "false");
+    if (counted) {
+      fprintf(jout, ",\"allocationsInRun\":%llu,\"locksInRun\":%llu,\"syscallsInRun\":%llu,\"events\":[",
+              (unsigned long long)ns.allocs, (unsigned long long)ns.locks, (unsigned long long)ns.syscalls);
+      emit_rt_events(ns.seen, ns.n_seen);
+      fprintf(jout, "]");
     }
+    fprintf(jout, "}");
   }
-  fprintf(jout, "]}");
+  fprintf(jout, "}");
 
   /* ---- rate support: instantiate and RUN at each rate the console can boot at ----
    * Instantiating is not enough. AmpVTS instantiates happily at 96 kHz and then
