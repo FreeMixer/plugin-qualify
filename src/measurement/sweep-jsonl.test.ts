@@ -106,7 +106,7 @@ describe("the hosting dimensions through the format and the merge", () => {
 
   it("a v1.1 document round-trips its three blocks through the reader", () => {
     const written = doc("shipped", swept);
-    expect(written.formatVersion).toBe("1.4");
+    expect(written.formatVersion).toBe("1.5");
     const read = readMeasurementDocument(JSON.parse(serialiseMeasurementDocument(written)));
     expect(read.ok).toBe(true);
     if (!read.ok) return;
@@ -174,5 +174,27 @@ describe("the pin lv2-measure printed travels with the plugin (spec §11.3)", ()
   it("a line with no pin carries none", () => {
     const [plugin] = measuredPluginsFromSweep({ measurements: [QUICK] });
     expect(plugin?.integrity).toBeUndefined();
+  });
+});
+
+describe("the note sweep lv2-measure printed travels in rtSafety (format 1.5)", () => {
+  const sweep = { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 6144, processErrors: 0, nonFinite: false,
+    interposer: true, allocationsInRun: 4608, locksInRun: 0, syscallsInRun: 0, events: [{ kind: "malloc", module: "?", symbol: "?" }] };
+
+  it("an instrument's sweep is kept, its counts by value, and survives the document's round trip", () => {
+    const [plugin] = measuredPluginsFromSweep({ measurements: [{ ...QUICK, rtSafety: { ...QUICK.rtSafety, noteSweep: sweep } }] });
+    const { events: _e, ...counted } = sweep;
+    expect(plugin?.rtSafety?.noteSweep).toEqual(counted);
+    const read = readMeasurementDocument(JSON.parse(serialiseMeasurementDocument(doc("synth", [plugin!]))));
+    expect(read.ok && read.document.plugins[0]?.rtSafety?.noteSweep).toEqual(counted);
+  });
+
+  it("an effect's sweep reads not applicable, and a count it cannot vouch for is left out", () => {
+    const [effect] = measuredPluginsFromSweep({ measurements: [{ ...QUICK, rtSafety: { ...QUICK.rtSafety, noteSweep: { applicable: false } } }] });
+    expect(effect?.rtSafety?.noteSweep).toEqual({ applicable: false });
+    const [bad] = measuredPluginsFromSweep({ measurements: [{ ...QUICK, rtSafety: { ...QUICK.rtSafety, noteSweep: { ...sweep, allocationsInRun: -1 } } }] });
+    expect(bad?.rtSafety?.noteSweep?.allocationsInRun).toBeUndefined();
+    const [none] = measuredPluginsFromSweep({ measurements: [QUICK] });
+    expect(none?.rtSafety?.noteSweep).toBeUndefined();
   });
 });
