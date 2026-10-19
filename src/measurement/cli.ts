@@ -54,6 +54,9 @@ export const TOOL_NAME = "lv2-measure";
  */
 export const TOOL_VERSION = "0.1.0";
 
+/** The most notes a cost run holds: one per MIDI key, as the probers cap it. */
+export const PROBE_NOTES_MAX = 128;
+
 /** A fully resolved invocation. */
 export interface MeasureOptions {
   /** Where the document goes. Absent = stdout. */
@@ -70,6 +73,11 @@ export interface MeasureOptions {
   readonly sweep: boolean;
   /** Core to pin the cost pass to. Absent = let the prober choose. */
   readonly costCpu?: number;
+  /**
+   * The notes the cost pass holds down while it times an instrument (`--probe-notes`, the console's
+   * `SYNTH_VOICE_PROBE_NOTES`), basis `probe`. Absent = an instrument is unmeasured `voices-unknown`.
+   */
+  readonly probeNotes?: number;
   readonly label?: string;
   /** Directory holding `scan.py` and `benchmark.py`. */
   readonly toolDir: string;
@@ -203,6 +211,7 @@ export function buildPipeline(options: MeasureOptions, native?: HostingTools): P
         "--cost-provenance",
         costProvenance,
         ...(options.costCpu === undefined ? [] : ["--cost-cpu", String(options.costCpu)]),
+        ...(options.probeNotes === undefined ? [] : ["--probe-notes", String(options.probeNotes)]),
       ],
       produces: cost,
       dimension: "cost",
@@ -356,6 +365,7 @@ export function parseMeasureArgs(
   let workDir = defaults.workDir;
   let sweep = false;
   let costCpu: number | undefined;
+  let probeNotes: number | undefined;
   let label: string | undefined;
   let toolDir = defaults.toolDir;
   let python = env.PYTHON ?? "python3";
@@ -430,6 +440,15 @@ export function parseMeasureArgs(
         costCpu = cpu;
         break;
       }
+      case "--probe-notes": {
+        const value = next();
+        const notes = value === undefined ? Number.NaN : Number(value);
+        if (!Number.isInteger(notes) || notes < 1 || notes > PROBE_NOTES_MAX) {
+          return { ok: false, error: `--probe-notes needs a count of notes, 1 to ${PROBE_NOTES_MAX}` };
+        }
+        probeNotes = notes;
+        break;
+      }
       case "--label": {
         const value = next();
         if (value === undefined) return { ok: false, error: "--label needs text" };
@@ -494,6 +513,7 @@ export function parseMeasureArgs(
       ...(scanPath === undefined ? {} : { scanPath }),
       ...(plugins === undefined ? {} : { plugins }),
       ...(costCpu === undefined ? {} : { costCpu }),
+      ...(probeNotes === undefined ? {} : { probeNotes }),
       ...(label === undefined ? {} : { label }),
       ...(featureFlags.length === 0 ? {} : { featureFlags }),
     },

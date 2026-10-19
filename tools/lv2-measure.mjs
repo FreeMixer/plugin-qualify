@@ -80,6 +80,8 @@ const HELP = `${TOOL_NAME} ${TOOL_VERSION} — measure LV2 plugin latency and CP
   --python BIN            Python interpreter (default: $PYTHON or python3).
   --sweep                 Also sweep latency-bearing controls (finds parameter-dependent latency).
   --cost-cpu N            Pin the cost pass to core N.
+  --probe-notes N         The notes an instrument holds down while its cost is timed (1 to 128);
+                          without it an instrument's cost is unmeasured (voices-unknown).
   --label TEXT            A note recorded with the run.
   --run                   Required to probe. Instantiates and runs every plugin.
   --dry-run               Print the plan and probe nothing.

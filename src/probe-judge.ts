@@ -35,7 +35,7 @@ import type { HostProfile } from "./host-profiles.js";
 import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
-import type { IntegrityMeasurement } from "./measurement/format.js";
+import type { IntegrityMeasurement, VoicesHeld } from "./measurement/format.js";
 
 /** Facts of the descriptor, which the probe output repeats none of. */
 export interface JudgeFacts {
@@ -168,8 +168,11 @@ export interface HostJudgment {
   /** In-process only for a suitable plugin on a host that runs its plugins in its own process, else isolated. */
   readonly hosting: "in-process" | "isolated";
   readonly reasons: readonly RecordReason[];
-  /** The cost reasons at this host's rate and quantum, kept beside the verdict, not folded into it. */
-  readonly cost: { readonly rate: number; readonly quantum: number; readonly reasons: readonly RecordReason[] };
+  /**
+   * The cost reasons at this host's rate and quantum, kept beside the verdict, not folded into it; for an instrument,
+   * the notes it held while that figure was timed.
+   */
+  readonly cost: { readonly rate: number; readonly quantum: number; readonly voices?: VoicesHeld; readonly reasons: readonly RecordReason[] };
 }
 
 export interface Judgment {
@@ -191,7 +194,8 @@ function costOf(output: ProbeOutput, profile: HostProfile): HostJudgment["cost"]
     { rate, quantum, profile },
     DEFAULT_HOSTING_POLICY,
   );
-  return { rate, quantum, reasons: reasons.map(asRecordReason) };
+  const voices = output.grid.find((p) => p.outcome === PROBE_OK && p.rate === rate && p.quantum === quantum)?.cost?.voices;
+  return { rate, quantum, ...(voices === undefined ? {} : { voices }), reasons: reasons.map(asRecordReason) };
 }
 
 /**
