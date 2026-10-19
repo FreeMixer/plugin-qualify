@@ -58,10 +58,12 @@ import {
   type HostLatencyHandling,
   type MeasurementDimension,
   type VerdictRating,
+  type VoiceBasis,
   HOST_ISOLATIONS,
   HOST_LATENCY_HANDLING,
   MEASUREMENT_DIMENSIONS,
   VERDICT_RATINGS,
+  isVoiceBasis,
   readDimension,
 } from "./vocabulary.js";
 
@@ -74,8 +76,9 @@ export const MEASUREMENT_FORMAT_MAJOR = 1;
 /** The minor this build writes. Additive-only within {@link MEASUREMENT_FORMAT_MAJOR}.
  *  `1.1` added the three hosting dimensions — {@link StabilityMeasurement},
  *  {@link RtSafetyMeasurement}, {@link FeaturesMeasurement} — which a 1.0 reader skips.
- *  `1.2` added the verdicts per host profile; `1.3` the {@link IntegrityMeasurement} block. */
-export const MEASUREMENT_FORMAT_MINOR = 3;
+ *  `1.2` added the verdicts per host profile; `1.3` the {@link IntegrityMeasurement} block; `1.4` the notes
+ *  an instrument's cost was measured with ({@link CostAtRate.voices}). */
+export const MEASUREMENT_FORMAT_MINOR = 4;
 
 /** The version string this build writes, e.g. `"1.0"`. */
 export const MEASUREMENT_FORMAT_VERSION = `${MEASUREMENT_FORMAT_MAJOR}.${MEASUREMENT_FORMAT_MINOR}`;
@@ -270,6 +273,17 @@ export interface LatencyMeasurement {
   readonly unmeasuredDetail?: string;
 }
 
+/**
+ * The notes an instrument held down while its cost was timed (1.4): how many, where that count came
+ * from ({@link VoiceBasis}), and the voice capacity the plugin declared at that rate when it declares one.
+ * An instrument costs nothing until a voice plays, so its figure means nothing without this.
+ */
+export interface VoicesHeld {
+  readonly held: number;
+  readonly basis: VoiceBasis;
+  readonly capacity?: number;
+}
+
 /** One rate's cost reading. Per SAMPLE, so it is independent of the block size. */
 export interface CostAtRate {
   readonly nsPerSampleMedian: number;
@@ -286,6 +300,8 @@ export interface CostAtRate {
   /** Timed, but emitted silence under a stimulus that should have passed — the figure may
    *  describe a short-circuit path rather than the DSP. */
   readonly silentOutput?: boolean;
+  /** 1.4: for an instrument, the notes held while it was timed. Absent for an effect. */
+  readonly voices?: VoicesHeld;
 }
 
 /** Everything one run learned about one plugin's CPU cost. */
@@ -834,7 +850,18 @@ function readCostAtRate(value: unknown): CostAtRate | undefined {
     ...optional("nsPerSampleMax", finiteNumber(value.nsPerSampleMax)),
     ...optional("warmupNsPerSampleMedian", finiteNumber(value.warmupNsPerSampleMedian)),
     ...optional("silentOutput", booleanValue(value.silentOutput)),
+    ...optional("voices", readVoicesHeld(value.voices)),
   };
+}
+
+/** The notes held, or `undefined` unless the count and a known basis are there. */
+export function readVoicesHeld(value: unknown): VoicesHeld | undefined {
+  if (!isRecord(value)) return undefined;
+  const held = positiveNumber(value.held);
+  const basis = isVoiceBasis(value.basis) ? value.basis : undefined;
+  const capacity = finiteNumber(value.capacity);
+  if (held === undefined || !Number.isInteger(held) || basis === undefined) return undefined;
+  return { held, basis, ...(capacity !== undefined && Number.isInteger(capacity) && capacity >= 0 ? { capacity } : {}) };
 }
 
 function readCost(value: unknown): CostMeasurement | undefined {

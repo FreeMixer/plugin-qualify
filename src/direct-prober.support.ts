@@ -68,6 +68,10 @@ export interface ClapQualifyOptions {
   readonly exists?: (path: string) => boolean;
   /** The host extensions the prober offers beyond the console's, each one of {@link OMX_CLAP_HOST_CONFIGURED_EXTENSIONS}. */
   readonly offer?: readonly string[];
+  /** The notes the cost arm holds for an instrument that declares no voice capacity (`--probe-notes`). */
+  readonly probeNotes?: number;
+  /** The notes the cost arm holds whatever the instrument declares (`--hold`). */
+  readonly hold?: number;
 }
 
 /**
@@ -86,6 +90,8 @@ export function qualifyClap(binaryPath: string, id: string | undefined, options:
     "--blocks",
     String(CLAP_SWEEP_BLOCKS),
     ...(options.offer === undefined || options.offer.length === 0 ? [] : ["--offer", options.offer.join(",")]),
+    ...(options.probeNotes === undefined ? [] : ["--probe-notes", String(options.probeNotes)]),
+    ...(options.hold === undefined ? [] : ["--hold", String(options.hold)]),
     binaryPath,
     ...(id === undefined ? [] : [id]),
   ];

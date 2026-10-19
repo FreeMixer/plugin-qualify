@@ -146,6 +146,17 @@ describe("the probe pipeline", () => {
     expect(cost?.args).toEqual(expect.arrayContaining(["--cost-cpu", "7"]));
   });
 
+  it("gives the cost pass the probe count an instrument is held at, and only when asked", () => {
+    const cost = buildPipeline(options({ probeNotes: 32 })).steps.find((s) => s.id === "cost");
+    expect(cost?.args).toEqual(expect.arrayContaining(["--probe-notes", "32"]));
+    expect(buildPipeline(options()).steps.find((s) => s.id === "cost")?.args).not.toContain("--probe-notes");
+    const parsed = parseMeasureArgs(["--rates", "96000", "--probe-notes", "32"], {}, DEFAULTS);
+    expect(parsed.ok && parsed.options.probeNotes).toBe(32);
+    for (const bad of ["0", "129", "2.5", "many"]) {
+      expect(parseMeasureArgs(["--rates", "96000", "--probe-notes", bad], {}, DEFAULTS).ok).toBe(false);
+    }
+  });
+
   it("gates every prober invocation behind the prober's own --run", () => {
     for (const step of buildPipeline(options()).steps.filter((s) => s.dimension !== undefined)) {
       expect(step.args).toContain("--run");

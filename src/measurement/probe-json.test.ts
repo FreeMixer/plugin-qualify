@@ -157,3 +157,38 @@ describe("the worker refusal's code is one string in both languages", () => {
     expect(/^WORKER_NONCONFORMING = "([^"]+)"/m.exec(py)?.[1]).toBe(HOSTING_CODE.workerNonconforming);
   });
 });
+
+describe("an instrument's cost, timed with notes held (format 1.4)", () => {
+  const timed = { nsPerSampleMedian: 40, nsPerSampleP95: 44, blocks: 512, blockFrames: 512 };
+
+  it("carries the notes held, per rate, beside the figure", () => {
+    const plugin = measuredPluginFromProbeEntry(
+      { uri: "urn:synth", audioInputs: 0, audioOutputs: 2, hasMidiIn: true,
+        cpuCost: { perRate: { "96000": { ...timed, voices: { held: 32, basis: "probe" } } } } },
+      BOTH,
+    );
+    expect(plugin?.cost?.perRate["96000"]?.voices).toEqual({ held: 32, basis: "probe" });
+    expect(plugin?.cost?.perRate["96000"]?.nsPerSamplePercentile).toBe(44);
+  });
+
+  it("drops a held count it cannot vouch for, and keeps an effect's figure without one", () => {
+    const read = (voices: unknown) =>
+      measuredPluginFromProbeEntry({ uri: "urn:x", audioInputs: 0, audioOutputs: 2, cpuCost: { perRate: { "48000": { ...timed, voices } } } }, BOTH)
+        ?.cost?.perRate["48000"]?.voices;
+    expect(read({ held: 32, basis: "guess" })).toBeUndefined();
+    expect(read({ held: 0, basis: "probe" })).toBeUndefined();
+    expect(read({ held: 2.5, basis: "probe" })).toBeUndefined();
+    expect(read(undefined)).toBeUndefined();
+    expect(read({ held: 8, basis: "declared", capacity: 8 })).toEqual({ held: 8, basis: "declared", capacity: 8 });
+  });
+
+  it("an instrument measured with no count to hold is not attempted, never a plugin with nothing to measure", () => {
+    const plugin = measuredPluginFromProbeEntry(
+      { uri: "urn:synth", audioInputs: 0, audioOutputs: 2, cpuCost: { unmeasurable: "voices-unknown" } },
+      BOTH,
+    );
+    expect(plugin?.cost?.unmeasuredReason).toBe("voices-unknown");
+    expect(unmeasuredKind("voices-unknown")).toBe("not-attempted");
+  });
+});
+

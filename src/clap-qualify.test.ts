@@ -57,9 +57,10 @@ const CONTROLS = join(FIXTURES, "controls.clap");
 const SYNTH = join(FIXTURES, "synth.clap");
 const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
+const SYNTH_STRICT = join(FIXTURES, "synth-strict.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI].every((p) => existsSync(p));
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI, SYNTH_STRICT].every((p) => existsSync(p));
 
 const scratch = mkdtempSync(join(tmpdir(), "clap-qualify-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -320,6 +321,20 @@ describe("clap-qualify, live — an instrument is played: the note sweep", () =>
     expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
   });
 
+  live("all notes off reaches a port that reads MIDI too as controller 123, as the host sends it, never as a wildcard", () => {
+    // the fixture aborts on a CLAP note whose key or channel is -1, as Surge XT and Six Sines do
+    const [l] = qualifyClap(SYNTH_STRICT, undefined, { rates: QUALIFY_RATES });
+    expect(l!.noteSweep).toMatchObject({ applicable: true, dialect: "clap", allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
+    expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
+  });
+
+  live("a stepped parameter is swept over its whole values, as a host moves it, in the sweep and the cost arm", () => {
+    // the fixture aborts on a value between two steps of its mode parameter
+    const [l] = qualifyClap(SYNTH_STRICT, undefined, { rates: [QUALIFY_RATES[0]!], probeNotes: 4 });
+    expect(l!.rtSafety.swept).toBe(true);
+    expect(l!.cost?.perRate[String(QUALIFY_RATES[0])]).toMatchObject({ voices: { held: 4, basis: "probe" } });
+  });
+
   live("an effect is not played: its note sweep is not applicable and adds no reason", () => {
     const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.noteSweep).toEqual({ applicable: false });
@@ -502,7 +517,7 @@ describe("the note sweep in the line and the document", () => {
 
   it("a plugin with no note input gets no note reason: its verdict is the one /1 gave", () => {
     const doc = rtSafetyDocument(parseClapQualifyLine(line()));
-    expect(doc.schema).toBe("plugin-qualify.rt-safety/2");
+    expect(doc.schema).toBe("plugin-qualify.rt-safety/3");
     expect(doc.verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
     expect(doc.measured.noteSweep).toEqual({ applicable: false });
   });
