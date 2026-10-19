@@ -1522,6 +1522,14 @@ int main(int argc, char **argv) {
     fprintf(stderr, "%s: %s: cannot be read\n", argv[0], path);
     return 2;
   }
+  /* the lines go to a private copy of stdout, and stdout itself to stderr, before any plugin code runs: what a plugin
+   * prints (Six Sines writes its start-up to stdout) can never enter or tear a line, as in the scan's child */
+  {
+    fflush(stdout);
+    const int out = dup(STDOUT_FILENO);
+    FILE *lines = out >= 0 && dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 ? fdopen(out, "w") : NULL;
+    if (lines) g_out = lines;
+  }
 
   void *so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (!so) {
@@ -1541,9 +1549,9 @@ int main(int argc, char **argv) {
     const clap_plugin_descriptor_t *d = factory->get_plugin_descriptor(factory, i);
     if (!d || !d->id || (o.id && strcmp(o.id, d->id))) continue;
     found = 1;
-    fflush(stdout);
+    fflush(g_out);
     if (qualify_plugin(factory, d, path, sha256, &o) != 0) status = 2;
-    fflush(stdout);
+    fflush(g_out);
   }
   entry->deinit();
   dlclose(so);

@@ -11,7 +11,9 @@
  *                          and clean until it is played, the known RT-unsafe one.
  *   synth-midi.clap        built with -DFIXTURE_MIDI_ONLY, the safe one reading MIDI's dialect alone.
  *   synth-voices.clap      built with -DFIXTURE_VOICE_CAPACITY=8, the safe one declaring through voice-info
- *                          that 8 voices sound at most: the cost arm holds 8 notes, basis declared.
+ *                          that 8 voices sound at most: the cost arm holds 8 notes, basis declared. It also
+ *                          prints a line to stdout on init, as Six Sines does, which must never reach the
+ *                          prober's lines.
  *   synth-no-voices.clap   built with -DFIXTURE_VOICE_CAPACITY=0, the safe one declaring a capacity of 0.
  *   synth-strict.clap      built with -DFIXTURE_NO_WILDCARDS, the safe one aborting on a CLAP note event whose
  *                          key or channel is the wildcard -1, as Surge XT 1.3.4 and Six Sines 1.2.1 do: its port
@@ -79,7 +81,17 @@ struct synth {
   struct voice voice[VOICES];
 };
 
+#if defined FIXTURE_VOICE_CAPACITY && FIXTURE_VOICE_CAPACITY > 0
+#include <stdio.h>
+static bool synth_init(const clap_plugin_t *p) {
+  (void)p;
+  printf("fixture synth: initialising, on stdout\n");
+  fflush(stdout);
+  return true;
+}
+#else
 static bool synth_init(const clap_plugin_t *p) { (void)p; return true; }
+#endif
 static void synth_destroy(const clap_plugin_t *p) { free(p->plugin_data); }
 static bool synth_activate(const clap_plugin_t *p, double rate, uint32_t min, uint32_t max) {
   (void)min; (void)max;
