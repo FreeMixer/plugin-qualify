@@ -237,7 +237,13 @@ describe("--host-profile — one verdict per plugin per profile (§3a, §5)", ()
   // The live pair the fixtures were costed at; each profile's own declared pair is its own test below.
   const opts = { rate: COST_REFERENCE_RATE, quantum: QUANTUM_FRAMES };
   const good = { target: { format: "lv2", uri: "urn:t:good" }, plugin: knownGood() };
-  const synth = { target: { format: "lv2", uri: "urn:t:synth" }, plugin: { ...knownGood(), audioInputs: 0, audioOutputs: 2, hasMidiIn: true } as QualifiedPlugin };
+  // an instrument, played through its MIDI input under the interposer: an instrument host reads that count
+  const played = { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 6144, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 } as const;
+  const synthPlugin = knownGood();
+  const synth = {
+    target: { format: "lv2", uri: "urn:t:synth" },
+    plugin: { ...synthPlugin, audioInputs: 0, audioOutputs: 2, hasMidiIn: true, rtSafety: { ...synthPlugin.rtSafety, noteSweep: played } } as QualifiedPlugin,
+  };
 
   it("defaults to openmixer-console, the declared default --help prints", () => {
     const a = parseQualifyArgs(["urn:t:good"]);

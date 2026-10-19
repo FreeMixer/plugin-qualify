@@ -320,8 +320,14 @@ import { costFieldsMissing, costPointKey } from "./cost-fields.js";
 export interface ClapLatencyAtRate {
   /** `latency.get()` after `activate` at this rate; a plugin without the ext declares 0. */
   readonly declaredFrames: number;
-  /** Where the qualifier's impulse landed through `process()`, in frames. */
+  /** Where the qualifier's impulse landed through `process()`, in frames; for an instrument, where a note's
+   *  sound began. */
   readonly measuredFrames: number;
+  /** `note`: a plugin with no main audio input, measured from a note struck at frame 0 (the onset of its
+   *  sound, which an attack envelope may put later than its latency). Absent: from an impulse. */
+  readonly from?: "note";
+  /** `false`: the note was struck and nothing was heard, so there is no onset to read. */
+  readonly heard?: boolean;
 }
 
 /**
@@ -847,7 +853,10 @@ export function clapTopologyReasons(clap: PluginClapMeasurement | undefined, ins
 /**
  * The CLAP arm of `latency` (CLAP spec §3): declared = measured at EVERY declared rate earns;
  * one rate that lies refuses (`unsuitable` — compensation reads the figure as truth); no rate
- * measured is `unknown`.
+ * measured is `unknown`. An instrument has no input to put an impulse in, so its figure is the onset
+ * of a note struck at frame 0: an onset before the declared latency is the same lie, one at or after
+ * it is resolved (an attack envelope sounds later than the plugin's delay, and that is no latency),
+ * and a note that was never heard is unmeasured.
  */
 export function clapLatencyReasons(clap: PluginClapMeasurement | undefined): readonly HostingReason[] {
   const rates = clap ? Object.keys(clap.latency) : [];
@@ -856,7 +865,11 @@ export function clapLatencyReasons(clap: PluginClapMeasurement | undefined): rea
   }
   for (const rate of rates) {
     const at = clap.latency[rate]!;
-    if (at.declaredFrames !== at.measuredFrames) {
+    if (at.from === "note" && at.heard === false) {
+      return [reason("latency", "objective", "unknown", HOSTING_CODE.latencyUnmeasured, { rate: Number(rate) })];
+    }
+    const lies = at.from === "note" ? at.measuredFrames < at.declaredFrames : at.declaredFrames !== at.measuredFrames;
+    if (lies) {
       return [
         reason("latency", "objective", "unsuitable", HOSTING_CODE.clapLatencyMismatch, {
           rate: Number(rate), declared: at.declaredFrames, measured: at.measuredFrames,
@@ -978,12 +991,15 @@ export function classifyPluginHosting(
   // report could agree with itself while every served descriptor read unknown.
   // The CLAP arm: the SAME six dimensions, fed from the
   // qualifier's CLAP facts where the LV2 scan's facts do not exist for the format. Stability,
-  // the interposer's counts and the cost are format-blind and read unchanged.
+  // the interposer's counts and the cost are format-blind and read unchanged. A host that plays
+  // notes (an instrument host) also reads the note sweep: an instrument is clean at rest, so the
+  // parameter sweep alone says nothing about what a voice does.
   const reasons: HostingReason[] = descriptor.format === "clap"
     ? [
         ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess, options.rate),
         ...rtSafetyReasons(descriptor.rtSafety),
         ...clapRtReasons(descriptor.clap),
+        ...(profile.instruments ? noteSweepReasons(descriptor.rtSafety?.noteSweep, descriptor.clap?.noteInputs ?? (descriptor.hasMidiIn ? 1 : 0)) : []),
         ...clapFeatureReasons(descriptor.clap, profile, descriptor.hasMidiIn),
         ...hostingCostReasons(descriptor, options, policy),
         ...clapLatencyReasons(descriptor.clap),
@@ -992,6 +1008,7 @@ export function classifyPluginHosting(
     : [
         ...stabilityReasons(descriptor.stability, policy, options.pluginBinary, sharesProcess, options.rate),
         ...rtSafetyReasons(descriptor.rtSafety),
+        ...(profile.instruments ? noteSweepReasons(descriptor.rtSafety?.noteSweep, descriptor.hasMidiIn ? 1 : 0) : []),
         ...featureReasons(descriptor.lv2Features, descriptor, profile.lv2Features, options.quantum !== undefined, profile.instruments),
         ...hostingCostReasons(descriptor, options, policy),
         ...hostingLatencyReasons(descriptor, profile.latency),

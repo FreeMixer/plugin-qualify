@@ -290,6 +290,10 @@ struct facts {
   uint32_t n_rates;
   double rates[MAX_RATES];
   uint32_t declared[MAX_RATES], measured[MAX_RATES];
+  /* the latency of a plugin with no main audio input, taken from a note: the dialect to play it in (0 CLAP's, 1
+   * MIDI's, -1 no note to play), and per rate whether anything was heard */
+  int latency_note;
+  int heard[MAX_RATES];
   uint32_t process_calls, process_errors;
   int nonfinite;
   int interposer;
@@ -404,6 +408,8 @@ struct options {
   const char *id;
 };
 
+static void note_key(int clap_dialect, uint32_t time, int on, int16_t key, double velocity);
+
 static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint32_t blocks, const struct param_row *rows,
                          uint32_t n_rows, const struct interposer *ip, struct facts *f, uint32_t r) {
   const clap_plugin_audio_ports_t *ports = p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
@@ -436,8 +442,11 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
 
   /* the impulse: where does it land? The whole response up to the declared figure plus a tail is
    * kept as its per-frame magnitude (the loudest main-out channel), and the arrival is read against
-   * its own peak (ONSET_OF_PEAK); a response that never leaves SILENCE has not arrived. */
+   * its own peak (ONSET_OF_PEAK); a response that never leaves SILENCE has not arrived. A plugin with
+   * no main audio input has nowhere to put an impulse: an instrument is played a note instead, A4 at
+   * velocity 127 at frame 0, let go at the end, and its onset is read the same way. */
   if (p->reset) p->reset(p);
+  const int by_note = ins.main_port < 0 && f->latency_note >= 0;
   const uint32_t horizon = f->declared[r] + IMPULSE_TAIL;
   const uint32_t span = (horizon + frames - 1u) / frames * frames;
   float *mag = calloc(span, sizeof *mag);
@@ -446,6 +455,8 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
     ports_fill(&ins, frames, 0.0f);
     if (base == 0 && ins.main_port >= 0)
       for (uint32_t c = 0; c < ins.buf[ins.main_port].channel_count; c++) ins.chan[ins.main_port][c][0] = 1.0f;
+    if (by_note && base == 0) note_key(f->latency_note == 0, 0, 1, 69, 1.0);
+    if (by_note && base + frames >= horizon) note_key(f->latency_note == 0, 0, 0, 69, 0.0);
     if (run_block(p, &ins, &outs, frames, &steady, NULL) == CLAP_PROCESS_ERROR) {
       f->process_errors++;
       break;
@@ -474,6 +485,9 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
     free(mag);
   }
   f->measured[r] = seen_at == UINT32_MAX ? f->declared[r] + 1u : seen_at;
+  f->heard[r] = seen_at != UINT32_MAX;
+  /* the note's voice, and its release, never reach the sweep */
+  if (by_note && p->reset) p->reset(p);
 
   /* the sweep: every parameter across its range through events, noise in, counted under the interposer */
   uint32_t seed = 0x6f6d78u;
@@ -918,8 +932,9 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
   fprintf(g_out, ",\"headlessOk\":%s,\"noteInputs\":%u,\"latency\":{", f->headless_ok ? "true" : "false", f->note_inputs);
   if (f->headless_ok)
     for (uint32_t r = 0; r < f->n_rates; r++)
-      fprintf(g_out, "%s\"%.0f\":{\"declaredFrames\":%u,\"measuredFrames\":%u}", r ? "," : "", f->rates[r], f->declared[r],
-             f->measured[r]);
+      fprintf(g_out, "%s\"%.0f\":{\"declaredFrames\":%u,\"measuredFrames\":%u%s%s}", r ? "," : "", f->rates[r], f->declared[r],
+             f->measured[r], f->latency_note >= 0 && f->main_in == 0 ? ",\"from\":\"note\"" : "",
+             f->latency_note >= 0 && f->main_in == 0 && !f->heard[r] ? ",\"heard\":false" : "");
   fprintf(g_out, "},\"threadViolations\":%u,\"processErrors\":%u,\"processCalls\":%u,\"nonFinite\":%s}", g_host.thread_violations,
          f->process_errors, f->process_calls, f->nonfinite ? "true" : "false");
   if (!f->interposer) {
@@ -1402,6 +1417,10 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   struct interposer ip;
   f.interposer = interposer_find(&ip);
   if (f.interposer) ip.reset();
+  {
+    int clap_d = 0, midi_d = 0;
+    f.latency_note = note_dialect(p, &clap_d, &midi_d) ? (clap_d ? 0 : 1) : -1;
+  }
   for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++)
     measure_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, f.interposer ? &ip : NULL, &f, r);
   if (f.interposer) {
