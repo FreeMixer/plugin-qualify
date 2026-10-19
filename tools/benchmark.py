@@ -179,11 +179,11 @@ COST_PERCENTILE = 95.0
 DEFAULT_COST_TIMEOUT = float(COST_TIMEOUT_S)
 # Iterations of the empty-call loop that measures the harness's own timing floor.
 COST_CALIBRATION_ITERS = 512
-# An instrument (a MIDI input, no audio input) is timed holding notes down, since it costs nothing
-# until a voice plays: `--probe-notes` notes, struck at velocity 127 in the first block and never
-# let go, spread across a piano's keys (every MIDI key past 88). LV2 declares no voice capacity, so
-# the count is always the caller's: basis `probe`. The same rule as the CLAP prober's cost arm
-# (`native/clap-qualify.c`, `held_key`).
+# An instrument (a MIDI input, and no audio input or the lv2:InstrumentPlugin class) is timed
+# holding notes down, since it costs nothing until a voice plays: `--probe-notes` notes, struck at
+# velocity 127 in the first block and never let go, spread across a piano's keys (every MIDI key
+# past 88). LV2 declares no voice capacity, so the count is always the caller's: basis `probe`. The
+# same rule as the CLAP prober's cost arm (`native/clap-qualify.c`, `held_key`).
 NOTE_KEYS_MAX = 128
 PIANO_LOW_KEY, PIANO_HIGH_KEY, PIANO_KEYS = 21, 108, 88
 HELD_VELOCITY = 127
@@ -1418,6 +1418,12 @@ def audio_port_indices(host, plugin):
     return audio_in, audio_out
 
 
+def is_instrument_class(host, plugin):
+    """True when the plugin's class is lv2:InstrumentPlugin."""
+    cls = plugin.get_class()
+    return cls is not None and str(cls.get_uri()) == LV2 + "InstrumentPlugin"
+
+
 def midi_input_index(host, plugin):
     """The index of the plugin's first atom input that takes MIDI events, or None."""
     midi = host.world.new_uri(MIDI_EVENT)
@@ -1647,9 +1653,10 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     the gap between them is the xrun risk. Signal, not silence: a plugin that
     short-circuits on a silent input would otherwise be recorded as free.
 
-    An instrument (no audio input, a MIDI atom input) is fed no tone: it holds `probe_notes` notes
-    down ({@link held_keys}, velocity 127), struck in the first block and never let go, and the
-    record says so (`voices: {held, basis: "probe"}`). Without a count it is not timed.
+    An instrument (a MIDI atom input, and no audio input or the lv2:InstrumentPlugin class) also
+    holds `probe_notes` notes down ({@link held_keys}, velocity 127), struck in the first block and
+    never let go, and the record says so (`voices: {held, basis: "probe"}`). Without a count it is
+    not timed. A synth's audio input (synthv1 has one) hears the tone like any other.
 
     Buffer filling and every statistic are outside the timed region; the GC is off
     across the loop, so a collection cannot land inside a block and be charged to
@@ -1668,7 +1675,9 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     if plugin is None:
         return {"error": "not installed"}
     audio_in, audio_out = audio_port_indices(host, plugin)
-    midi_in = midi_input_index(host, plugin) if not audio_in else None
+    midi_in = midi_input_index(host, plugin)
+    if midi_in is not None and audio_in and not is_instrument_class(host, plugin):
+        midi_in = None  # an effect that also takes MIDI: timed on the tone alone
     if not audio_in and midi_in is None:
         return {"unmeasurable": "no-audio-in"}
     if not audio_out:
@@ -1696,14 +1705,13 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     ramp = np.arange(block, dtype=np.float32)
 
     def drive(blk):
-        """Hold the tone on every audio input for block `blk`, or strike the held notes in the first
-        block and send none after; every atom port a fresh sequence. Never timed."""
+        """Hold the tone on every audio input for block `blk`; for an instrument, strike the held notes
+        in the first block and send none after; every atom port a fresh sequence. Never timed."""
         for _i, buf, size in atoms:
             buf[0] = size
         if midi_in is not None:
             notes = struck if blk == 0 else empty
             buffers[midi_in][:len(notes)] = notes
-            return
         sig = COST_TONE_AMP * np.sin(phase * (blk * block + ramp))
         for buf in ins:
             buf[:] = sig

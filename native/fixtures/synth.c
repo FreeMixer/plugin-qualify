@@ -15,6 +15,9 @@
  *                          prints a line to stdout on init, as Six Sines does, which must never reach the
  *                          prober's lines.
  *   synth-no-voices.clap   built with -DFIXTURE_VOICE_CAPACITY=0, the safe one declaring a capacity of 0.
+ *   synth-input.clap       built with -DFIXTURE_AUDIO_INPUT, the safe one with a stereo main audio input too,
+ *                          mixed into its output: still an instrument by its feature, so it is timed with
+ *                          notes held.
  *   synth-strict.clap      built with -DFIXTURE_NO_WILDCARDS, the safe one aborting on a CLAP note event whose
  *                          key or channel is the wildcard -1, as Surge XT 1.3.4 and Six Sines 1.2.1 do: its port
  *                          reads MIDI too, so a host sends it all notes off as controller 123, never a wildcard.
@@ -40,6 +43,9 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_MIDI_ONLY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-midi"
 #define FIXTURE_NAME "synth reading MIDI"
+#elif defined FIXTURE_AUDIO_INPUT
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-input"
+#define FIXTURE_NAME "synth with an audio input"
 #elif defined FIXTURE_NO_WILDCARDS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-strict"
 #define FIXTURE_NAME "synth refusing wildcard notes"
@@ -184,18 +190,27 @@ static clap_process_status synth_process(const clap_plugin_t *p, const clap_proc
         y += sin(s->voice[v].phase) * 0.1;
         s->voice[v].phase += s->voice[v].step;
       }
-    for (uint32_t c = 0; c < out->channel_count; c++) out->data32[c][i] = (float)(y * s->gain);
+    for (uint32_t c = 0; c < out->channel_count; c++) {
+      double in = 0.0;
+      if (proc->audio_inputs_count > 0 && c < proc->audio_inputs[0].channel_count) in = proc->audio_inputs[0].data32[c][i];
+      out->data32[c][i] = (float)((y + in) * s->gain);
+    }
   }
   for (; next < n; next++) synth_event(s, proc->in_events->get(proc->in_events, next));
   return CLAP_PROCESS_CONTINUE;
 }
 
-static uint32_t ports_count(const clap_plugin_t *p, bool is_input) { (void)p; return is_input ? 0 : 1; }
+#ifdef FIXTURE_AUDIO_INPUT
+#define AUDIO_INPUTS 1u
+#else
+#define AUDIO_INPUTS 0u
+#endif
+static uint32_t ports_count(const clap_plugin_t *p, bool is_input) { (void)p; return is_input ? AUDIO_INPUTS : 1; }
 static bool ports_get(const clap_plugin_t *p, uint32_t index, bool is_input, clap_audio_port_info_t *info) {
   (void)p;
-  if (index != 0 || is_input) return false;
+  if (index != 0 || (is_input && AUDIO_INPUTS == 0)) return false;
   memset(info, 0, sizeof *info);
-  strcpy(info->name, "out");
+  strcpy(info->name, is_input ? "in" : "out");
   info->flags = CLAP_AUDIO_PORT_IS_MAIN;
   info->channel_count = 2;
   info->port_type = CLAP_PORT_STEREO;

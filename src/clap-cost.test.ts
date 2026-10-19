@@ -23,8 +23,9 @@ const SYNTH = join(FIXTURES, "synth.clap");
 const SYNTH_VOICES = join(FIXTURES, "synth-voices.clap");
 const SYNTH_NO_VOICES = join(FIXTURES, "synth-no-voices.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
+const SYNTH_INPUT = join(FIXTURES, "synth-input.clap");
 const SAFE = join(FIXTURES, "rt-safe.clap");
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SYNTH, SYNTH_VOICES, SYNTH_NO_VOICES, SYNTH_MIDI, SAFE].every((p) => existsSync(p));
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SYNTH, SYNTH_VOICES, SYNTH_NO_VOICES, SYNTH_MIDI, SYNTH_INPUT, SAFE].every((p) => existsSync(p));
 
 function live(name: string, body: () => void): void {
   it(name, (ctx) => {
@@ -80,6 +81,13 @@ describe("clap-qualify, live — an instrument's cost is taken with notes held",
     const [one] = qualifyClap(SYNTH_MIDI, undefined, { rates: [RATE], probeNotes: 1 });
     const [sixteen] = qualifyClap(SYNTH_MIDI, undefined, { rates: [RATE], probeNotes: 16 });
     expect(figure(sixteen!.cost?.perRate[String(RATE)]).nsPerSampleMedian).toBeGreaterThan(3 * figure(one!.cost?.perRate[String(RATE)]).nsPerSampleMedian);
+  });
+
+  live("an instrument with an audio input is still an instrument: it holds notes, its input hearing the noise", () => {
+    const [l] = qualifyClap(SYNTH_INPUT, undefined, { rates: [RATE], probeNotes: 16 });
+    expect(l!.clap.mainInputChannels).toBe(2);
+    expect(l!.cost?.stimulus).toBe("notes-held");
+    expect(figure(l!.cost?.perRate[String(RATE)]).voices).toEqual({ held: 16, basis: "probe" });
   });
 
   live("an effect is timed under the sweep's noise and holds no note", () => {
