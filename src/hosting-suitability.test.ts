@@ -21,6 +21,7 @@ import {
   assertHostingOverride,
   attributeCrash,
   classifyPluginHosting,
+  clapLatencyReasons,
   contributedHostingRating,
   isClapPlugin,
   isClapUri,
@@ -33,7 +34,7 @@ import {
   type PluginRtSafetyMeasurement,
   type PluginStabilityMeasurement,
 } from "./hosting-suitability.js";
-import type { SoakAtRate, SoakReading } from "./measurement/format.js";
+import type { NoteSweepMeasurement, SoakAtRate, SoakReading } from "./measurement/format.js";
 import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { HOST_BUDGETS } from "./qualify-declarations.js";
 
@@ -107,6 +108,10 @@ function cleanSoak(perRate: Record<string, SoakAtRate> = {}): SoakReading {
 }
 
 /** Measurements that clear every dimension the catalog must grow — RAW, as the sweep lands them. */
+/** An instrument's note sweep, played under the interposer and clean. */
+const PLAYED = { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 6144, interposer: true,
+  allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 } as const;
+
 function cleanMeasurements(over: Blocks = {}): Required<Pick<PluginDescriptor, "stability" | "rtSafety" | "lv2Features">> {
   return {
     stability: {
@@ -776,13 +781,24 @@ describe("host profiles — the host is a declared input, the measurements are n
   });
 
   it("a synth (no audio input, MIDI in) is refused as a console insert and earns jalv and mod-host", () => {
-    const synth = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true });
+    const synth = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true }, { rtSafety: { noteSweep: PLAYED } });
     expect(classify(synth).deciding?.code).toBe(HOSTING_CODE.topologyNoAudioInput);
     for (const v of [onJalv(synth), onModHost(synth)]) {
       expect(v.rating).toBe("suitable");
       expect(codes(v)).toContain(HOSTING_CODE.topologyInstrument);
       expect(codes(v)).not.toContain(HOSTING_CODE.featuresMidiIn);
     }
+  });
+
+  it("an instrument host reads the note sweep: unplayed is unknown, an allocation while played unsuitable", () => {
+    const unplayed = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true });
+    expect(onJalv(unplayed)).toMatchObject({ rating: "unknown", deciding: { code: HOSTING_CODE.rtSafetyNotesUnmeasured } });
+    const dirty = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true }, { rtSafety: { noteSweep: { ...PLAYED, allocationsInRun: 4608 } } });
+    expect(onJalv(dirty)).toMatchObject({ rating: "unsuitable", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
+    // the console plays no note into an insert: it reads no note sweep, so an effect with a MIDI input keeps its verdict
+    const midiEffect = measured({ hasMidiIn: true });
+    expect(codes(classify(midiEffect))).not.toContain(HOSTING_CODE.rtSafetyNotesUnmeasured);
+    expect(classify(midiEffect).deciding?.code).toBe(HOSTING_CODE.featuresMidiIn);
   });
 
   it("no audio input and no MIDI input is nothing any host can feed", () => {
@@ -886,8 +902,14 @@ describe("host profiles — the CLAP arm", () => {
     expect(v.deciding?.code).toBe(HOSTING_CODE.clapExtensionsNotCovered);
   });
 
+  const clapSynth = (over: Partial<PluginClapMeasurement> = {}, noteSweep: NoteSweepMeasurement | undefined = { ...PLAYED, dialect: "clap" }) => {
+    const d = clapPlugin({ mainInputChannels: 0, noteInputs: 1, features: ["instrument"],
+      latency: { [String(RATE)]: { declaredFrames: 0, measuredFrames: 1, from: "note" } }, ...over });
+    return noteSweep === undefined ? d : { ...d, rtSafety: { ...d.rtSafety, noteSweep } };
+  };
+
   it("a CLAP instrument earns an instrument host and not the console", () => {
-    const synth = clapPlugin({ mainInputChannels: 0, noteInputs: 1, features: ["instrument"] });
+    const synth = clapSynth();
     expect(classify(synth).rating).toBe("unsuitable");
     const host = { ...OPENMIXER_CONSOLE_PROFILE, id: "t", instruments: true, isolation: "per-process" as const };
     const v = classify(synth, { profile: host });
@@ -896,13 +918,35 @@ describe("host profiles — the CLAP arm", () => {
   });
 
   it("a CLAP instrument is suitable under omx-clap-host and unsuitable under openmixer-console", () => {
-    const synth = clapPlugin({ mainInputChannels: 0, noteInputs: 1, features: ["instrument"] });
+    const synth = clapSynth();
     const asHost = classify(synth, { profile: OMX_CLAP_HOST_PROFILE, quantum: OMX_CLAP_HOST_PROFILE.cost.quantum });
     expect(asHost.rating).toBe("suitable");
     expect(asHost.reasons.map((r) => r.code)).toContain(HOSTING_CODE.topologyInstrument);
     const asConsole = classify(synth, { profile: OPENMIXER_CONSOLE_PROFILE });
     expect(asConsole.rating).toBe("unsuitable");
     expect(asConsole.reasons.map((r) => r.code)).toContain(HOSTING_CODE.clapNoteInput);
+  });
+});
+
+describe("an instrument, judged as an instrument host plays it (#79)", () => {
+  const facts = (latency: PluginClapMeasurement["latency"]): PluginClapMeasurement => ({
+    mainInputChannels: 0, mainOutputChannels: 2, sidechainInputs: 0, features: ["instrument"], headlessOk: true, noteInputs: 1,
+    latency, threadViolations: 0, processErrors: 0, processCalls: 512,
+  });
+  const at = (measuredFrames: number, declaredFrames = 0, extra: object = { from: "note" }) => ({ [String(RATE)]: { declaredFrames, measuredFrames, ...extra } });
+
+  it("a note's onset at or after the declared latency is resolved: an attack sounds late, and that is no latency", () => {
+    for (const onset of [0, 1, 48]) expect(clapLatencyReasons(facts(at(onset)))[0]?.code).toBe(HOSTING_CODE.latencyResolved);
+    expect(clapLatencyReasons(facts(at(64, 64)))[0]?.code).toBe(HOSTING_CODE.latencyResolved);
+  });
+
+  it("an onset before the declared latency is the lie compensation would act on; a note never heard is unmeasured", () => {
+    expect(clapLatencyReasons(facts(at(10, 64)))[0]).toMatchObject({ rating: "unsuitable", code: HOSTING_CODE.clapLatencyMismatch });
+    expect(clapLatencyReasons(facts(at(1, 0, { from: "note", heard: false })))[0]).toMatchObject({ rating: "unknown", code: HOSTING_CODE.latencyUnmeasured });
+  });
+
+  it("an impulse reading keeps its exact rule", () => {
+    expect(clapLatencyReasons(facts(at(1, 0, {})))[0]?.code).toBe(HOSTING_CODE.clapLatencyMismatch);
   });
 });
 
