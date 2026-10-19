@@ -299,7 +299,7 @@ describe("--host-profile — one verdict per plugin per profile (§3a, §5)", ()
   it("the interchange document carries the profiles and the verdicts with their host id, and reads back", () => {
     const vs = qualifyPlugins([good, synth], { profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], ...opts });
     const doc = judgedDocument(RUN, [], [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], vs);
-    expect(doc.formatVersion).toBe("1.4");
+    expect(doc.formatVersion).toBe("1.5");
     expect(doc.hostProfiles?.map((p) => p.id)).toEqual(["openmixer-console", "jalv"]);
     expect(doc.verdicts).toHaveLength(4);
     expect(doc.verdicts?.[3]).toEqual({ uri: "urn:t:synth", host: "jalv", rating: "suitable", qualified: true });

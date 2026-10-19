@@ -29,7 +29,7 @@ import type {
   SoakReading,
   StabilityMeasurement,
 } from "./format.js";
-import { readIntegrity, readLifecycle, readSoakAtRate, readThreads } from "./format.js";
+import { readIntegrity, readLifecycle, readNoteSweep, readSoakAtRate, readThreads } from "./format.js";
 import { booleanValue, finiteNumber, isRecord, mapArray, nonEmptyString, optional, positiveNumber } from "./guards.js";
 
 /** The sweep's three passes, each a list of parsed JSONL lines. Only `measurements` is required. */
@@ -106,6 +106,7 @@ function rtSafetyOf(row: Record<string, unknown>): RtSafetyMeasurement {
     ...optional("locksInRun", finiteNumber(rt.locksInRun)),
     ...optional("syscallsInRun", finiteNumber(rt.syscallsInRun)),
     ...optional("variable", booleanValue(rt.variable)),
+    ...optional("noteSweep", readNoteSweep(rt.noteSweep)),
   };
 }
 

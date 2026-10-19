@@ -77,8 +77,9 @@ export const MEASUREMENT_FORMAT_MAJOR = 1;
  *  `1.1` added the three hosting dimensions — {@link StabilityMeasurement},
  *  {@link RtSafetyMeasurement}, {@link FeaturesMeasurement} — which a 1.0 reader skips.
  *  `1.2` added the verdicts per host profile; `1.3` the {@link IntegrityMeasurement} block; `1.4` the notes
- *  an instrument's cost was measured with ({@link CostAtRate.voices}). */
-export const MEASUREMENT_FORMAT_MINOR = 4;
+ *  an instrument's cost was measured with ({@link CostAtRate.voices}); `1.5` the note sweep an instrument's
+ *  `run()` was counted under ({@link RtSafetyMeasurement.noteSweep}). */
+export const MEASUREMENT_FORMAT_MINOR = 5;
 
 /** The version string this build writes, e.g. `"1.0"`. */
 export const MEASUREMENT_FORMAT_VERSION = `${MEASUREMENT_FORMAT_MAJOR}.${MEASUREMENT_FORMAT_MINOR}`;
@@ -386,6 +387,27 @@ export interface StabilityMeasurement {
 }
 
 /**
+ * 1.5: an instrument played through its MIDI input while the interposer counted, apart from the control
+ * sweep — a chord, bend and a controller, pressure, the chord let go, a burst of note ons and their offs,
+ * all notes off. `applicable: false` is a plugin with no MIDI input; the counts are present only when
+ * the interposer was loaded.
+ */
+export interface NoteSweepMeasurement {
+  readonly applicable: boolean;
+  readonly dialect?: "clap" | "midi";
+  readonly blocks?: number;
+  readonly blockFrames?: number;
+  /** The note, expression and MIDI events the sweep sent. */
+  readonly noteEvents?: number;
+  readonly processErrors?: number;
+  readonly nonFinite?: boolean;
+  readonly interposer?: boolean;
+  readonly allocationsInRun?: number;
+  readonly locksInRun?: number;
+  readonly syscallsInRun?: number;
+}
+
+/**
  * What an interposer counted INSIDE `run()`. `rate` and `blockFrames` are the pair it ran at —
  * a count is a property of the code paths the run took there. Readable when all three counts
  * are present.
@@ -407,6 +429,8 @@ export interface RtSafetyMeasurement {
   readonly syscallsInRun?: number;
   /** Repeats disagreed. */
   readonly variable?: boolean;
+  /** 1.5: the same counts taken while the plugin was played through its MIDI input. */
+  readonly noteSweep?: NoteSweepMeasurement;
   readonly unmeasuredReason?: string;
   readonly unmeasuredDetail?: string;
 }
@@ -969,7 +993,34 @@ function readRtSafety(value: unknown): RtSafetyMeasurement | undefined {
     ...optional("locksInRun", finiteNumber(value.locksInRun)),
     ...optional("syscallsInRun", finiteNumber(value.syscallsInRun)),
     ...optional("variable", booleanValue(value.variable)),
+    ...optional("noteSweep", readNoteSweep(value.noteSweep)),
     ...reasonOf(value),
+  };
+}
+
+/** A note sweep, or `undefined` unless it says whether it was applicable; a count it cannot vouch for is left out. */
+export function readNoteSweep(value: unknown): NoteSweepMeasurement | undefined {
+  if (!isRecord(value)) return undefined;
+  const applicable = booleanValue(value.applicable);
+  if (applicable === undefined) return undefined;
+  if (!applicable) return { applicable };
+  const dialect = value.dialect === "clap" || value.dialect === "midi" ? value.dialect : undefined;
+  const counted = (v: unknown) => {
+    const n = finiteNumber(v);
+    return n !== undefined && Number.isInteger(n) && n >= 0 ? n : undefined;
+  };
+  return {
+    applicable,
+    ...optional("dialect", dialect),
+    ...optional("blocks", counted(value.blocks)),
+    ...optional("blockFrames", counted(value.blockFrames)),
+    ...optional("noteEvents", counted(value.noteEvents)),
+    ...optional("processErrors", counted(value.processErrors)),
+    ...optional("nonFinite", booleanValue(value.nonFinite)),
+    ...optional("interposer", booleanValue(value.interposer)),
+    ...optional("allocationsInRun", counted(value.allocationsInRun)),
+    ...optional("locksInRun", counted(value.locksInRun)),
+    ...optional("syscallsInRun", counted(value.syscallsInRun)),
   };
 }
 
