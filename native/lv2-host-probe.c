@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include <lilv/lilv.h>
+#include <omxdsp/omx_units.h> /* omx_lin_to_db_d */
 #include <lv2/core/lv2.h>
 #include <lv2/worker/worker.h>
 
@@ -85,7 +86,8 @@ static double level_db_at(const float *x, uint32_t from, uint32_t n, double hz) 
     im += (double)x[from + i] * sin(w);
   }
   const double mag = 2.0 * sqrt(re * re + im * im) / (double)n;
-  return 20.0 * log10(mag < 1e-12 ? 1e-12 : mag);
+  /* a NaN magnitude stays NaN: the floor would read it as silence, and silence passes 'quieter' */
+  return isnan(mag) ? mag : omx_lin_to_db_d(mag, 1e-12);
 }
 
 /* ---- the host's worker ------------------------------------------------------------------
@@ -324,6 +326,7 @@ int main(int argc, char **argv) {
          (double)from / RATE, (double)end / RATE, HOT_HARMONIC, e, b, e - b);
   printf("  steady neighbour H3: %.2f dB\n", h3e - h3b);
 
+  claim(isfinite(e) && isfinite(b) && isfinite(h3e) && isfinite(h3b), "every level measured is a number (no NaN in the window)");
   claim(e - b < -1.0, "the engaged plugin is measurably quieter at the resonance");
   claim(fabs(h3e - h3b) < 1.5, "and leaves the steady neighbour alone");
   claim(memcmp(g_in, g_bypassed, FRAMES * sizeof(float)) == 0,

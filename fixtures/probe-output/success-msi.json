@@ -1,0 +1,363 @@
+{
+  "format": "plugin-hostd.probe-output",
+  "formatVersion": "1.0",
+  "run": {
+    "id": "msi-20261017T221500Z-3569027",
+    "startedAt": "2026-10-17T22:15:00+02:00",
+    "elapsedMs": 184220,
+    "complete": true,
+    "outcome": "probe.ok",
+    "reason": "reference",
+    "protocol": {
+      "name": "plugin-hostd.probe-protocol",
+      "version": 1
+    },
+    "tools": {
+      "runner": "plugin-hostd-probe 0.1.0",
+      "child": "plugin-hostd-probe-clap 0.1.0",
+      "clapCore": "0.9.0",
+      "interposer": "rt-interpose 1"
+    },
+    "via": "runner"
+  },
+  "plugin": {
+    "format": "clap",
+    "id": "org.example.plate",
+    "name": "Plate",
+    "vendor": "Example",
+    "version": "1.4.2",
+    "ownerPackage": "example-plate-1.4.2-1.fc44.x86_64"
+  },
+  "binary": {
+    "path": "/usr/lib64/clap/example-plate.clap",
+    "sha256": "356902794a4eec2122989e072271ef995968131145db918d9a3084ce582f244b",
+    "files": [
+      {
+        "path": "example-plate.clap",
+        "sha256": "356902794a4eec2122989e072271ef995968131145db918d9a3084ce582f244b"
+      }
+    ],
+    "layout": {
+      "scheme": "omx-layout/1",
+      "sha256": "0a3e01399262321514e05af0575ebb0b207a35567ac262a060fde655ee069805"
+    }
+  },
+  "descriptor": {
+    "path": "descriptors/2/clap/org.example.plate@1.4.2-356902794a4e.json",
+    "sha256": "cc312bdd5a9aa62796ebcb5a648c354c5ee45a6a99892425495ccb58a31bc44e",
+    "bytes": 9412
+  },
+  "machine": {
+    "class": {
+      "arch": "x86_64",
+      "family": "intel",
+      "coreBand": "17-32",
+      "clockBand": "4.5GHz+",
+      "preemptRt": false,
+      "cstatesLimited": true
+    },
+    "profile": {
+      "governor": "performance",
+      "turbo": true,
+      "smt": true,
+      "preempt": "PREEMPT_DYNAMIC",
+      "cpuidle": [
+        {
+          "cpu": 22,
+          "state": "POLL",
+          "latencyUs": 0,
+          "disabled": false,
+          "usageDelta": 118
+        },
+        {
+          "cpu": 22,
+          "state": "C1_ACPI",
+          "latencyUs": 1,
+          "disabled": false,
+          "usageDelta": 40210
+        },
+        {
+          "cpu": 22,
+          "state": "C2_ACPI",
+          "latencyUs": 127,
+          "disabled": true,
+          "usageDelta": 0
+        },
+        {
+          "cpu": 22,
+          "state": "C3_ACPI",
+          "latencyUs": 1048,
+          "disabled": true,
+          "usageDelta": 0
+        }
+      ],
+      "meetsProtocol": true,
+      "declaredName": "omx-live-rig"
+    },
+    "pinnedCpus": "22",
+    "reference": {
+      "rig": "msi",
+      "image": "omx-ref-2026-10"
+    }
+  },
+  "offer": {
+    "id": "omx-clap-host",
+    "clapExtensions": [
+      "clap.audio-ports",
+      "clap.latency",
+      "clap.log",
+      "clap.params",
+      "clap.state",
+      "clap.thread-check",
+      "clap.preset-load/2",
+      "clap.track-info/1",
+      "clap.remote-controls/2"
+    ],
+    "realtime": "none"
+  },
+  "limits": {
+    "set": "default",
+    "applied": [
+      {
+        "limit": "wall-clock",
+        "value": 600,
+        "unit": "s",
+        "by": "supervisor"
+      },
+      {
+        "limit": "cpu-time",
+        "value": 540,
+        "unit": "s",
+        "by": "rlimit"
+      },
+      {
+        "limit": "memory",
+        "value": 2147483648,
+        "unit": "bytes",
+        "by": "cgroup"
+      },
+      {
+        "limit": "tasks",
+        "value": 64,
+        "unit": "count",
+        "by": "cgroup"
+      },
+      {
+        "limit": "files",
+        "value": 256,
+        "unit": "count",
+        "by": "rlimit"
+      },
+      {
+        "limit": "file-size",
+        "value": 67108864,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "core-dump",
+        "value": 0,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "rt-priority",
+        "value": 0,
+        "by": "rlimit"
+      },
+      {
+        "limit": "cpus",
+        "value": "22",
+        "by": "affinity"
+      },
+      {
+        "limit": "no-new-privs",
+        "by": "prctl"
+      },
+      {
+        "limit": "network",
+        "value": "none",
+        "by": "netns"
+      }
+    ],
+    "unavailable": []
+  },
+  "steps": [
+    {
+      "step": "hash",
+      "outcome": "probe.ok",
+      "elapsedMs": 4
+    },
+    {
+      "step": "instantiate",
+      "outcome": "probe.ok",
+      "elapsedMs": 31
+    },
+    {
+      "step": "lifecycle",
+      "outcome": "probe.ok",
+      "elapsedMs": 2210
+    },
+    {
+      "step": "latency",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 310
+    },
+    {
+      "step": "cost",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 30020
+    },
+    {
+      "step": "rt-safety",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 4100
+    },
+    {
+      "step": "latency",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 305
+    },
+    {
+      "step": "cost",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 30011
+    },
+    {
+      "step": "rt-safety",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 4080
+    },
+    {
+      "step": "note-sweep",
+      "outcome": "probe.not-attempted",
+      "elapsedMs": 0,
+      "detail": "no note input"
+    }
+  ],
+  "grid": [
+    {
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 0,
+        "method": "impulse-onset"
+      },
+      "cost": {
+        "unit": "ns-per-sample",
+        "median": 41.2,
+        "percentile": {
+          "p": 95,
+          "value": 47.9
+        },
+        "min": 39.8,
+        "max": 112.4,
+        "iqr": 3.1,
+        "blocks": 11250,
+        "warmupBlocks": 64,
+        "warmupMedian": 58.0,
+        "timingFloorNsPerBlock": 180
+      },
+      "rtSafety": {
+        "interposer": true,
+        "swept": true,
+        "sweepApplicable": true,
+        "blocks": 512,
+        "allocations": 0,
+        "locks": 0,
+        "syscalls": 0,
+        "threadViolations": 0,
+        "processErrors": 0,
+        "events": []
+      }
+    },
+    {
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 0,
+        "method": "impulse-onset"
+      },
+      "cost": {
+        "unit": "ns-per-sample",
+        "median": 40.7,
+        "percentile": {
+          "p": 95,
+          "value": 46.3
+        },
+        "min": 39.1,
+        "max": 98.0,
+        "iqr": 2.8,
+        "blocks": 22500,
+        "warmupBlocks": 64,
+        "timingFloorNsPerBlock": 180,
+        "samples": {
+          "name": "cost-96000-128",
+          "path": "probes/org.example.plate@1.4.2-356902794a4e.cost-96000-128.bin",
+          "sha256": "5f649130dafd22f1edc70441f9455415d0856f0f7d26cf7274463b82ac2c5813",
+          "bytes": 180000
+        }
+      },
+      "rtSafety": {
+        "interposer": true,
+        "swept": true,
+        "sweepApplicable": true,
+        "blocks": 512,
+        "allocations": 0,
+        "locks": 0,
+        "syscalls": 0,
+        "threadViolations": 0,
+        "processErrors": 0,
+        "events": []
+      }
+    }
+  ],
+  "behaviour": {
+    "lifecycle": {
+      "cycles": 30,
+      "instantiated": 30,
+      "failed": 0
+    },
+    "threads": {
+      "before": 2,
+      "afterFirstInstantiate": 2,
+      "afterAllFreed": 2
+    },
+    "memory": {
+      "rssStartKb": 9120,
+      "rssMaxKb": 14988
+    },
+    "features": {
+      "extensionsAsked": [
+        "clap.audio-ports",
+        "clap.params",
+        "clap.state",
+        "clap.latency"
+      ]
+    }
+  },
+  "logs": [
+    {
+      "name": "stderr",
+      "path": "probes/org.example.plate@1.4.2-356902794a4e.stderr.log",
+      "sha256": "c46928bc87de23b9a8bd235aa1fe67ccb1542c8389ad3f02bf4ab5cff506e98f",
+      "bytes": 212
+    }
+  ]
+}

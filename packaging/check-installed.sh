@@ -31,7 +31,12 @@ rc=${PIPESTATUS[0]}
 set -e
 [ "$rc" -eq 0 ] || fail "plugin-qualify $safe exited $rc, not 0"
 grep -Eq '^urn:clap:\S+ +suitable ' "$out/safe.txt" || fail "$safe is not suitable"
-ls "$out"/*.rt-safety.json >/dev/null || fail "no RT-safety document was written"
+# --out holds the qualification record and, beside it, the byte copy of the probe output it judged
+records=("$out"/*.qualification.json)
+[ -f "${records[0]}" ] || fail "no qualification record was written"
+for r in "${records[@]}"; do
+  [ -f "${r%.qualification.json}.probe.json" ] || fail "$r has no probe output beside it"
+done
 
 set +e
 bare plugin-qualify "$unsafe" | tee "$out/unsafe.txt"
