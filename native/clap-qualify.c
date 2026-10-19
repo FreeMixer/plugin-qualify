@@ -525,14 +525,17 @@ static void note_midi(uint32_t time, uint8_t status, uint8_t a, uint8_t b) {
   e->midi.data[2] = b;
 }
 
-/* a note on (velocity above 0) or off, key -1 for every key, in the dialect */
+/* a note on (velocity above 0) or off, key -1 for every key, in the dialect. Always on channel 0: every key of
+ * channel 0 is what the host sends for all notes off (omx-clap-core maps controller 123 to a note off with key -1
+ * on the controller's channel), never the channel wildcard, which a plugin indexing a 16-channel table reads out of
+ * bounds (Six Sines 1.2.1). */
 static void note_key(int clap_dialect, uint32_t time, int on, int16_t key, double velocity) {
   if (clap_dialect) {
     union any_event *e = note_event(time, on ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF, sizeof(clap_event_note_t));
     if (!e) return;
     e->note.note_id = -1;
     e->note.port_index = 0;
-    e->note.channel = key < 0 ? -1 : 0;
+    e->note.channel = 0;
     e->note.key = key;
     e->note.velocity = velocity;
   } else if (key < 0) {
@@ -587,7 +590,10 @@ static void note_block(uint32_t b, uint32_t frames, int clap_dialect, int midi_t
     break;
   case 6:
     note_key(clap_dialect, 0, 1, 72, 1.0);
-    note_key(clap_dialect, frames / 2u, 0, -1, 0.0);
+    /* all notes off as the host sends it (omx-clap-core's note input): to a port that reads MIDI too, controller
+     * 123 as it came; to one reading CLAP's dialect alone, a note off on every key of the channel */
+    if (clap_dialect && midi_too) note_midi(frames / 2u, 0xB0, 123, 0);
+    else note_key(clap_dialect, frames / 2u, 0, -1, 0.0);
     break;
   default:
     break; /* the release tails */

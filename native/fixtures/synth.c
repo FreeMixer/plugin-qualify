@@ -13,6 +13,9 @@
  *   synth-voices.clap      built with -DFIXTURE_VOICE_CAPACITY=8, the safe one declaring through voice-info
  *                          that 8 voices sound at most: the cost arm holds 8 notes, basis declared.
  *   synth-no-voices.clap   built with -DFIXTURE_VOICE_CAPACITY=0, the safe one declaring a capacity of 0.
+ *   synth-strict.clap      built with -DFIXTURE_NO_WILDCARDS, the safe one aborting on a CLAP note event whose
+ *                          key or channel is the wildcard -1, as Surge XT 1.3.4 and Six Sines 1.2.1 do: its port
+ *                          reads MIDI too, so a host sends it all notes off as controller 123, never a wildcard.
  *
  * Each voice costs a sine per sample, so the cost grows with the notes held.
  *
@@ -33,6 +36,9 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_MIDI_ONLY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-midi"
 #define FIXTURE_NAME "synth reading MIDI"
+#elif defined FIXTURE_NO_WILDCARDS
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-strict"
+#define FIXTURE_NAME "synth refusing wildcard notes"
 #elif defined FIXTURE_VOICE_CAPACITY && FIXTURE_VOICE_CAPACITY == 0
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-no-voices"
 #define FIXTURE_NAME "synth declaring no voices"
@@ -117,9 +123,15 @@ static void synth_event(struct synth *s, const clap_event_header_t *e) {
   }
 #ifndef FIXTURE_MIDI_ONLY
   case CLAP_EVENT_NOTE_ON:
+#ifdef FIXTURE_NO_WILDCARDS
+    if (((const clap_event_note_t *)e)->key < 0 || ((const clap_event_note_t *)e)->channel < 0) abort();
+#endif
     note_on(s, ((const clap_event_note_t *)e)->key);
     break;
   case CLAP_EVENT_NOTE_OFF:
+#ifdef FIXTURE_NO_WILDCARDS
+    if (((const clap_event_note_t *)e)->key < 0 || ((const clap_event_note_t *)e)->channel < 0) abort();
+#endif
     note_off(s, ((const clap_event_note_t *)e)->key);
     break;
 #endif
