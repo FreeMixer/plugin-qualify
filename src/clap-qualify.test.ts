@@ -57,9 +57,10 @@ const CONTROLS = join(FIXTURES, "controls.clap");
 const SYNTH = join(FIXTURES, "synth.clap");
 const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
+const SYNTH_STRICT = join(FIXTURES, "synth-strict.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI].every((p) => existsSync(p));
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI, SYNTH_STRICT].every((p) => existsSync(p));
 
 const scratch = mkdtempSync(join(tmpdir(), "clap-qualify-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -317,6 +318,13 @@ describe("clap-qualify, live — an instrument is played: the note sweep", () =>
   live("a synth that reads only MIDI is played in MIDI's dialect", () => {
     const [l] = qualifyClap(SYNTH_MIDI, undefined, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.noteSweep).toMatchObject({ applicable: true, dialect: "midi", allocationsInRun: 0 });
+    expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
+  });
+
+  live("all notes off reaches a port that reads MIDI too as controller 123, as the host sends it, never as a wildcard", () => {
+    // the fixture aborts on a CLAP note whose key or channel is -1, as Surge XT and Six Sines do
+    const [l] = qualifyClap(SYNTH_STRICT, undefined, { rates: QUALIFY_RATES });
+    expect(l!.noteSweep).toMatchObject({ applicable: true, dialect: "clap", allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
     expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
   });
 
