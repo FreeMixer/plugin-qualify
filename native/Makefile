@@ -8,7 +8,7 @@
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices}.clap,
 #                            build/fixtures/fail-alloc.so,
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness}.lv2
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth}.lv2
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
@@ -92,7 +92,8 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap \
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
-	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so
+	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
+	$(BUILD)/fixtures/lv2/synth.lv2/synth.so
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -182,6 +183,12 @@ $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-uns
 	mkdir -p $(@D)
 	cp fixtures/rt-unsafe.lv2/manifest.ttl fixtures/rt-unsafe.lv2/gain.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# the instrument: MIDI in through an atom sequence, a stereo out, a sine per held note
+$(BUILD)/fixtures/lv2/synth.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
+	mkdir -p $(@D)
+	cp fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 
 # five plugins, each demanding one thing of the measuring host: options, a worker, patch:Set, a
 # bounded sweep, a stdout of its own
