@@ -23,10 +23,11 @@
  * `process()` is only seen here.
  *
  * Then the cost (the cost arm): at every rate the plugin is run again with every parameter swept,
- * and each `process()` is timed. An effect is fed the sweep's noise. An instrument is fed no audio
- * and holds notes down, at velocity 127, spread across the keyboard, for the whole run: as many as
- * the voice capacity it declares through `voice-info` after `activate` at that rate (basis
- * `declared`), or, when it declares none, the count `--probe-notes` gives (basis `probe`).
+ * the sweep's noise on every audio input, and each `process()` is timed. An instrument (a note
+ * input, and no main audio input or the instrument feature) also holds notes down, at velocity
+ * 127, spread across the keyboard, for the whole run: as many as the voice capacity it declares
+ * through `voice-info` after `activate` at that rate (basis `declared`), or, when it declares
+ * none, the count `--probe-notes` gives (basis `probe`).
  * `--hold` holds that count whatever the plugin declares (basis `probe`). An instrument with no
  * count to hold, or one declaring a capacity of 0, is not timed and the line says why. The figure
  * is nanoseconds per sample, a warm-up head dropped, its median and 95th percentile; the run is
@@ -693,8 +694,8 @@ static int64_t now_ns(void) {
 
 /*
  * One rate of the cost arm. Every parameter is moved across its range through events, a block's worth
- * at a time, as the RT sweep moves them; an effect hears the sweep's noise, an instrument silence and
- * the notes it holds, all struck in the first block and never let go. Each process() is timed alone;
+ * at a time, as the RT sweep moves them, and every audio input hears the sweep's noise; an instrument
+ * also holds its notes, all struck in the first block and never let go. Each process() is timed alone;
  * the warm-up head is dropped and the rest folded into nanoseconds per sample.
  */
 static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint32_t blocks, const struct param_row *rows,
@@ -756,8 +757,7 @@ static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint
       e->param.key = -1;
       e->param.value = sweep_value(&rows[row], frac);
     }
-    if (!f->cost_notes)
-      for (uint32_t k = 0; k < ins.count; k++)
+    for (uint32_t k = 0; k < ins.count; k++)
         for (uint32_t ch = 0; ch < ins.buf[k].channel_count; ch++)
           for (uint32_t i = 0; i < frames; i++) {
             seed = seed * 1664525u + 1013904223u;
@@ -1419,10 +1419,15 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
       f.n_note_rt_events = ip.events(f.note_rt_events, OMX_RT_EV_MAX);
     }
   }
-  /* the cost arm: an instrument the sweep could play holds notes; one it could not play is not timed */
-  f.cost_notes = f.note_dialect != NULL;
+  /* the cost arm: an instrument (a note input, and no main audio input or the instrument feature) holds notes, one the
+   * sweep could not play is not timed; anything else, an effect with a note input too, is timed on noise alone */
+  int instrument_feature = 0;
+  for (const char *const *ft = d->features; ft && *ft; ft++)
+    if (!strcmp(*ft, CLAP_PLUGIN_FEATURE_INSTRUMENT)) instrument_feature = 1;
+  const int instrument = f.note_inputs > 0 && (f.main_in == 0 || instrument_feature);
+  f.cost_notes = instrument && f.note_dialect != NULL;
   for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++) {
-    if (f.note_inputs > 0 && !f.note_dialect) {
+    if (instrument && !f.note_dialect) {
       f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";
       continue;
     }

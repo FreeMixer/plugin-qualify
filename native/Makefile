@@ -6,7 +6,7 @@
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
-#                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-strict}.clap,
+#                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/fail-alloc.so,
 #                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth}.lv2
 #   build/lv2_measure_options_test    the measurer's feature options oracle
@@ -89,7 +89,8 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
-	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-strict.clap \
+	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
+	$(BUILD)/fixtures/synth-strict.clap \
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
@@ -166,6 +167,9 @@ $(BUILD)/fixtures/synth-voices.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_VOICE_CAPACITY=8 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 $(BUILD)/fixtures/synth-no-voices.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_VOICE_CAPACITY=0 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+# the same with an audio input
+$(BUILD)/fixtures/synth-input.clap: fixtures/synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_AUDIO_INPUT -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 # the same aborting on a wildcard key or channel, as two third-party synths do
 $(BUILD)/fixtures/synth-strict.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_NO_WILDCARDS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
