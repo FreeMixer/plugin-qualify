@@ -19,10 +19,13 @@ import {
   contributedHostingRating,
   noteSweepReasons,
   rtSafetyReasons,
+  type ClapLatencyAtRate,
   type HostingReason,
   type PluginClapMeasurement,
   type PluginNoteSweepMeasurement,
   type PluginRtSafetyMeasurement,
+  type PluginStabilityMeasurement,
+  type QualifiedPlugin,
 } from "./hosting-suitability.js";
 import {
   OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
@@ -157,10 +160,17 @@ function readClap(v: unknown): ClapProbedFacts {
   if (!isRecord(v)) return bad("no clap facts");
   const latencyIn = v["latency"];
   if (!isRecord(latencyIn)) return bad("clap has no latency map");
-  const latency: Record<string, { declaredFrames: number; measuredFrames: number }> = {};
+  const latency: Record<string, ClapLatencyAtRate> = {};
   for (const [rate, at] of Object.entries(latencyIn)) {
     if (!/^[1-9]\d*$/.test(rate) || !isRecord(at)) return bad(`clap latency at ${rate}`);
-    latency[rate] = { declaredFrames: count(at, "declaredFrames", `latency ${rate}`), measuredFrames: count(at, "measuredFrames", `latency ${rate}`) };
+    if (at["from"] !== undefined && at["from"] !== "note") return bad(`clap latency at ${rate} from ${JSON.stringify(at["from"])}`);
+    if (at["heard"] !== undefined && (at["from"] !== "note" || at["heard"] !== false)) return bad(`clap latency at ${rate} heard`);
+    latency[rate] = {
+      declaredFrames: count(at, "declaredFrames", `latency ${rate}`),
+      measuredFrames: count(at, "measuredFrames", `latency ${rate}`),
+      ...(at["from"] === "note" ? { from: "note" as const } : {}),
+      ...(at["heard"] === false ? { heard: false } : {}),
+    };
   }
   return {
     mainInputChannels: count(v, "mainInputChannels", "clap"),
@@ -308,6 +318,28 @@ export function clapCostPerRate(
     };
   }
   return out;
+}
+
+/**
+ * A prober line as the plugin the full classifier (`classifyPluginHosting`) reads: the CLAP facts, the
+ * interposer's counts with the note sweep beside them, and the cost arm's figures per rate. The prober
+ * measures no stability (that is the soak's), so the caller passes what it has; without it the verdict
+ * is `unknown` on stability, never a pass.
+ */
+export function qualifiedPluginOfClapLine(line: ClapQualifyLine, stability?: PluginStabilityMeasurement): QualifiedPlugin {
+  const { events: _events, ...rtSafety } = line.rtSafety;
+  const { events: _noteEvents, ...noteSweep } = line.noteSweep;
+  const { nonFinite: _nonFinite, ...clap } = line.clap;
+  return {
+    format: "clap",
+    audioInputs: line.clap.mainInputChannels,
+    audioOutputs: line.clap.mainOutputChannels,
+    hasMidiIn: line.clap.noteInputs > 0,
+    clap,
+    rtSafety: { ...rtSafety, noteSweep },
+    cpuCost: { perRate: clapCostPerRate(line.cost) },
+    ...(stability === undefined ? {} : { stability }),
+  };
 }
 
 /** One line of the prober's stdout, or a {@link ClapQualifyError} saying how it differs. */
