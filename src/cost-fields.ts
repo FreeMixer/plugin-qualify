@@ -70,3 +70,42 @@ export function classifierCostFromDocument(reading: CostAtRate, rate: number): C
     [COST_FIELDS.classifier.coreFraction]: fraction,
   };
 }
+
+/**
+ * The key of one point of a cost grid: the rate and the quantum it was measured at. One place spells it,
+ * so the reader that fills a grid and the gate that looks a point up cannot disagree.
+ */
+export function costPointKey(rate: number, quantum: number): string {
+  return `${rate}/${quantum}`;
+}
+
+/** The percentile the classifier's `nsPerSampleP95` is. A figure taken at another percentile is not that field. */
+export const CLASSIFIER_PERCENTILE = 95;
+
+/** One point of a grid as it is measured: the figures {@link gridCostReadings} turns into the classifier's. */
+export interface CostGridPoint {
+  readonly rate: number;
+  readonly quantum: number;
+  readonly outcome: string;
+  readonly cost?: { readonly median: number; readonly percentile: { readonly p: number; readonly value: number } };
+}
+
+/**
+ * The classifier's cost readings of a grid, by {@link costPointKey}. A point that did not end `probe.ok`, has no
+ * cost, or whose percentile is not {@link CLASSIFIER_PERCENTILE} has no reading: the gate then reads the pair as
+ * unmeasured, which is the truth, where a figure under the wrong name would be judged as if it were the P95.
+ */
+export function gridCostReadings(points: readonly CostGridPoint[], okOutcome: string): Record<string, ClassifierCostReading> {
+  const out: Record<string, ClassifierCostReading> = {};
+  for (const p of points) {
+    if (p.outcome !== okOutcome || p.cost === undefined || p.cost.percentile.p !== CLASSIFIER_PERCENTILE) continue;
+    const fraction = coreFraction(p.cost.percentile.value, p.rate);
+    if (fraction === undefined) continue;
+    out[costPointKey(p.rate, p.quantum)] = {
+      [COST_FIELDS.classifier.median]: p.cost.median,
+      [COST_FIELDS.classifier.percentile]: p.cost.percentile.value,
+      [COST_FIELDS.classifier.coreFraction]: fraction,
+    };
+  }
+  return out;
+}

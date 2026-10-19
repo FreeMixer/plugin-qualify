@@ -5,32 +5,36 @@
  * `plugin-qualify` — the entry point. Every decision is a
  * pure function in `src/qualify-cli.ts`; this file only reads argv, prints and exits.
  *
- * CLAP targets are qualified here: the prober (`native/clap-qualify`) runs each under the interposer
- * and every plugin gets its RT-safety verdict document, per binary hash and console. `--all` finds
- * them on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then `/usr/lib/clap`).
- *
- * NOT YET WIRED for LV2 (refused with exit 2, never a silent partial run): driving the offline pass
- * (`tools/lv2-measure.mjs`) for a named subset and the mod-host hosting sweep from this entry
- * point. Until then a run that would measure an LV2 refuses and says which step is missing.
+ * Every named plugin, CLAP or LV2, is measured by plugin-hostd's probe runner (`plugin-hostd-probe`,
+ * named by `OMX_PROBE_RUNNER` when it is not on `PATH`), which keeps the deadline and the limits, and is
+ * judged from the probe output it writes: the verdict and the qualification record, per host profile.
+ * `--all` finds the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
+ * `/usr/lib/clap`). `plugin-qualify judge` judges probe outputs already written.
  */
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeFileSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { dirname } from "node:path";
 
 import {
   ClapScanError,
   EXIT_CODE,
   clapLoader,
   clapPinEntries,
+  defaultQualificationDir,
+  judgeExitCode,
+  judgeFiles,
+  judgeHelpText,
+  parseJudgeArgs,
   discoverAllTargets,
   exitCodeFor,
   helpText,
   lv2Loader,
   parseQualifyArgs,
   pinsFile,
-  qualifyClapTargets,
+  qualificationRecordOf,
+  qualifyTargets,
   resolveHostProfiles,
   resolveTargets,
-  rtSafetyDocumentName,
+  writeQualification,
   textTable,
 } from "../dist/index.js";
 
@@ -56,6 +60,33 @@ function writePins(path, file) {
   }
   renameSync(`${path}.new`, path);
   process.stderr.write(`plugin-qualify: ${file.written.length} pin${file.written.length === 1 ? "" : "s"} written to ${path}\n`);
+}
+
+if (process.argv[2] === "judge") {
+  const j = parseJudgeArgs(process.argv.slice(3));
+  if (!j.ok) {
+    process.stderr.write(`plugin-qualify judge: ${j.error}\n\n${judgeHelpText()}`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  if (j.args.help) {
+    process.stdout.write(judgeHelpText());
+    process.exit(EXIT_CODE.allQualified);
+  }
+  const hosts = resolveHostProfiles(j.args.hostProfiles);
+  if (!hosts.ok) {
+    for (const r of hosts.refused) process.stderr.write(`plugin-qualify judge: --host-profile ${r.spec}: ${r.problem}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  const dir = j.args.qualificationDir ?? defaultQualificationDir(process.env);
+  const result = judgeFiles(j.args.files, { profiles: hosts.profiles, dir });
+  for (const f of result.failures) process.stderr.write(`plugin-qualify judge: ${f.file}: ${f.problem}\n`);
+  for (const r of result.records) process.stderr.write(`plugin-qualify judge: record ${r.recordPath}\n`);
+  process.stdout.write(
+    j.args.format === "json"
+      ? `${JSON.stringify(result.records.map((r) => JSON.parse(readFileSync(r.recordPath, "utf8"))), null, 2)}\n`
+      : textTable(result.verdicts),
+  );
+  process.exit(judgeExitCode(result));
 }
 
 const parsed = parseQualifyArgs(process.argv.slice(2));
@@ -90,23 +121,25 @@ try {
   process.exit(EXIT_CODE.couldNotMeasure);
 }
 for (const p of plugins) process.stderr.write(`plugin-qualify: target ${p.uri}${p.bundle ? ` (${p.bundle})` : ""}\n`);
-if (plugins.length > 0 && plugins.every((p) => p.format === "clap")) {
-  if (parsed.args.all) {
-    process.stderr.write("plugin-qualify: --all qualified the CLAP plugins on the search path (no LV2 bundle is on the LV2 path)\n");
-  }
-  const pass = qualifyClapTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
-  for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
-  if (parsed.args.out !== undefined) {
-    mkdirSync(parsed.args.out, { recursive: true });
-    for (const doc of pass.documents) writeFileSync(join(parsed.args.out, rtSafetyDocumentName(doc)), `${JSON.stringify(doc, null, 2)}\n`);
-  }
-  if (parsed.args.pins !== undefined) writePins(parsed.args.pins, pinsFile(clapPinEntries(pass.documents, profiles.profiles[0].id)));
-  process.stdout.write(parsed.args.format === "json" ? `${JSON.stringify(pass.documents, null, 2)}\n` : textTable(pass.verdicts));
-  process.exit(exitCodeFor(pass.verdicts));
+if (plugins.length === 0) {
+  process.stderr.write("plugin-qualify: no plugin to measure\n");
+  process.exit(EXIT_CODE.couldNotMeasure);
 }
-if (parsed.args.pins !== undefined) process.stderr.write(`plugin-qualify: --pins ${parsed.args.pins}: nothing to pin, this run measures no plugin yet\n`);
-process.stderr.write(
-  "plugin-qualify: measuring from this entry point is not wired yet " +
-    "(offline pass: tools/lv2-measure.mjs; hosting sweep: mod-host) — refusing rather than rating on less\n",
+if (parsed.args.all) {
+  process.stderr.write("plugin-qualify: --all qualified the CLAP plugins on the search path (no LV2 bundle is on the LV2 path)\n");
+}
+const pass = qualifyTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
+for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
+if (parsed.args.out !== undefined) {
+  for (const run of pass.runs) {
+    const w = writeQualification(parsed.args.out, run.bytes, run.judgment);
+    process.stderr.write(`plugin-qualify: record ${w.recordPath}\n`);
+  }
+}
+if (parsed.args.pins !== undefined) writePins(parsed.args.pins, pinsFile(clapPinEntries(pass.documents, profiles.profiles[0].id)));
+process.stdout.write(
+  parsed.args.format === "json"
+    ? `${JSON.stringify(pass.runs.map((r) => qualificationRecordOf(r.bytes, r.judgment)), null, 2)}\n`
+    : textTable(pass.verdicts),
 );
-process.exit(EXIT_CODE.couldNotMeasure);
+process.exit(exitCodeFor(pass.verdicts));

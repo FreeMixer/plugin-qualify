@@ -118,7 +118,7 @@ export function helpText(): string {
     "  plugin-qualify <uri|bundle-path>...   exactly the named plugins; a .lv2 bundle = every plugin in it",
     "  plugin-qualify --all                  every CLAP plugin on CLAP_PATH, then ~/.clap, then /usr/lib/clap;",
     "                                        refuses (exit 2) when LV2 bundles are on the LV2 path (LV2_PATH),",
-    "                                        which this entry point cannot measure",
+    "                                        whose plugins --all does not enumerate: name them instead",
     "",
     ...rows,
     "",
