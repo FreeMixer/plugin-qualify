@@ -179,6 +179,14 @@ COST_PERCENTILE = 95.0
 DEFAULT_COST_TIMEOUT = float(COST_TIMEOUT_S)
 # Iterations of the empty-call loop that measures the harness's own timing floor.
 COST_CALIBRATION_ITERS = 512
+# An instrument (a MIDI input, no audio input) is timed holding notes down, since it costs nothing
+# until a voice plays: `--probe-notes` notes, struck at velocity 127 in the first block and never
+# let go, spread across a piano's keys (every MIDI key past 88). LV2 declares no voice capacity, so
+# the count is always the caller's: basis `probe`. The same rule as the CLAP prober's cost arm
+# (`native/clap-qualify.c`, `held_key`).
+NOTE_KEYS_MAX = 128
+PIANO_LOW_KEY, PIANO_HIGH_KEY, PIANO_KEYS = 21, 108, 88
+HELD_VELOCITY = 127
 
 # What measure_offline returns: measured latencies, the plugins that failed (each
 # with a human reason) so one finicky plugin never silently drops the batch,
@@ -858,6 +866,32 @@ def instances_per_core(fraction):
     return int(1.0 / float(fraction))
 
 
+def held_keys(n):
+    """The `n` keys an instrument's cost holds down: spread evenly across a piano's keys, or every
+    MIDI key past 88 notes; one note is A4. Pure, and the CLAP prober's `held_key` rule."""
+    n = int(n)
+    if n <= 1:
+        return [69] if n == 1 else []
+    low, high = (PIANO_LOW_KEY, PIANO_HIGH_KEY) if n <= PIANO_KEYS else (0, NOTE_KEYS_MAX - 1)
+    return [low + i * (high - low) // (n - 1) for i in range(n)]
+
+
+def midi_sequence(events, seq_urid, midi_urid):
+    """An LV2 atom:Sequence holding `events`, each `(frame, bytes)` of one MIDI message, as the
+    little-endian bytes a host writes into an atom input port. Pure.
+
+    The layout is the atom spec's: the sequence atom (size, type), its body (unit 0 = frames, pad),
+    then per event its time (int64 frames), the event atom (size, type) and the message padded to 8.
+    """
+    import struct
+
+    body = struct.pack("<II", 0, 0)
+    for frame, data in events:
+        msg = bytes(data)
+        body += struct.pack("<qII", int(frame), len(msg), midi_urid) + msg + b"\0" * (-len(msg) % 8)
+    return struct.pack("<II", len(body), seq_urid) + body
+
+
 def summarise_cost(block_times_ns, block_frames, rate, warmup=DEFAULT_COST_WARMUP,
                    pct=COST_PERCENTILE):
     """Fold per-block wall times into one rate's cost record. Pure.
@@ -1081,6 +1115,7 @@ def annotate_measured(catalog, measured, unmeasurable, sample_rate, tol=2):
 
 LV2 = "http://lv2plug.in/ns/lv2core#"
 ATOM = "http://lv2plug.in/ns/ext/atom#"
+MIDI_EVENT = "http://lv2plug.in/ns/ext/midi#MidiEvent"
 URID = "http://lv2plug.in/ns/ext/urid#"
 OPTIONS = "http://lv2plug.in/ns/ext/options#"
 BUFSZ = "http://lv2plug.in/ns/ext/buf-size#"
@@ -1383,6 +1418,17 @@ def audio_port_indices(host, plugin):
     return audio_in, audio_out
 
 
+def midi_input_index(host, plugin):
+    """The index of the plugin's first atom input that takes MIDI events, or None."""
+    midi = host.world.new_uri(MIDI_EVENT)
+    for i in range(plugin.get_num_ports()):
+        port = plugin.get_port_by_index(i)
+        if (port.is_a(host.u[ATOM + "AtomPort"]) and port.is_a(host.u[LV2 + "InputPort"])
+                and port.supports_event(midi)):
+            return i
+    return None
+
+
 def instantiate_connected(host, plugin, overrides=None):
     """Instantiate `plugin` and connect a live buffer to every one of its ports.
 
@@ -1589,7 +1635,7 @@ def timing_floor_ns(iters=COST_CALIBRATION_ITERS):
 
 
 def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOCKS,
-             min_blocks=COST_MIN_BLOCKS, target_seconds=COST_TARGET_SECONDS):
+             min_blocks=COST_MIN_BLOCKS, target_seconds=COST_TARGET_SECONDS, probe_notes=None):
     """Instantiate one plugin offline and MEASURE its CPU cost per processed sample.
 
     A sustained 1 kHz sine at -6 dBFS is held on every audio input, phase-continuous
@@ -1601,13 +1647,17 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     the gap between them is the xrun risk. Signal, not silence: a plugin that
     short-circuits on a silent input would otherwise be recorded as free.
 
+    An instrument (no audio input, a MIDI atom input) is fed no tone: it holds `probe_notes` notes
+    down ({@link held_keys}, velocity 127), struck in the first block and never let go, and the
+    record says so (`voices: {held, basis: "probe"}`). Without a count it is not timed.
+
     Buffer filling and every statistic are outside the timed region; the GC is off
     across the loop, so a collection cannot land inside a block and be charged to
     the plugin.
 
     Returns exactly one of:
-      {"blockTimesNs": [...], "silentOutput": bool}   timings, warm-up head first
-      {"unmeasurable": <reason>}   no audio in/out — nothing to insert, nothing to cost
+      {"blockTimesNs": [...], "silentOutput": bool[, "voices": {...}]}   timings, warm-up head first
+      {"unmeasurable": <reason>}   no audio in/out, or an instrument with no count to hold
       {"error": <reason>}          not installed / refused / non-finite output
     """
     import gc
@@ -1618,14 +1668,24 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     if plugin is None:
         return {"error": "not installed"}
     audio_in, audio_out = audio_port_indices(host, plugin)
-    if not audio_in:
+    midi_in = midi_input_index(host, plugin) if not audio_in else None
+    if not audio_in and midi_in is None:
         return {"unmeasurable": "no-audio-in"}
     if not audio_out:
         return {"unmeasurable": "no-audio-out"}
+    if midi_in is not None and not probe_notes:
+        return {"unmeasurable": "voices-unknown"}
+    held = held_keys(min(int(probe_notes), NOTE_KEYS_MAX)) if midi_in is not None else []
 
     instance, buffers, reason = instantiate_connected(host, plugin)
     if instance is None:
         return {"error": reason}
+    atoms = [(i, buf, buf[0]) for i, buf in buffers.items() if buf.dtype == np.uint32]
+    struck = empty = None
+    if midi_in is not None:
+        seq, midi = host.seq_urid, host.map_uri(MIDI_EVENT)
+        struck = np.frombuffer(midi_sequence([(0, (0x90, k, HELD_VELOCITY)) for k in held], seq, midi), dtype=np.uint32)
+        empty = np.frombuffer(midi_sequence([], seq, midi), dtype=np.uint32)
 
     block = host.block
     ins = [buffers[i] for i in audio_in]
@@ -1636,7 +1696,14 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
     ramp = np.arange(block, dtype=np.float32)
 
     def drive(blk):
-        """Hold the tone on every audio input for block `blk`. Never timed."""
+        """Hold the tone on every audio input for block `blk`, or strike the held notes in the first
+        block and send none after; every atom port a fresh sequence. Never timed."""
+        for _i, buf, size in atoms:
+            buf[0] = size
+        if midi_in is not None:
+            notes = struck if blk == 0 else empty
+            buffers[midi_in][:len(notes)] = notes
+            return
         sig = COST_TONE_AMP * np.sin(phase * (blk * block + ramp))
         for buf in ins:
             buf[:] = sig
@@ -1679,9 +1746,12 @@ def cost_one(host, uri, warmup=DEFAULT_COST_WARMUP, max_blocks=DEFAULT_COST_BLOC
 
     if not np.all(np.isfinite(out_buf)):
         return {"error": "non-finite output"}
-    return {"blockTimesNs": times,
-            "silentOutput": bool(np.max(np.abs(out_buf)) == 0.0),
-            "worker": host.worker.stats()}
+    res = {"blockTimesNs": times,
+           "silentOutput": bool(np.max(np.abs(out_buf)) == 0.0),
+           "worker": host.worker.stats()}
+    if midi_in is not None:
+        res["voices"] = {"held": len(held), "basis": "probe"}
+    return res
 
 
 def control_ranges(host, plugin, symbols):
@@ -1753,7 +1823,7 @@ def threshold_overrides(host, plugin):
 
 
 def worker_main(rate, block, measure=False, cost=False, cpu=None,
-                warmup=DEFAULT_COST_WARMUP, blocks=DEFAULT_COST_BLOCKS):
+                warmup=DEFAULT_COST_WARMUP, blocks=DEFAULT_COST_BLOCKS, probe_notes=None):
     """The worker loop: JSON-lines protocol over stdio (see parse_worker_line).
 
     Loads the LV2 world once, announces readiness, then probes one plugin per
@@ -1784,7 +1854,7 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
         uri, _tab, arg = line.partition("\t")
         if cost:
             try:
-                res = cost_one(host, uri, warmup=warmup, max_blocks=blocks)
+                res = cost_one(host, uri, warmup=warmup, max_blocks=blocks, probe_notes=probe_notes)
             except Exception as e:  # noqa: BLE001 - report, don't die
                 res = {"error": f"cost error: {e}"}
             if "blockTimesNs" in res:
@@ -1796,6 +1866,8 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
                     continue
                 if res.get("silentOutput"):
                     record["silentOutput"] = True
+                if "voices" in res:
+                    record["voices"] = res["voices"]
                 # what the host did with the plugin's worker, so a cost read can be told apart
                 # from an unbuilt plugin's (jobs and dropped are counts, never a verdict).
                 if "worker" in res:
@@ -2179,13 +2251,15 @@ def host_provenance(cpu, rates, block, warmup, blocks, timing_floor_ns_value=Non
     }
 
 
-def default_cost_worker_cmd(rate, block, cpu, warmup, blocks):
+def default_cost_worker_cmd(rate, block, cpu, warmup, blocks, probe_notes=None):
     """This same script, in --worker --cost mode, under the same interpreter."""
     cmd = [sys.executable, os.path.abspath(__file__), "--worker", "--cost",
            "--rate", str(rate), "--block", str(block),
            "--cost-warmup", str(warmup), "--cost-blocks", str(blocks)]
     if cpu is not None:
         cmd += ["--cost-cpu", str(cpu)]
+    if probe_notes:
+        cmd += ["--probe-notes", str(probe_notes)]
     return cmd
 
 
@@ -2198,7 +2272,8 @@ def cost_at_rate(catalog, rate, args, cpu):
     """
     worker_cmd = (shlex.split(args.worker_cmd) if args.worker_cmd
                   else default_cost_worker_cmd(rate, args.cost_block, cpu,
-                                               args.cost_warmup, args.cost_blocks))
+                                               args.cost_warmup, args.cost_blocks,
+                                               args.probe_notes))
     # a cost probe runs hundreds of blocks where a latency probe runs a handful, so
     # the latency default would time out honest work; an explicit --timeout wins.
     timeout = DEFAULT_COST_TIMEOUT if args.timeout == DEFAULT_TIMEOUT else args.timeout
@@ -2504,6 +2579,11 @@ def main():
     ap.add_argument("--cost-cpu", type=int,
                     help="pin the cost worker to this cpu (default: the last "
                          "performance core this process may use)")
+    ap.add_argument("--probe-notes", type=int,
+                    help="for --cost: the notes an instrument (a MIDI input, no audio "
+                         "input) holds down while it is timed, 1 to "
+                         f"{NOTE_KEYS_MAX}; its record says basis `probe`. Without it "
+                         "an instrument is unmeasurable `voices-unknown`")
     ap.add_argument("--cost-provenance",
                     help="write the run's host/CPU/governor/settings provenance here "
                          "as JSON — the machine the cost figures are only meaningful "
@@ -2522,11 +2602,14 @@ def main():
                          "perRate figures already in the catalog. No probing, no LV2, "
                          "no --run: use it when a classification rule changes.")
     args = ap.parse_args()
+    if args.probe_notes is not None and not 1 <= args.probe_notes <= NOTE_KEYS_MAX:
+        ap.error(f"--probe-notes takes 1 to {NOTE_KEYS_MAX} notes")
 
     if args.worker:
         worker_main(args.rate, args.block if not args.cost else args.cost_block,
                     measure=args.measure, cost=args.cost, cpu=args.cost_cpu,
-                    warmup=args.cost_warmup, blocks=args.cost_blocks)
+                    warmup=args.cost_warmup, blocks=args.cost_blocks,
+                    probe_notes=args.probe_notes)
         return
 
     if not args.inp:

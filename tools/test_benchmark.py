@@ -1111,6 +1111,80 @@ else:
         self.assertIn("worker crashed", result.failures["B"])
 
 
+class InstrumentCost(unittest.TestCase):
+    """An instrument is timed holding notes down: which keys, and the MIDI sequence that strikes them."""
+
+    def test_held_keys_spread_across_a_piano_and_then_every_key(self):
+        self.assertEqual(b.held_keys(0), [])
+        self.assertEqual(b.held_keys(1), [69])
+        self.assertEqual(b.held_keys(2), [21, 108])
+        keys = b.held_keys(32)
+        self.assertEqual(len(set(keys)), 32)
+        self.assertEqual((keys[0], keys[-1]), (21, 108))
+        every = b.held_keys(128)
+        self.assertEqual(every, list(range(128)))
+        self.assertEqual(len(set(b.held_keys(100))), 100)
+
+    def test_held_keys_match_the_clap_prober(self):
+        # native/clap-qualify.c held_key: low + i * (high - low) / (n - 1), integer division
+        for n in (3, 16, 88, 89, 127):
+            low, high = (21, 108) if n <= 88 else (0, 127)
+            self.assertEqual(b.held_keys(n), [low + i * (high - low) // (n - 1) for i in range(n)])
+
+    def test_midi_sequence_is_the_atom_layout(self):
+        import struct
+        seq = b.midi_sequence([(0, (0x90, 60, 127)), (7, (0x90, 64, 127))], seq_urid=11, midi_urid=22)
+        size, typ, unit, pad = struct.unpack_from("<IIII", seq)
+        self.assertEqual((typ, unit, pad), (11, 0, 0))
+        self.assertEqual(size, len(seq) - 8)
+        self.assertEqual(len(seq) % 8, 0)
+        frames, ev_size, ev_type = struct.unpack_from("<qII", seq, 16)
+        self.assertEqual((frames, ev_size, ev_type), (0, 3, 22))
+        self.assertEqual(seq[32:35], bytes((0x90, 60, 127)))
+        frames, _, _ = struct.unpack_from("<qII", seq, 40)
+        self.assertEqual(frames, 7)
+        self.assertEqual(b.midi_sequence([], 11, 22), struct.pack("<IIII", 8, 11, 0, 0))
+
+    def test_the_held_notes_ride_back_on_the_cost_record(self):
+        body = """
+print(json.dumps({"uri": line.partition("\\t")[0], "nsPerSample": 40.0,
+                  "cost": {"nsPerSampleMedian": 40.0, "nsPerSampleP95": 44.0, "blocks": 512, "warmupBlocks": 64,
+                           "blockFrames": 512, "voices": {"held": 32, "basis": "probe"}}}), flush=True)
+"""
+        result = b.measure_offline([{"uri": "S"}], 96000, stub_worker(body), timeout=10, job_arg=lambda _d: "",
+                                   value_key="nsPerSample", describe=b.describe_cost)
+        self.assertEqual(result.details["S"]["cost"]["voices"], {"held": 32, "basis": "probe"})
+
+    def test_the_cost_worker_is_given_the_probe_count(self):
+        cmd = b.default_cost_worker_cmd(96000, 512, 3, 64, 512, probe_notes=32)
+        self.assertEqual(cmd[cmd.index("--probe-notes") + 1], "32")
+        self.assertNotIn("--probe-notes", b.default_cost_worker_cmd(96000, 512, 3, 64, 512))
+
+
+@unittest.skipUnless(os.environ.get("PLUGIN_QUALIFY_LIVE_LV2") == "1", "live LV2 cost: set PLUGIN_QUALIFY_LIVE_LV2=1 (needs python lilv, numpy, make -C native)")
+class InstrumentCostLive(unittest.TestCase):
+    """The fixture LV2 instrument (native/build/fixtures/lv2/synth.lv2), timed by the real worker."""
+
+    URI = "urn:plugin-qualify:fixture:lv2-synth"
+
+    def cost(self, notes):
+        env = dict(os.environ, LV2_PATH=os.path.join(os.path.dirname(__file__), "..", "native", "build", "fixtures", "lv2"))
+        cmd = b.default_cost_worker_cmd(48000, 512, None, 64, 256, probe_notes=notes)
+        out = subprocess.run(cmd, input=self.URI + "\t\n", capture_output=True, text=True, env=env, timeout=120)
+        reply = json.loads(out.stdout.splitlines()[-1])
+        return reply
+
+    def test_the_cost_grows_with_the_notes_held_and_says_how_many(self):
+        one, sixteen = self.cost(1)["cost"], self.cost(16)["cost"]
+        self.assertEqual(one["voices"], {"held": 1, "basis": "probe"})
+        self.assertEqual(sixteen["voices"], {"held": 16, "basis": "probe"})
+        self.assertGreater(sixteen["nsPerSampleMedian"], 3 * one["nsPerSampleMedian"])
+        self.assertNotIn("silentOutput", sixteen)
+
+    def test_without_a_count_an_instrument_is_not_timed(self):
+        self.assertEqual(self.cost(None)["error"], "unmeasurable:voices-unknown")
+
+
 class HostProvenanceParsing(unittest.TestCase):
     """The pure parsers behind the run provenance."""
 
