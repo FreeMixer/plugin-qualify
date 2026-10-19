@@ -12,7 +12,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { clapCostPerRate, isClapCostFigure, parseClapQualifyLine, rtSafetyDocument, type ClapCostAtRate, type ClapCostFigure } from "./clap-qualify.js";
+import {
+  clapCostPerRate,
+  isClapCostFigure,
+  parseClapQualifyLine,
+  proberOffer,
+  qualifiedPluginOfClapLine,
+  rtSafetyDocument,
+  type ClapCostAtRate,
+  type ClapCostFigure,
+} from "./clap-qualify.js";
+import { classifyPluginHosting } from "./hosting-suitability.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { DEFAULT_HOSTING_POLICY } from "./qualify-declarations.js";
 import { qualifyClap } from "./direct-prober.support.js";
 import { OMX_CLAP_HOST_EXTENSIONS } from "./host-profiles.js";
 import { QUALIFY_RATES } from "./qualify-declarations.js";
@@ -24,8 +37,9 @@ const SYNTH_VOICES = join(FIXTURES, "synth-voices.clap");
 const SYNTH_NO_VOICES = join(FIXTURES, "synth-no-voices.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
 const SYNTH_INPUT = join(FIXTURES, "synth-input.clap");
+const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
 const SAFE = join(FIXTURES, "rt-safe.clap");
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SYNTH, SYNTH_VOICES, SYNTH_NO_VOICES, SYNTH_MIDI, SYNTH_INPUT, SAFE].every((p) => existsSync(p));
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), SYNTH, SYNTH_VOICES, SYNTH_NO_VOICES, SYNTH_MIDI, SYNTH_INPUT, SYNTH_ALLOC, SAFE].every((p) => existsSync(p));
 
 function live(name: string, body: () => void): void {
   it(name, (ctx) => {
@@ -156,3 +170,37 @@ describe("the cost block in the prober's line", () => {
     expect(() => parseClapQualifyLine(line(cost({ "48000": { ...held, blocks: 0 } })))).toThrow(/no block/);
   });
 });
+
+describe("clap-qualify, live — the full classifier reads the prober's instrument (#79)", () => {
+  const rate = OMX_CLAP_HOST_PROFILE.cost.rate;
+  /** What the soak would have written for a plugin that held: the prober measures no stability. */
+  const soaked = {
+    lifecycle: { cycles: DEFAULT_HOSTING_POLICY.cycleFloor, instantiated: DEFAULT_HOSTING_POLICY.cycleFloor, failed: 0 },
+    threads: { before: 1, afterFirstInstantiate: 1, afterAllFreed: 1, leaked: 0 },
+    crashes: [],
+    soak: { sweptParams: true, perRate: { [String(rate)]: { instantiated: true, seconds: DEFAULT_HOSTING_POLICY.soakSeconds, windows: 10_000,
+      nonFiniteWindows: 0, silentWindows: 0, firstRmsDbfs: -30, lastRmsDbfs: -30, rssGrowthKb: 0 } } },
+    linksGuiToolkit: false,
+  };
+  const judged = (path: string, profile: typeof OMX_CLAP_HOST_PROFILE) => {
+    const [l] = qualifyClap(path, undefined, { rates: [rate], probeNotes: 16, offer: proberOffer(profile) ?? [] });
+    return classifyPluginHosting(qualifiedPluginOfClapLine(l!, soaked), { rate, profile });
+  };
+
+  live("synth.clap is suitable under omx-clap-host, its latency from a note resolved, and unsuitable under the console", () => {
+    const host = judged(SYNTH, OMX_CLAP_HOST_PROFILE);
+    expect(host.rating).toBe("suitable");
+    expect(host.reasons.map((r) => r.code)).toEqual(expect.arrayContaining([
+      HOSTING_CODE.rtSafetyNotesClean, HOSTING_CODE.latencyResolved, HOSTING_CODE.topologyInstrument, HOSTING_CODE.costWithinCeiling,
+    ]));
+    const console = judged(SYNTH, OPENMIXER_CONSOLE_PROFILE);
+    expect(console.rating).toBe("unsuitable");
+    expect(console.reasons.map((r) => r.code)).toContain(HOSTING_CODE.clapNoteInput);
+  });
+
+  live("the synth that allocates on note on is unsuitable under omx-clap-host, on the note sweep", () => {
+    const v = judged(SYNTH_ALLOC, OMX_CLAP_HOST_PROFILE);
+    expect(v).toMatchObject({ rating: "unsuitable", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
+  });
+});
+
