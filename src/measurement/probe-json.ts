@@ -35,6 +35,7 @@ import type {
   PluginTopology,
 } from "./format.js";
 import { booleanValue, finiteNumber, isRecord, nonEmptyString, optional, positiveNumber } from "./guards.js";
+import { readVoicesHeld } from "./format.js";
 import type { MeasurementDimension } from "./vocabulary.js";
 
 /** One free-text prober failure, and the vocabulary term it means. */
@@ -55,6 +56,7 @@ export const PROBE_REASON_RULES: readonly ReasonRule[] = [
   { match: /^no-audio-in$/, code: "no-audio-in" },
   { match: /^no-audio-out$/, code: "no-audio-out" },
   { match: /^silent-output$/, code: "silent-output" },
+  { match: /^voices-unknown$/, code: "voices-unknown" },
   { match: /hosting\.worker\.nonconforming/, code: "worker-nonconforming" },
   { match: /worker crashed|worker desync|worker unavailable/, code: "probe-crashed" },
   { match: /timed out|timeout/, code: "probe-timeout" },
@@ -198,6 +200,7 @@ function readCost(value: unknown): CostMeasurement | undefined {
         ...optional("nsPerSampleMax", finiteNumber(reading.nsPerSampleMax)),
         ...optional("warmupNsPerSampleMedian", finiteNumber(reading.warmupNsPerSampleMedian)),
         ...optional("silentOutput", booleanValue(reading.silentOutput)),
+        ...optional("voices", readVoicesHeld(reading.voices)),
       };
     }
   }
