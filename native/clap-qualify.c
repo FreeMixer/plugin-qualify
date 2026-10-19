@@ -382,7 +382,14 @@ static clap_process_status run_block(const clap_plugin_t *p, struct port_set *in
   return st;
 }
 
-struct param_row { clap_id id; double min, max; void *cookie; };
+struct param_row { clap_id id; double min, max; void *cookie; int stepped; };
+
+/* where a sweep puts a parameter at `frac` of its range: a stepped one (an enum, a switch) on a whole value, as a
+ * host sends it, never between two steps */
+static double sweep_value(const struct param_row *row, double frac) {
+  const double v = row->min + (row->max - row->min) * frac;
+  return row->stepped ? floor(v + 0.5) : v;
+}
 
 struct options {
   double rates[MAX_RATES];
@@ -484,7 +491,7 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
       e->port_index = -1;
       e->channel = -1;
       e->key = -1;
-      e->value = rows[k].min + (rows[k].max - rows[k].min) * frac;
+      e->value = sweep_value(&rows[k], frac);
     }
     for (uint32_t k = 0; k < ins.count; k++)
       for (uint32_t c = 0; c < ins.buf[k].channel_count; c++)
@@ -747,7 +754,7 @@ static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint
       e->param.port_index = -1;
       e->param.channel = -1;
       e->param.key = -1;
-      e->param.value = rows[row].min + (rows[row].max - rows[row].min) * frac;
+      e->param.value = sweep_value(&rows[row], frac);
     }
     if (!f->cost_notes)
       for (uint32_t k = 0; k < ins.count; k++)
@@ -1388,7 +1395,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     if (!params->get_info(p, i, &info)) continue;
     if (info.flags & CLAP_PARAM_IS_READONLY) continue;
     if (!isfinite(info.min_value) || !isfinite(info.max_value)) continue;
-    rows[n_rows++] = (struct param_row){ info.id, info.min_value, info.max_value, info.cookie };
+    rows[n_rows++] = (struct param_row){ info.id, info.min_value, info.max_value, info.cookie, (info.flags & CLAP_PARAM_IS_STEPPED) != 0 };
   }
   f.params = n_rows;
 
