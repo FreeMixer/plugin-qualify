@@ -251,7 +251,7 @@ describe("v1.2 — verdicts per host profile (§3b)", () => {
     const doc = buildMeasurementDocument(fixtureRun(), []);
     expect("verdicts" in doc).toBe(false);
     expect("hostProfiles" in doc).toBe(false);
-    expect(doc.formatVersion).toBe("1.3");
+    expect(doc.formatVersion).toBe("1.4");
   });
 });
 

@@ -86,6 +86,25 @@ export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
       "host accepts. The plugin stays unpinned, never partly pinned.",
   },
   {
+    code: "no-voices",
+    kind: "nothing-to-measure",
+    description:
+      "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
+      "cost with notes held cannot be taken.",
+  },
+  {
+    code: "notes-unplayable",
+    kind: "nothing-to-measure",
+    description: "An instrument whose note input reads no dialect the prober speaks (CLAP's or MIDI's): it cannot be played.",
+  },
+  {
+    code: "voices-unknown",
+    kind: "not-attempted",
+    description:
+      "An instrument that declares no voice capacity, measured by a run given no probe count (`--probe-notes`): " +
+      "the run did not know how many notes to hold, so it timed none.",
+  },
+  {
     code: "refused-instantiation",
     kind: "probe-failed",
     description: "The plugin would not instantiate at this rate or block size.",
@@ -317,3 +336,15 @@ export type HostIsolation = (typeof HOST_ISOLATIONS)[number];
 export const HOST_LATENCY_HANDLING = ["compensated", "uncompensated"] as const;
 export type HostLatencyHandling = (typeof HOST_LATENCY_HANDLING)[number];
 
+/**
+ * Where the number of notes an instrument's cost was measured with came from: `declared` is the voice
+ * capacity the plugin declares (CLAP's voice-info, read after activate at that rate); `probe` is a count
+ * the caller gave (`--probe-notes`, the console's `SYNTH_VOICE_PROBE_NOTES`), used when the plugin declares
+ * none or when the caller asked for that count whatever it declares.
+ */
+export const VOICE_BASES = ["declared", "probe"] as const;
+export type VoiceBasis = (typeof VOICE_BASES)[number];
+
+export function isVoiceBasis(value: unknown): value is VoiceBasis {
+  return VOICE_BASES.some((b) => b === value);
+}
