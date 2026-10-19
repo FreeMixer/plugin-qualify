@@ -145,6 +145,12 @@ document does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`, and 
 differently give two different cost reasons. Only a measurement of the old format, which keeps one figure per
 rate, is read per rate. A run that did not end `probe.ok` is `unknown`, with the run's outcome code as the reason.
 
+An instrument costs nothing until a voice plays, so its cost is taken with notes held down, at velocity 127,
+spread across the keyboard, while every parameter is swept: as many notes as the voice capacity the plugin
+declares (CLAP `voice-info`, basis `declared`), or, when it declares none, the count `--probe-notes` gives
+(basis `probe`; LV2 declares none). Each rate's figure says how many notes it held and why (`voices: { held,
+basis, capacity }`). An instrument with no count to hold is not timed (`voices-unknown`).
+
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
