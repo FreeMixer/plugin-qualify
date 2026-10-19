@@ -328,6 +328,13 @@ describe("clap-qualify, live — an instrument is played: the note sweep", () =>
     expect(rtSafetyDocument(l!).verdict.rating).toBe("suitable");
   });
 
+  live("a stepped parameter is swept over its whole values, as a host moves it, in the sweep and the cost arm", () => {
+    // the fixture aborts on a value between two steps of its mode parameter
+    const [l] = qualifyClap(SYNTH_STRICT, undefined, { rates: [QUALIFY_RATES[0]!], probeNotes: 4 });
+    expect(l!.rtSafety.swept).toBe(true);
+    expect(l!.cost?.perRate[String(QUALIFY_RATES[0])]).toMatchObject({ voices: { held: 4, basis: "probe" } });
+  });
+
   live("an effect is not played: its note sweep is not applicable and adds no reason", () => {
     const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.noteSweep).toEqual({ applicable: false });

@@ -16,6 +16,8 @@
  *   synth-strict.clap      built with -DFIXTURE_NO_WILDCARDS, the safe one aborting on a CLAP note event whose
  *                          key or channel is the wildcard -1, as Surge XT 1.3.4 and Six Sines 1.2.1 do: its port
  *                          reads MIDI too, so a host sends it all notes off as controller 123, never a wildcard.
+ *                          It also has a stepped parameter (a mode, 0 to 3) and aborts on a value between two
+ *                          steps, which no host sends.
  *
  * Each voice costs a sine per sample, so the cost grows with the notes held.
  *
@@ -52,6 +54,7 @@ static void (*volatile fixture_free)(void *) = free;
 
 #define VOICES 16
 #define GAIN_ID 0u
+#define MODE_ID 1u
 
 static const char *const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO, NULL };
 
@@ -119,6 +122,9 @@ static void synth_event(struct synth *s, const clap_event_header_t *e) {
   case CLAP_EVENT_PARAM_VALUE: {
     const clap_event_param_value_t *v = (const clap_event_param_value_t *)e;
     if (v->param_id == GAIN_ID) s->gain = v->value;
+#ifdef FIXTURE_NO_WILDCARDS
+    if (v->param_id == MODE_ID && v->value != floor(v->value)) abort();
+#endif
     break;
   }
 #ifndef FIXTURE_MIDI_ONLY
@@ -203,11 +209,23 @@ static bool notes_get(const clap_plugin_t *p, uint32_t index, bool is_input, cla
 }
 static const clap_plugin_note_ports_t note_ports = { notes_count, notes_get };
 
-static uint32_t params_count(const clap_plugin_t *p) { (void)p; return 1; }
+#ifdef FIXTURE_NO_WILDCARDS
+#define PARAMS 2u
+#else
+#define PARAMS 1u
+#endif
+static uint32_t params_count(const clap_plugin_t *p) { (void)p; return PARAMS; }
 static bool params_info(const clap_plugin_t *p, uint32_t index, clap_param_info_t *info) {
   (void)p;
-  if (index != 0) return false;
+  if (index >= PARAMS) return false;
   memset(info, 0, sizeof *info);
+  if (index == 1) {
+    info->id = MODE_ID;
+    info->flags = CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED;
+    strcpy(info->name, "mode");
+    info->max_value = 3.0;
+    return true;
+  }
   info->id = GAIN_ID;
   info->flags = CLAP_PARAM_IS_AUTOMATABLE;
   strcpy(info->name, "gain");
@@ -216,6 +234,10 @@ static bool params_info(const clap_plugin_t *p, uint32_t index, clap_param_info_
   return true;
 }
 static bool params_value(const clap_plugin_t *p, clap_id id, double *value) {
+  if (id == MODE_ID && PARAMS > 1) {
+    *value = 0.0;
+    return true;
+  }
   if (id != GAIN_ID) return false;
   *value = ((struct synth *)p->plugin_data)->gain;
   return true;
