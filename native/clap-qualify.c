@@ -5,7 +5,8 @@
  * headless at every rate it is given and prints, per plugin, one JSON line of what it MEASURED.
  * It judges nothing: the verdict is plugin-qualify's (`src/clap-qualify.ts`), read from these facts.
  *
- *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] <path.clap> [<id>]
+ *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>]
+ *                [--probe-notes <n>] [--hold <n>] <path.clap> [<id>]
  *   clap-qualify --json <path>...      the scan (below), the document the CLAP loader reads
  *
  * Per rate the plugin is activated, its latency read, an impulse run through `process()` to see
@@ -20,6 +21,16 @@
  * go, a burst of note ons in one block and their offs, all notes off, in the dialect its note
  * port reads. An instrument is quiet and cheap until a voice plays, so what a note on does inside
  * `process()` is only seen here.
+ *
+ * Then the cost (the cost arm): at every rate the plugin is run again with every parameter swept,
+ * and each `process()` is timed. An effect is fed the sweep's noise. An instrument is fed no audio
+ * and holds notes down, at velocity 127, spread across the keyboard, for the whole run: as many as
+ * the voice capacity it declares through `voice-info` after `activate` at that rate (basis
+ * `declared`), or, when it declares none, the count `--probe-notes` gives (basis `probe`).
+ * `--hold` holds that count whatever the plugin declares (basis `probe`). An instrument with no
+ * count to hold, or one declaring a capacity of 0, is not timed and the line says why. The figure
+ * is nanoseconds per sample, a warm-up head dropped, its median and 95th percentile; the run is
+ * not under the interposer's count.
  *
  * The host offers exactly the extensions in HOST_EXTENSIONS and nothing else, so a plugin that
  * needs more fails headless here rather than on the desk; `--offer` adds those of OFFERABLE a
@@ -43,6 +54,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <clap/clap.h>
@@ -62,6 +74,18 @@ _Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every param
 #define STR(x) STR_(x)
 /* parameter events one sweep block carries */
 #define EVENTS_PER_BLOCK 64u
+/* notes the cost arm can hold: one per MIDI key */
+#define NOTE_KEYS_MAX 128
+/* the events one block can carry: every held note's note on beside a sweep block's parameters */
+#define EVENTS_MAX (NOTE_KEYS_MAX + EVENTS_PER_BLOCK)
+/* the cost arm: blocks timed and dropped before the figure is taken, and its high percentile */
+#define COST_WARMUP_BLOCKS 64u
+#define COST_PERCENTILE 95.0
+/* the keyboard the held notes are spread across: a piano's keys, or every MIDI key past 88 notes */
+#define PIANO_LOW_KEY 21
+#define PIANO_HIGH_KEY 108
+#define PIANO_KEYS 88u
+#define HELD_VELOCITY 1.0
 /* frames past the declared latency the impulse is looked for */
 #define IMPULSE_TAIL 8192u
 #define SILENCE 1e-6f
@@ -220,7 +244,7 @@ union any_event {
 };
 
 static struct {
-  union any_event ev[EVENTS_PER_BLOCK];
+  union any_event ev[EVENTS_MAX];
   uint32_t count;
 } g_in;
 
@@ -240,6 +264,22 @@ struct port_set {
   clap_audio_buffer_t buf[MAX_PORTS];
   float **chan[MAX_PORTS];
   int main_port; /* -1 when none is main */
+};
+
+/* how the cost arm chose how many notes to hold */
+enum voice_basis { BASIS_NONE, BASIS_DECLARED, BASIS_PROBE };
+
+/* one rate of the cost arm: the figures, or why there are none */
+struct cost_at {
+  const char *unmeasured; /* NULL when measured */
+  const char *detail;
+  double median, p95, min, max, warmup_median;
+  uint32_t blocks;
+  /* the notes held (0 for an effect), why that many, and the capacity voice-info declared */
+  uint32_t held;
+  enum voice_basis basis;
+  int has_capacity;
+  uint32_t capacity;
 };
 
 struct facts {
@@ -263,6 +303,9 @@ struct facts {
   uint64_t note_allocations, note_locks, note_syscalls;
   struct omx_rt_event note_rt_events[OMX_RT_EV_MAX];
   int n_note_rt_events;
+  /* the cost arm, per rate; `cost_notes` is whether it played notes (an instrument) or noise */
+  int cost_notes;
+  struct cost_at cost[MAX_RATES];
 };
 
 static int ports_open(const clap_plugin_t *p, const clap_plugin_audio_ports_t *ext, bool input, uint32_t frames,
@@ -340,6 +383,18 @@ static clap_process_status run_block(const clap_plugin_t *p, struct port_set *in
 }
 
 struct param_row { clap_id id; double min, max; void *cookie; };
+
+struct options {
+  double rates[MAX_RATES];
+  uint32_t n_rates;
+  uint32_t frames;
+  uint32_t blocks;
+  /* the notes the cost arm holds for an instrument that declares no voice capacity (--probe-notes), and
+   * the count it holds whatever the plugin declares (--hold); 0 when not given */
+  uint32_t probe_notes, hold;
+  const char *path; /* as invoked, before realpath: the name the pin holds */
+  const char *id;
+};
 
 static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint32_t blocks, const struct param_row *rows,
                          uint32_t n_rows, const struct interposer *ip, struct facts *f, uint32_t r) {
@@ -451,7 +506,7 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
 
 /* one event of a note block, at frame `time`; the caller keeps the block's events in time order */
 static union any_event *note_event(uint32_t time, uint16_t type, uint32_t size) {
-  if (g_in.count >= EVENTS_PER_BLOCK) return NULL;
+  if (g_in.count >= EVENTS_MAX) return NULL;
   union any_event *e = &g_in.ev[g_in.count++];
   memset(e, 0, sizeof *e);
   e->header.size = size;
@@ -586,6 +641,136 @@ static void note_sweep_rate(const clap_plugin_t *p, double rate, uint32_t frames
   ports_close(&outs);
 }
 
+/* ---- the cost arm ---- */
+
+/* the voice capacity voice-info declares now (after activate), or 0 in *has when the plugin has no voice-info */
+static uint32_t voice_capacity(const clap_plugin_t *p, int *has) {
+  const clap_plugin_voice_info_t *vi = p->get_extension(p, CLAP_EXT_VOICE_INFO);
+  clap_voice_info_t info;
+  memset(&info, 0, sizeof info);
+  *has = vi && vi->get && vi->get(p, &info);
+  return *has ? info.voice_capacity : 0;
+}
+
+/* the i-th of n held keys, spread evenly across a piano's keys (every MIDI key past 88 notes); one note is A4 */
+static int16_t held_key(uint32_t i, uint32_t n) {
+  if (n <= 1) return 69;
+  const uint32_t low = n <= PIANO_KEYS ? PIANO_LOW_KEY : 0, high = n <= PIANO_KEYS ? PIANO_HIGH_KEY : NOTE_KEYS_MAX - 1;
+  return (int16_t)(low + i * (high - low) / (n - 1));
+}
+
+static int by_value(const void *a, const void *b) {
+  const double x = *(const double *)a, y = *(const double *)b;
+  return x < y ? -1 : x > y;
+}
+
+/* the linear-interpolated percentile of n sorted values (numpy's default, benchmark.py's `percentile`) */
+static double percentile_sorted(const double *v, uint32_t n, double pct) {
+  if (n == 1) return v[0];
+  const double pos = (double)(n - 1) * pct / 100.0;
+  const uint32_t low = (uint32_t)pos, high = low + 1 < n ? low + 1 : n - 1;
+  return v[low] + (v[high] - v[low]) * (pos - (double)low);
+}
+
+static int64_t now_ns(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t);
+  return (int64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+}
+
+/*
+ * One rate of the cost arm. Every parameter is moved across its range through events, a block's worth
+ * at a time, as the RT sweep moves them; an effect hears the sweep's noise, an instrument silence and
+ * the notes it holds, all struck in the first block and never let go. Each process() is timed alone;
+ * the warm-up head is dropped and the rest folded into nanoseconds per sample.
+ */
+static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint32_t blocks, const struct param_row *rows,
+                      uint32_t n_rows, int clap_dialect, const struct options *o, struct facts *f, uint32_t r) {
+  struct cost_at *c = &f->cost[r];
+  const clap_plugin_audio_ports_t *ports = p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
+  struct port_set ins, outs;
+  uint32_t main_in, main_out, others;
+  if (ports_open(p, ports, true, frames, &ins, &main_in, &others) != 0 || ports_open(p, ports, false, frames, &outs, &main_out, &others) != 0 ||
+      !p->activate(p, rate, frames, frames)) {
+    ports_close(&ins);
+    ports_close(&outs);
+    c->unmeasured = "refused-instantiation", c->detail = "activate failed for the cost run";
+    return;
+  }
+  if (f->cost_notes) {
+    c->capacity = voice_capacity(p, &c->has_capacity);
+    if (o->hold) {
+      c->held = o->hold, c->basis = BASIS_PROBE;
+    } else if (c->has_capacity && c->capacity == 0) {
+      c->unmeasured = "no-voices", c->detail = "voice-info declares a voice capacity of 0";
+    } else if (c->has_capacity) {
+      c->held = c->capacity, c->basis = BASIS_DECLARED;
+    } else if (o->probe_notes) {
+      c->held = o->probe_notes, c->basis = BASIS_PROBE;
+    } else {
+      c->unmeasured = "voices-unknown", c->detail = "no voice-info and no --probe-notes count to hold";
+    }
+    if (c->held > NOTE_KEYS_MAX) c->held = NOTE_KEYS_MAX;
+  }
+  double *ns = c->unmeasured ? NULL : calloc(COST_WARMUP_BLOCKS + blocks, sizeof *ns);
+  if (!c->unmeasured && !ns) c->unmeasured = "probe-error", c->detail = "out of memory for the block times";
+  if (c->unmeasured || (p->start_processing && !p->start_processing(p))) {
+    if (!c->unmeasured) c->unmeasured = "refused-instantiation", c->detail = "start_processing failed for the cost run";
+    free(ns);
+    p->deactivate(p);
+    ports_close(&ins);
+    ports_close(&outs);
+    return;
+  }
+  if (p->reset) p->reset(p);
+  ports_fill(&ins, frames, 0.0f);
+  uint32_t seed = 0x636f73u;
+  const uint32_t total = COST_WARMUP_BLOCKS + blocks;
+  int64_t steady = 0;
+  for (uint32_t b = 0; b < total; b++) {
+    if (b == 0)
+      for (uint32_t k = 0; k < c->held; k++) note_key(clap_dialect, 0, 1, held_key(k, c->held), HELD_VELOCITY);
+    for (uint32_t k = 0; k < n_rows && k < EVENTS_PER_BLOCK; k++) {
+      const uint32_t row = (b * EVENTS_PER_BLOCK + k) % n_rows;
+      const double frac = (double)((b * 7u + row * 13u) % 101u) / 100.0;
+      union any_event *e = note_event(0, CLAP_EVENT_PARAM_VALUE, sizeof(clap_event_param_value_t));
+      if (!e) break;
+      e->param.param_id = rows[row].id;
+      e->param.cookie = rows[row].cookie;
+      e->param.note_id = -1;
+      e->param.port_index = -1;
+      e->param.channel = -1;
+      e->param.key = -1;
+      e->param.value = rows[row].min + (rows[row].max - rows[row].min) * frac;
+    }
+    if (!f->cost_notes)
+      for (uint32_t k = 0; k < ins.count; k++)
+        for (uint32_t ch = 0; ch < ins.buf[k].channel_count; ch++)
+          for (uint32_t i = 0; i < frames; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            ins.chan[k][ch][i] = ((float)(seed >> 8) / 16777216.0f - 0.5f) * 0.5f;
+          }
+    const int64_t t0 = now_ns();
+    run_block(p, &ins, &outs, frames, &steady, NULL);
+    ns[b] = (double)(now_ns() - t0) / (double)frames;
+  }
+  if (p->stop_processing) p->stop_processing(p);
+  p->deactivate(p);
+  ports_close(&ins);
+  ports_close(&outs);
+
+  double *warm = ns, *timed = ns + COST_WARMUP_BLOCKS;
+  qsort(warm, COST_WARMUP_BLOCKS, sizeof *warm, by_value);
+  qsort(timed, blocks, sizeof *timed, by_value);
+  c->warmup_median = percentile_sorted(warm, COST_WARMUP_BLOCKS, 50.0);
+  c->median = percentile_sorted(timed, blocks, 50.0);
+  c->p95 = percentile_sorted(timed, blocks, COST_PERCENTILE);
+  c->min = timed[0];
+  c->max = timed[blocks - 1];
+  c->blocks = blocks;
+  free(ns);
+}
+
 /* ---- JSON ---- */
 
 /* where the JSON goes: stdout, or a scan child's pipe */
@@ -684,6 +869,35 @@ static void put_note_sweep(const struct facts *f, uint32_t frames) {
   fputc_out('}');
 }
 
+static const char *const BASIS_NAME[] = { [BASIS_NONE] = NULL, [BASIS_DECLARED] = "declared", [BASIS_PROBE] = "probe" };
+
+/* the cost arm: per rate, its figures in nanoseconds per sample and the notes it held, or why it has none */
+static void put_cost(const struct facts *f, uint32_t frames) {
+  fprintf(g_out, ",\"cost\":{\"stimulus\":\"%s\",\"blockFrames\":%u,\"warmupBlocks\":%u,\"percentile\":%.0f,\"perRate\":{",
+          f->cost_notes ? "notes-held" : "noise", frames, COST_WARMUP_BLOCKS, COST_PERCENTILE);
+  for (uint32_t r = 0; r < f->n_rates; r++) {
+    const struct cost_at *c = &f->cost[r];
+    fprintf(g_out, "%s\"%.0f\":{", r ? "," : "", f->rates[r]);
+    if (c->unmeasured) {
+      fprintf(g_out, "\"unmeasuredReason\":");
+      put_string(c->unmeasured);
+      fprintf(g_out, ",\"unmeasuredDetail\":");
+      put_string(c->detail);
+    } else {
+      fprintf(g_out, "\"nsPerSampleMedian\":%.6g,\"nsPerSampleP95\":%.6g,\"nsPerSampleMin\":%.6g,\"nsPerSampleMax\":%.6g,"
+              "\"warmupNsPerSampleMedian\":%.6g,\"blocks\":%u", c->median, c->p95, c->min, c->max, c->warmup_median, c->blocks);
+    }
+    if (f->cost_notes && (c->basis != BASIS_NONE || c->has_capacity)) {
+      fprintf(g_out, ",\"voices\":{");
+      if (c->basis != BASIS_NONE) fprintf(g_out, "\"held\":%u,\"basis\":\"%s\"%s", c->held, BASIS_NAME[c->basis], c->has_capacity ? "," : "");
+      if (c->has_capacity) fprintf(g_out, "\"capacity\":%u", c->capacity);
+      fputc_out('}');
+    }
+    fputc_out('}');
+  }
+  fprintf(g_out, "}}");
+}
+
 static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, uint32_t frames) {
   fprintf(g_out, ",\"clap\":{\"mainInputChannels\":%u,\"mainOutputChannels\":%u,\"sidechainInputs\":%u,\"features\":", f->main_in,
          f->main_out, f->sidechains);
@@ -698,6 +912,7 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
   if (!f->interposer) {
     fprintf(g_out, ",\"rtSafety\":{\"interposer\":false}");
     put_note_sweep(f, frames);
+    if (f->n_rates && f->headless_ok) put_cost(f, frames);
     return;
   }
   fprintf(g_out, ",\"rtSafety\":{\"interposer\":true,\"swept\":%s,\"sweepApplicable\":%s,\"blocks\":%u,\"blockFrames\":%u,"
@@ -710,6 +925,7 @@ static void put_facts(const clap_plugin_descriptor_t *d, const struct facts *f, 
   }
   fprintf(g_out, "]}");
   put_note_sweep(f, frames);
+  if (f->n_rates && f->headless_ok) put_cost(f, frames);
 }
 
 /* ---- the pin (plugin-qualify spec §11) ---- */
@@ -1132,15 +1348,6 @@ static int scan(int n, char **paths) {
 
 /* ---- the program ---- */
 
-struct options {
-  double rates[MAX_RATES];
-  uint32_t n_rates;
-  uint32_t frames;
-  uint32_t blocks;
-  const char *path; /* as invoked, before realpath: the name the pin holds */
-  const char *id;
-};
-
 static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d, const char *path,
                           const char *sha256, const struct options *o) {
   static struct param_row rows[MAX_PARAMS];
@@ -1199,6 +1406,15 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
       f.n_note_rt_events = ip.events(f.note_rt_events, OMX_RT_EV_MAX);
     }
   }
+  /* the cost arm: an instrument the sweep could play holds notes; one it could not play is not timed */
+  f.cost_notes = f.note_dialect != NULL;
+  for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++) {
+    if (f.note_inputs > 0 && !f.note_dialect) {
+      f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";
+      continue;
+    }
+    cost_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, clap_dialect, o, &f, r);
+  }
   p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
@@ -1246,7 +1462,8 @@ static int parse_offer(const char *s) {
 
 static int usage(const char *name) {
   fprintf(stderr,
-          "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] <path.clap> [<id>]\n"
+          "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] [--probe-notes <n>] [--hold <n>]\n"
+          "          <path.clap> [<id>]   (--probe-notes and --hold: 1 to " STR(NOTE_KEYS_MAX) " notes)\n"
           "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n",
           name, name);
   return 2;
@@ -1267,6 +1484,10 @@ int main(int argc, char **argv) {
       if (parse_u32(argv[a + 1], &o.blocks) != 0) return usage(argv[0]);
     } else if (!strcmp(argv[a], "--offer")) {
       if (parse_offer(argv[a + 1]) != 0) return usage(argv[0]);
+    } else if (!strcmp(argv[a], "--probe-notes")) {
+      if (parse_u32(argv[a + 1], &o.probe_notes) != 0 || o.probe_notes > NOTE_KEYS_MAX) return usage(argv[0]);
+    } else if (!strcmp(argv[a], "--hold")) {
+      if (parse_u32(argv[a + 1], &o.hold) != 0 || o.hold > NOTE_KEYS_MAX) return usage(argv[0]);
     } else {
       return usage(argv[0]);
     }

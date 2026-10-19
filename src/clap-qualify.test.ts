@@ -502,7 +502,7 @@ describe("the note sweep in the line and the document", () => {
 
   it("a plugin with no note input gets no note reason: its verdict is the one /1 gave", () => {
     const doc = rtSafetyDocument(parseClapQualifyLine(line()));
-    expect(doc.schema).toBe("plugin-qualify.rt-safety/2");
+    expect(doc.schema).toBe("plugin-qualify.rt-safety/3");
     expect(doc.verdict.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
     expect(doc.measured.noteSweep).toEqual({ applicable: false });
   });

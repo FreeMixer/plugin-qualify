@@ -33,7 +33,9 @@ import {
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import { halfPopulatedRefusal, locateNativeTools } from "./tool-paths.js";
-import { readIntegrity, type IntegrityMeasurement } from "./measurement/format.js";
+import { readIntegrity, type IntegrityMeasurement, type VoicesHeld } from "./measurement/format.js";
+import { isVoiceBasis } from "./measurement/vocabulary.js";
+import { coreFraction } from "./cost-fields.js";
 
 export class ClapQualifyError extends Error {
   constructor(message: string) {
@@ -61,6 +63,45 @@ export interface ClapProbedFacts extends PluginClapMeasurement {
   readonly nonFinite: boolean;
 }
 
+/** One rate's cost: the block times in nanoseconds per sample, warm-up dropped, and the notes held for an instrument. */
+export interface ClapCostFigure {
+  readonly nsPerSampleMedian: number;
+  readonly nsPerSampleP95: number;
+  readonly nsPerSampleMin: number;
+  readonly nsPerSampleMax: number;
+  /** The median of the dropped warm-up blocks: the evidence that dropping them was warranted. */
+  readonly warmupNsPerSampleMedian: number;
+  readonly blocks: number;
+  /** For an instrument: the notes held while it was timed. Absent for an effect. */
+  readonly voices?: VoicesHeld;
+}
+
+/** One rate the cost arm did not time, and why; an instrument's declared capacity is kept when it has one. */
+export interface ClapCostUnmeasured {
+  readonly unmeasuredReason: string;
+  readonly unmeasuredDetail: string;
+  readonly voices?: { readonly capacity: number };
+}
+
+export type ClapCostAtRate = ClapCostFigure | ClapCostUnmeasured;
+
+export function isClapCostFigure(at: ClapCostAtRate): at is ClapCostFigure {
+  return !("unmeasuredReason" in at);
+}
+
+/**
+ * The cost arm: every rate timed with every parameter swept, an effect fed noise and an instrument
+ * holding notes (`notes-held`), each rate's figures or the reason it has none.
+ */
+export interface ClapCostReading {
+  readonly stimulus: "notes-held" | "noise";
+  readonly blockFrames: number;
+  readonly warmupBlocks: number;
+  /** The percentile `nsPerSampleP95` is taken at. */
+  readonly percentile: number;
+  readonly perRate: Readonly<Record<string, ClapCostAtRate>>;
+}
+
 /** One plugin's line from `clap-qualify`. */
 export interface ClapQualifyLine {
   readonly uri: string;
@@ -72,6 +113,8 @@ export interface ClapQualifyLine {
   readonly rtSafety: ClapRtSafetyReading;
   /** The note sweep: the plugin played through its note input, counted apart. */
   readonly noteSweep: ClapNoteSweepReading;
+  /** The cost arm; absent when the plugin did not initialise and activate headless. */
+  readonly cost?: ClapCostReading;
   /**
    * The pin (spec §11): the `.clap`'s digest by its name in its directory and the layout fingerprint
    * the prober computed through plugin-hostd's `pin.h`, or the reason it took none.
@@ -175,6 +218,98 @@ function readNoteSweep(v: unknown): ClapNoteSweepReading {
   };
 }
 
+function figure(o: Record<string, unknown>, key: string, where: string): number {
+  const v = o[key];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : bad(`${where} has no figure ${key}`);
+}
+
+function readVoices(v: unknown, where: string): { held?: number; basis?: VoicesHeld["basis"]; capacity?: number } {
+  if (!isRecord(v)) return bad(`${where} voices is not an object`);
+  const out: { held?: number; basis?: VoicesHeld["basis"]; capacity?: number } = {};
+  if ("held" in v || "basis" in v) {
+    const basis = v["basis"];
+    if (!isVoiceBasis(basis)) return bad(`${where} voices basis ${JSON.stringify(basis)}`);
+    const held = count(v, "held", `${where} voices`);
+    if (held === 0) return bad(`${where} holds no note`);
+    out.held = held;
+    out.basis = basis;
+  }
+  if ("capacity" in v) out.capacity = count(v, "capacity", `${where} voices`);
+  return out;
+}
+
+function readCostAtRate(v: unknown, where: string, notes: boolean): ClapCostAtRate {
+  if (!isRecord(v)) return bad(`${where} is not an object`);
+  const voices = v["voices"] === undefined ? undefined : readVoices(v["voices"], where);
+  if (voices !== undefined && !notes) return bad(`${where} holds notes for a plugin fed noise`);
+  if (v["unmeasuredReason"] !== undefined) {
+    if (voices?.held !== undefined) return bad(`${where} held notes and timed nothing`);
+    return {
+      unmeasuredReason: str(v, "unmeasuredReason", where),
+      unmeasuredDetail: str(v, "unmeasuredDetail", where),
+      ...(voices?.capacity === undefined ? {} : { voices: { capacity: voices.capacity } }),
+    };
+  }
+  if (notes && (voices === undefined || voices.held === undefined || voices.basis === undefined)) {
+    return bad(`${where} timed an instrument without saying what it held`);
+  }
+  const blocks = count(v, "blocks", where);
+  if (blocks === 0) return bad(`${where} timed no block`);
+  return {
+    nsPerSampleMedian: figure(v, "nsPerSampleMedian", where),
+    nsPerSampleP95: figure(v, "nsPerSampleP95", where),
+    nsPerSampleMin: figure(v, "nsPerSampleMin", where),
+    nsPerSampleMax: figure(v, "nsPerSampleMax", where),
+    warmupNsPerSampleMedian: figure(v, "warmupNsPerSampleMedian", where),
+    blocks,
+    ...(voices?.held === undefined || voices.basis === undefined
+      ? {}
+      : { voices: { held: voices.held, basis: voices.basis, ...(voices.capacity === undefined ? {} : { capacity: voices.capacity }) } }),
+  };
+}
+
+function readCost(v: unknown): ClapCostReading {
+  if (!isRecord(v)) return bad("cost is not an object");
+  const stimulus = str(v, "stimulus", "cost");
+  if (stimulus !== "notes-held" && stimulus !== "noise") return bad(`cost stimulus ${stimulus}`);
+  const perRateIn = v["perRate"];
+  if (!isRecord(perRateIn)) return bad("cost has no perRate map");
+  const perRate: Record<string, ClapCostAtRate> = {};
+  for (const [rate, at] of Object.entries(perRateIn)) {
+    if (!/^[1-9]\d*$/.test(rate)) return bad(`cost rate ${rate}`);
+    perRate[rate] = readCostAtRate(at, `cost at ${rate}`, stimulus === "notes-held");
+  }
+  return {
+    stimulus,
+    blockFrames: count(v, "blockFrames", "cost"),
+    warmupBlocks: count(v, "warmupBlocks", "cost"),
+    percentile: figure(v, "percentile", "cost"),
+    perRate,
+  };
+}
+
+/**
+ * The cost arm's figures as the classifier's cost gate reads them, per rate: the median and the P95
+ * per sample, and the P95 as a fraction of one core at that rate. A rate the arm did not time is absent.
+ */
+export function clapCostPerRate(
+  cost: ClapCostReading | undefined,
+): Record<string, { coreFractionP95: number; nsPerSampleMedian: number; nsPerSampleP95: number; voices?: VoicesHeld }> {
+  const out: Record<string, { coreFractionP95: number; nsPerSampleMedian: number; nsPerSampleP95: number; voices?: VoicesHeld }> = {};
+  for (const [rate, at] of Object.entries(cost?.perRate ?? {})) {
+    if (!isClapCostFigure(at)) continue;
+    const fraction = coreFraction(at.nsPerSampleP95, Number(rate));
+    if (fraction === undefined) continue;
+    out[rate] = {
+      coreFractionP95: fraction,
+      nsPerSampleMedian: at.nsPerSampleMedian,
+      nsPerSampleP95: at.nsPerSampleP95,
+      ...(at.voices === undefined ? {} : { voices: at.voices }),
+    };
+  }
+  return out;
+}
+
 /** One line of the prober's stdout, or a {@link ClapQualifyError} saying how it differs. */
 export function parseClapQualifyLine(text: string): ClapQualifyLine {
   let v: unknown;
@@ -200,6 +335,7 @@ export function parseClapQualifyLine(text: string): ClapQualifyLine {
     clap: readClap(v["clap"]),
     rtSafety: readRtSafety(v["rtSafety"]),
     noteSweep: readNoteSweep(v["noteSweep"]),
+    ...(v["cost"] === undefined ? {} : { cost: readCost(v["cost"]) }),
     integrity: readIntegrity(v["integrity"]) ?? bad("no integrity"),
   };
 }
@@ -215,9 +351,11 @@ export function parseClapQualifyOutput(stdout: string): ClapQualifyLine[] {
  * The document's schema name; a reader refuses any other it does not know. `/2` is `/1` with
  * `measured.noteSweep` added and the note sweep's reasons folded into `verdict` (a plugin with no
  * note input gets none, so its `/2` verdict is its `/1` verdict); every `/1` field is unchanged, so
- * a `/1` reader of `verdict.rating` and `verdict.rtSafe` reads a `/2` document right.
+ * a `/1` reader of `verdict.rating` and `verdict.rtSafe` reads a `/2` document right. `/3` is `/2`
+ * with `measured.cost` added (the cost arm, an instrument's with the notes it held), which no
+ * verdict reads.
  */
-export const RT_SAFETY_DOCUMENT_SCHEMA = "plugin-qualify.rt-safety/2";
+export const RT_SAFETY_DOCUMENT_SCHEMA = "plugin-qualify.rt-safety/3";
 
 /**
  * The RT-safety verdict of one plugin binary for one console: keyed by the binary's SHA-256 and
@@ -246,6 +384,7 @@ export interface RtSafetyDocument {
     readonly clap: ClapProbedFacts;
     readonly rtSafety: ClapRtSafetyReading;
     readonly noteSweep: ClapNoteSweepReading;
+    readonly cost?: ClapCostReading;
     readonly integrity: IntegrityMeasurement;
   };
 }
@@ -288,6 +427,7 @@ export function rtSafetyDocument(line: ClapQualifyLine, profile: HostProfile = O
       clap: line.clap,
       rtSafety: line.rtSafety,
       noteSweep: line.noteSweep,
+      ...(line.cost === undefined ? {} : { cost: line.cost }),
       integrity: line.integrity,
     },
   };

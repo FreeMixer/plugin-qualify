@@ -10,6 +10,11 @@
  *                          scratch buffer on every note on and frees it: an instrument that is quiet
  *                          and clean until it is played, the known RT-unsafe one.
  *   synth-midi.clap        built with -DFIXTURE_MIDI_ONLY, the safe one reading MIDI's dialect alone.
+ *   synth-voices.clap      built with -DFIXTURE_VOICE_CAPACITY=8, the safe one declaring through voice-info
+ *                          that 8 voices sound at most: the cost arm holds 8 notes, basis declared.
+ *   synth-no-voices.clap   built with -DFIXTURE_VOICE_CAPACITY=0, the safe one declaring a capacity of 0.
+ *
+ * Each voice costs a sine per sample, so the cost grows with the notes held.
  *
  * Nothing else differs, so a verdict that tells them apart is what the note sweep counted.
  */
@@ -28,6 +33,12 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_MIDI_ONLY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-midi"
 #define FIXTURE_NAME "synth reading MIDI"
+#elif defined FIXTURE_VOICE_CAPACITY && FIXTURE_VOICE_CAPACITY == 0
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-no-voices"
+#define FIXTURE_NAME "synth declaring no voices"
+#elif defined FIXTURE_VOICE_CAPACITY
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-voices"
+#define FIXTURE_NAME "synth declaring its voices"
 #else
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth"
 #define FIXTURE_NAME "synth"
@@ -212,8 +223,22 @@ static void params_flush(const clap_plugin_t *p, const clap_input_events_t *in, 
 }
 static const clap_plugin_params_t params = { params_count, params_info, params_value, params_to_text, params_from_text, params_flush };
 
+#ifdef FIXTURE_VOICE_CAPACITY
+static bool voices_get(const clap_plugin_t *p, clap_voice_info_t *info) {
+  (void)p;
+  info->voice_count = FIXTURE_VOICE_CAPACITY;
+  info->voice_capacity = FIXTURE_VOICE_CAPACITY;
+  info->flags = CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
+  return true;
+}
+static const clap_plugin_voice_info_t voice_info = { voices_get };
+#endif
+
 static const void *synth_extension(const clap_plugin_t *p, const char *id) {
   (void)p;
+#ifdef FIXTURE_VOICE_CAPACITY
+  if (!strcmp(id, CLAP_EXT_VOICE_INFO)) return &voice_info;
+#endif
   if (!strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &audio_ports;
   if (!strcmp(id, CLAP_EXT_NOTE_PORTS)) return &note_ports;
   if (!strcmp(id, CLAP_EXT_PARAMS)) return &params;
