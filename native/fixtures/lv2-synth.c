@@ -6,7 +6,12 @@
  * off, or all notes off (controller 123), lets it go. Every voice costs a sine per sample, so the
  * cost grows with the notes held.
  *
- *   synth.lv2    run() touches only its ports and its voices: the known RT-safe instrument.
+ *   synth.lv2        run() touches only its ports and its voices: the known RT-safe instrument.
+ *   synth-alloc.lv2  built with -DFIXTURE_ALLOCATES_ON_NOTE, the same, which also allocates and frees a
+ *                    scratch buffer on every note on: quiet and clean until it is played, the known
+ *                    RT-unsafe instrument.
+ *
+ * Nothing else differs but the URI, so a verdict that tells them apart is what the note sweep counted.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -18,7 +23,14 @@
 #include <lv2/midi/midi.h>
 #include <lv2/urid/urid.h>
 
+#ifdef FIXTURE_ALLOCATES_ON_NOTE
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth-alloc"
+/* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
+static void *(*volatile fixture_malloc)(size_t) = malloc;
+static void (*volatile fixture_free)(void *) = free;
+#else
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth"
+#endif
 
 #define VOICES 32
 
@@ -66,6 +78,9 @@ static void activate(LV2_Handle h) {
 }
 
 static void note_on(struct synth *s, int key) {
+#ifdef FIXTURE_ALLOCATES_ON_NOTE
+  fixture_free(fixture_malloc(256 * sizeof(double)));
+#endif
   for (int v = 0; v < VOICES; v++)
     if (s->voice[v].key < 0) {
       s->voice[v].key = key;

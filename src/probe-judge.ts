@@ -27,6 +27,7 @@ import {
 import { gridCostReadings } from "./cost-fields.js";
 import {
   hostingCostReasons,
+  noteSweepReasons,
   rtSafetyReasons,
   contributedHostingRating,
   type HostingReason,
@@ -241,7 +242,10 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       documents.push(doc);
       reasons = doc.verdict.reasons.map(asRecordReason);
     } else {
-      reasons = rtSafetyReasons(rtSafetyOfProbeOutput(output)).map(asRecordReason);
+      // an LV2 plugin: the control sweep's counts, and the note sweep's when it was played through a MIDI input
+      const rt = rtSafetyOfProbeOutput(output);
+      const notes = noteSweepOfProbeOutput(output, rt);
+      reasons = [...rtSafetyReasons(rt), ...noteSweepReasons(notes, facts.noteInputs ?? (notes.applicable ? 1 : 0))].map(asRecordReason);
     }
     const rating = worstRating(reasons.map((r) => r.rating));
     const deciding = decidingOf(reasons, rating);

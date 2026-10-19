@@ -12,6 +12,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { noteSweepReasons } from "./hosting-suitability.js";
+import { readNoteSweep } from "./measurement/format.js";
+
 const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "..", "native");
 const BUILD = join(NATIVE, "build");
 const MEASURE = join(BUILD, "lv2_measure");
@@ -24,7 +28,10 @@ const LSAN_SUPPRESSIONS = join(NATIVE, "lsan.supp");
 const LV2_FIXTURES = join(BUILD, "fixtures", "lv2");
 const SAFE = "urn:plugin-qualify:fixture:lv2-rt-safe";
 const UNSAFE = "urn:plugin-qualify:fixture:lv2-rt-unsafe";
-const BUILT = [MEASURE, ORACLE, PATH_ORACLE, INTERPOSER, join(LV2_FIXTURES, "rt-safe.lv2", "gain.so")].every((p) => existsSync(p));
+const SYNTH = "urn:plugin-qualify:fixture:lv2-synth";
+const SYNTH_ALLOC = "urn:plugin-qualify:fixture:lv2-synth-alloc";
+const BUILT = [MEASURE, ORACLE, PATH_ORACLE, INTERPOSER, join(LV2_FIXTURES, "rt-safe.lv2", "gain.so"),
+  join(LV2_FIXTURES, "synth.lv2", "synth.so"), join(LV2_FIXTURES, "synth-alloc.lv2", "synth.so")].every((p) => existsSync(p));
 
 function live(name: string, body: () => void): void {
   it(name, (ctx) => {
@@ -64,6 +71,28 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(unsafe.status).toBe(0);
     expect(safe.line["rtSafety"]).toMatchObject({ interposer: true, swept: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
     expect(unsafe.line["rtSafety"]).toMatchObject({ interposer: true, swept: true, allocationsInRun: 1024 });
+  });
+
+  live("plays an instrument through its MIDI input and counts that apart: the allocating synth only once played", () => {
+    const safe = measure(SYNTH, "48000", "512", "1", "1");
+    const alloc = measure(SYNTH_ALLOC, "48000", "512", "1", "1");
+    expect(safe.status).toBe(0);
+    expect(alloc.status).toBe(0);
+    const sweep = (line: Record<string, unknown>) => (line["rtSafety"] as Record<string, unknown>)["noteSweep"];
+    // the control sweep plays no note: both read clean there
+    expect(alloc.line["rtSafety"]).toMatchObject({ allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
+    expect(sweep(safe.line)).toMatchObject({ applicable: true, dialect: "midi", interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0, nonFinite: false });
+    expect(sweep(alloc.line)).toMatchObject({ applicable: true, dialect: "midi", interposer: true });
+    const played = readNoteSweep(sweep(alloc.line))!;
+    expect(played.allocationsInRun).toBeGreaterThan(0);
+    expect(played.noteEvents).toBeGreaterThan(played.blocks!);
+    expect(noteSweepReasons(readNoteSweep(sweep(safe.line)), 1).map((r) => r.rating)).toEqual(["suitable"]);
+    expect(noteSweepReasons(played, 1)[0]).toMatchObject({ rating: "unsuitable", code: HOSTING_CODE.rtSafetyNotesViolations });
+  });
+
+  live("an effect has no MIDI input: its note sweep is not applicable", () => {
+    const { line } = measure(SAFE, "48000", "64", "1", "1");
+    expect((line["rtSafety"] as Record<string, unknown>)["noteSweep"]).toEqual({ applicable: false });
   });
 
   live("prints the plugin's pin beside the measurement, and alone with --pin", () => {

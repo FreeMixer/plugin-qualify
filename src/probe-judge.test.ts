@@ -220,6 +220,26 @@ describe("the fixtures of plugin-hostd", () => {
     expect(j.hosts[0]?.verdict).toMatchObject({ rating: "unsuitable", deciding: HOSTING_CODE.rtSafetyViolations });
     expect(j.hosts[0]?.reasons[0]?.params).toEqual({ allocations: 0, syscalls: 7, locks: 0 });
   });
+
+  it("an LV2 instrument is judged on its note sweep too: clean is suitable, an allocation while played is not", () => {
+    const doc = fixtureJson("success-msi");
+    doc["plugin"] = { format: "lv2", id: "urn:example:synth" };
+    delete doc["offer"]["clapExtensions"];
+    const judged = (sweep: object) => {
+      for (const point of doc["grid"]) point["noteSweep"] = sweep;
+      const read = readProbeOutput(JSON.stringify(doc));
+      if (!read.ok) throw new Error(read.problem);
+      return judgeProbeOutput(read.output, [OPENMIXER_CONSOLE_PROFILE]).hosts[0]!;
+    };
+    const clean = judged({ applicable: true, dialect: "midi", allocations: 0, locks: 0, syscalls: 0 });
+    expect(clean.verdict.rating).toBe("suitable");
+    expect(clean.reasons.map((r) => r.code)).toContain(HOSTING_CODE.rtSafetyNotesClean);
+    const dirty = judged({ applicable: true, dialect: "midi", allocations: 4608, locks: 0, syscalls: 0 });
+    expect(dirty.verdict).toMatchObject({ rating: "unsuitable", deciding: HOSTING_CODE.rtSafetyNotesViolations });
+    // an effect, which the runner gives no note sweep, keeps the verdict it had
+    const effect = judged({ applicable: false });
+    expect(effect.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);
+  });
 });
 
 describe("cost at rate and quantum, from the grid of a probe output", () => {
