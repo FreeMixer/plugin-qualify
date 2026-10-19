@@ -18,6 +18,7 @@ import {
 } from "./host-profiles.js";
 import { clapLineFromProbeOutput, judgeProbeOutput } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
+import { buildQualificationRecord } from "./qualification-record.js";
 import { clapLineFixture, fixtureJson, probeOutputOfLine, readFixture } from "./probe-output-fixtures.js";
 
 const withGui = [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"];
@@ -223,14 +224,15 @@ describe("the fixtures of plugin-hostd", () => {
 
 describe("cost at rate and quantum, from the grid of a probe output", () => {
   /** The success fixture with its grid replaced by cost points at one rate and the given quanta. */
-  function withCost(points: { quantum: number; p95: number; median: number }[]): ProbeOutput {
+  function withCost(points: { quantum: number; p95: number; median: number; voices?: object }[]): ProbeOutput {
     const doc = fixtureJson("success-msi");
-    const costOf = (p: { p95: number; median: number }) => ({
+    const costOf = (p: { p95: number; median: number; voices?: object }) => ({
       unit: "ns-per-sample",
       median: p.median,
       percentile: { p: 95, value: p.p95 },
       blocks: 1000,
       warmupBlocks: 64,
+      ...(p.voices === undefined ? {} : { voices: p.voices }),
     });
     doc["grid"] = points.map((p) => ({ rate: 96000, quantum: p.quantum, outcome: "probe.ok", cost: costOf(p), rtSafety: doc["grid"][0]["rtSafety"] }));
     const read = readProbeOutput(JSON.stringify(doc));
@@ -267,5 +269,24 @@ describe("cost at rate and quantum, from the grid of a probe output", () => {
     const [a] = judgeProbeOutput(o, [small]).hosts;
     expect(a?.cost.reasons[0]?.rating).toBe("unsuitable");
     expect(a?.verdict.rating).not.toBe("unsuitable");
+  });
+
+  it("an instrument's cost row says the notes it held, and the record carries it per rate", () => {
+    const o = withCost([{ quantum: large.cost.quantum, p95: 200, median: 180, voices: { held: 32, basis: "probe" } }]);
+    const judgment = judgeProbeOutput(o, [large]);
+    expect(judgment.hosts[0]?.cost).toMatchObject({ rate: 96000, quantum: large.cost.quantum, voices: { held: 32, basis: "probe" } });
+    const record = buildQualificationRecord(judgment, { file: "x.probe.json", sha256: "c".repeat(64), bytes: 1 });
+    expect(record.cost[0]?.voices).toEqual({ held: 32, basis: "probe" });
+    expect(record.measurements.grid[0]?.cost?.voices).toEqual({ held: 32, basis: "probe" });
+    // an effect's row has none
+    expect(judgeProbeOutput(withCost([{ quantum: large.cost.quantum, p95: 200, median: 180 }]), [large]).hosts[0]?.cost.voices).toBeUndefined();
+  });
+
+  it("a cost point whose voices are not a count with its basis is refused, not read as an effect's", () => {
+    const doc = fixtureJson("success-msi");
+    doc["grid"] = [{ rate: 96000, quantum: 1024, outcome: "probe.ok", rtSafety: doc["grid"][0]["rtSafety"],
+      cost: { unit: "ns-per-sample", median: 1, percentile: { p: 95, value: 2 }, blocks: 10, warmupBlocks: 4, voices: { held: 32, basis: "guess" } } }];
+    const read = readProbeOutput(JSON.stringify(doc));
+    expect(read.ok).toBe(false);
   });
 });
