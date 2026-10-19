@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
+import type { VoicesHeld } from "./measurement/format.js";
 
 export const QUALIFICATION_RECORD_SCHEMA = "plugin-qualify.qualification-record/1";
 
@@ -41,8 +42,14 @@ export interface QualificationRecord {
   readonly testedVersion?: string;
   readonly binary: ProbeOutput["binary"];
   readonly verdicts: readonly RecordVerdict[];
-  /** The cost reasons at each host's rate and quantum, beside the verdicts. */
-  readonly cost: readonly { readonly host: string; readonly rate: number; readonly quantum: number; readonly reasons: readonly RecordReason[] }[];
+  /** The cost reasons at each host's rate and quantum, beside the verdicts; an instrument's with the notes it held. */
+  readonly cost: readonly {
+    readonly host: string;
+    readonly rate: number;
+    readonly quantum: number;
+    readonly voices?: VoicesHeld;
+    readonly reasons: readonly RecordReason[];
+  }[];
   /** The figures as measured, per rate and quantum. */
   readonly measurements: { readonly grid: readonly ProbeGridPoint[]; readonly behaviour?: Readonly<Record<string, unknown>> };
   /** Who measured and when. */

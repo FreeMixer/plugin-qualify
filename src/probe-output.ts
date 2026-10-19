@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 
 import { finiteNumber, isRecord, nonEmptyString, optional } from "./measurement/guards.js";
+import { readVoicesHeld, type VoicesHeld } from "./measurement/format.js";
 
 export const PROBE_OUTPUT_FORMAT = "plugin-hostd.probe-output";
 /** The one major this reader knows. A minor of it only adds fields. */
@@ -60,6 +61,8 @@ export interface ProbeCost {
   readonly percentile: { readonly p: number; readonly value: number };
   readonly blocks: number;
   readonly warmupBlocks: number;
+  /** For an instrument: the notes it held while it was timed, how many and why that many. */
+  readonly voices?: VoicesHeld;
 }
 
 export interface ProbeRtSafety {
@@ -240,11 +243,14 @@ function readCost(v: unknown, where: string): ProbeCost {
   const median = num(o, "median", where);
   const value = num(pct, "value", `${where} percentile`);
   if (median < 0 || value < 0) invalid(`${where} holds a negative cost`);
+  const voices = o["voices"] === undefined ? undefined : readVoicesHeld(o["voices"]);
+  if (o["voices"] !== undefined && voices === undefined) invalid(`${where} voices is not a count of held notes with its basis`);
   return {
     median,
     percentile: { p, value },
     blocks: posInt(o, "blocks", where),
     warmupBlocks: count(o, "warmupBlocks", where),
+    ...(voices === undefined ? {} : { voices }),
   };
 }
 
