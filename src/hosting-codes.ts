@@ -1,82 +1,67 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * The hosting verdict's message codes. Codes, never prose: the
- * surface renders the operator's locale.
+ * The hosting verdict's message codes. Codes, never prose: the surface renders the operator's
+ * locale.
  *
- * A UNION list file: `.gitattributes` marks it
- * `merge=union`, so two lanes that each add a code merge with both kept. Only the table lives
- * here, one `key: 'code',` per line, with keys and codes unique; the registry-hotspots gate
- * refuses anything else.
+ * omx-contract declares every hosting code, one `HOSTING_<DIMENSION>_CODES` table per dimension
+ * (its `data/hosting/<dimension>.json`). {@link HOSTING_CODE} is those tables flattened into one
+ * `key: code` map, read from the contract at load: a code the contract does not declare cannot be
+ * named here, and a dimension the contract adds arrives without an edit.
+ *
+ * {@link RETIRED_HOSTING_CODES} are codes the contract still declares and plugin-qualify no longer
+ * writes or reads: they are left out of the map, so nothing here can name them.
  */
-export const HOSTING_CODE = {
-  stabilitySoaked: 'hosting.stability.soaked',
-  stabilityCrashedAttributed: 'hosting.stability.crashed-attributed-plugin',
-  stabilityCrashedLive: 'hosting.stability.crashed-live-on-this-rig',
-  stabilityBelowFloor: 'hosting.stability.cycles-below-floor',
-  stabilityUnsoaked: 'hosting.stability.unsoaked',
-  stabilitySoakFailedAtRate: 'hosting.stability.soak-failed-at-rate',
-  stabilityUnmeasured: 'hosting.stability.unmeasured',
-  stabilityCrashUnattributed: 'hosting.stability.crash-unattributed',
-  stabilitySpawnsThreads: 'hosting.stability.spawns-threads',
-  stabilityLinksGuiToolkit: 'hosting.stability.links-gui-toolkit',
-  rtSafetyClean: 'hosting.rt-safety.clean-under-sweep',
-  rtSafetyViolations: 'hosting.rt-safety.violations-in-run',
-  rtSafetyUnmeasured: 'hosting.rt-safety.unmeasured',
-  rtSafetyNotReproducible: 'hosting.rt-safety.not-reproducible',
-  // The note sweep: an instrument played under the interposer, a count of its own.
-  rtSafetyNotesClean: 'hosting.rt-safety.clean-under-notes',
-  rtSafetyNotesViolations: 'hosting.rt-safety.violations-under-notes',
-  rtSafetyNotesUnmeasured: 'hosting.rt-safety.notes-unmeasured',
-  featuresProvided: 'hosting.features.all-provided',
-  featuresMissing: 'hosting.features.required-not-provided',
-  featuresDisqualifying: 'hosting.features.host-not-provided',
-  featuresCv: 'hosting.features.cv-ports',
-  featuresMidiIn: 'hosting.features.midi-in-fed-empty',
-  featuresUnscanned: 'hosting.features.scan-predates-field',
-  costWithinCeiling: 'hosting.cost.within-ceiling',
-  costAboveCeiling: 'hosting.cost.above-ceiling',
-  costSpiky: 'hosting.cost.spiky-tail',
-  costUnmeasured: 'hosting.cost.unmeasured-at-rate-and-quantum',
-  costFieldsMissing: 'hosting.cost.fields-missing',
-  latencyResolved: 'hosting.latency.resolved',
-  latencyUnmeasured: 'hosting.latency.unmeasured',
-  latencyNonconforming: 'hosting.latency.nonconforming',
-  latencyParameterDependent: 'hosting.latency.parameter-dependent',
-  topologyMatched: 'hosting.topology.matched',
-  topologyNoAudioInput: 'hosting.topology.no-audio-input',
-  topologyNoAudioOutput: 'hosting.topology.no-audio-output',
-  topologyExtraInputs: 'hosting.topology.extra-inputs-fed-silence',
-  topologyInstrument: 'hosting.topology.instrument',
-  // The CLAP arm: the SAME dimensions fed from CLAP facts,
-  // minted here where the LV2 table has no code for the fact.
-  topologyWiderThanStrip: 'hosting.topology.wider-than-strip',
-  clapLatencyMismatch: 'hosting.clap.latency-mismatch',
-  clapNotAudioEffect: 'hosting.clap.not-audio-effect',
-  clapHeadlessFailed: 'hosting.clap.headless-failed',
-  clapNoteInput: 'hosting.clap.note-input',
-  clapThreadViolation: 'hosting.clap.thread-violation',
-  clapProcessError: 'hosting.clap.process-error',
-  clapUnqualified: 'hosting.clap.unqualified',
-  clapFormatNotHosted: 'hosting.clap.format-not-hosted',
-  clapExtensionsNotCovered: 'hosting.clap.extensions-not-covered',
-  outputNonFinite: 'hosting.output.non-finite',
-  workerNonconforming: 'hosting.worker.nonconforming',
-  // The pin (spec §11; one-contract §10.3): a host's refusal at add, by the daemon's code.
-  integrityUnpinned: 'hosting.integrity.unpinned',
-  integrityBinaryMismatch: 'hosting.integrity.binary-mismatch',
-  integrityLayoutMismatch: 'hosting.integrity.layout-mismatch',
-  overrideIsolated: 'hosting.override.curator-isolated',
-  hostProvenanceDiffers: 'hosting.provenance.host-differs',
-  sweepControlDidNotFire: 'hosting.provenance.sweep-control-did-not-fire',
-  // The five REALISED reasons. Everything above answers what a plugin EARNED; these answer
-  // what the console DID with that, and the difference between the two is the operator's
-  // whole question when a slot is not on the fast path.
-  disabled: 'hosting.disabled',
-  unjudged: 'hosting.unjudged',
-  noRealisation: 'hosting.no-realisation',
-  realisedInProcess: 'hosting.realised.in-process',
-  // A plugin LINKED into the engine (the static-link registry) runs in-process without a
-  // verdict: the library's oracles are its proof.
-  linked: 'hosting.linked',
-} as const;
+import * as contract from "@openmixer/omx-contract";
+
+type Contract = typeof contract;
+
+/**
+ * Codes the contract declares that plugin-qualify does not speak.
+ *
+ * `hosting.features.required-not-provided` named the fact `hosting.features.missing` names: a
+ * required feature the host does not provide. The host that refuses the plugin is the authority
+ * on the name, so plugin-qualify writes `hosting.features.missing` (the contract's
+ * `featuresMissingAtLoad`) and drops its own. A retired code the contract no longer declares
+ * fails the conformance test, so this list empties as the contract catches up.
+ */
+export const RETIRED_HOSTING_CODES = ["hosting.features.required-not-provided"] as const;
+type RetiredCode = (typeof RETIRED_HOSTING_CODES)[number];
+
+/** The contract's hosting tables, by export name: every `HOSTING_<DIMENSION>_CODES`. */
+type HostingTables = {
+  [Name in keyof Contract as Name extends `HOSTING_${string}_CODES` ? Name : never]: Contract[Name];
+};
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
+
+/** Every hosting table's `key: code`, merged into one record. */
+type HostingCodeTable = UnionToIntersection<
+  {
+    [Name in keyof HostingTables]: {
+      readonly [Key in keyof HostingTables[Name] as HostingTables[Name][Key] extends { readonly code: RetiredCode }
+        ? never
+        : Key]: HostingTables[Name][Key] extends { readonly code: infer Code } ? Code : never;
+    };
+  }[keyof HostingTables]
+>;
+
+/** True for an export name that is one of the contract's hosting tables. */
+export function isHostingTableName(name: string): boolean {
+  return /^HOSTING_[A-Z0-9_]+_CODES$/.test(name);
+}
+
+function flatten(): HostingCodeTable {
+  const table: Record<string, string> = {};
+  for (const [name, entries] of Object.entries(contract)) {
+    if (!isHostingTableName(name)) continue;
+    for (const [key, entry] of Object.entries(entries as Record<string, { readonly code: string }>)) {
+      if ((RETIRED_HOSTING_CODES as readonly string[]).includes(entry.code)) continue;
+      if (key in table) throw new Error(`omx-contract declares the hosting key ${key} twice (${name})`);
+      table[key] = entry.code;
+    }
+  }
+  return Object.freeze(table) as unknown as HostingCodeTable;
+}
+
+export const HOSTING_CODE: HostingCodeTable = flatten();

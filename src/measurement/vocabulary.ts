@@ -10,12 +10,40 @@
  * whether the plugin has nothing to measure or whether OUR PROBE failed — and each with
  * a plain description a UI can render.
  *
- * Everything is a data table, not a switch. Adding a term is one row; a consumer that
- * meets a term it does not know must be able to fall back on the `kind`, which is why the
- * readers below return a term record rather than a bare string.
+ * Everything is a data table, not a switch. A consumer that meets a term it does not know
+ * must be able to fall back on the `kind`, which is why the readers below return a term record
+ * rather than a bare string.
+ *
+ * The WORDS are omx-contract's (`data/measurement.json` and `data/resource-profile.json`, rendered
+ * as `<ITEM>_WORDS`), in its order: a word is added there, once, and every consumer reads it. What
+ * stays here is the prose, keyed by the contract's word type, so a word the contract adds without
+ * a description here, or a description for a word it lacks, is a type error.
  */
 
+import {
+  MEASUREMENT_COST_METHODS_WORDS,
+  MEASUREMENT_DIMENSIONS_WORDS,
+  MEASUREMENT_LATENCY_EXCLUSIONS_WORDS,
+  MEASUREMENT_LATENCY_METHODS_WORDS,
+  MEASUREMENT_LATENCY_SCALING_NOTES_WORDS,
+  MEASUREMENT_LATENCY_SCALING_WORDS,
+  MEASUREMENT_UNMEASURED_KINDS_WORDS,
+  MEASUREMENT_UNMEASURED_REASONS,
+  MEASUREMENT_UNMEASURED_REASONS_WORDS,
+  MEASUREMENT_VERDICT_RATINGS_WORDS,
+  MEASUREMENT_VOICE_BASES_WORDS,
+  RESOURCE_HOST_ISOLATIONS_WORDS,
+  RESOURCE_HOST_LATENCY_HANDLING_WORDS,
+} from "@openmixer/omx-contract";
 import { nonEmptyString } from "./guards.js";
+
+/** Pairs each word, in the contract's order, with its description here. */
+function described<Code extends string>(
+  words: readonly Code[],
+  descriptions: Readonly<Record<Code, string>>,
+): readonly { readonly code: Code; readonly description: string }[] {
+  return words.map((code) => ({ code, description: descriptions[code] }));
+}
 
 // ---------------------------------------------------------------------------
 // Why a figure is absent
@@ -35,124 +63,75 @@ import { nonEmptyString } from "./guards.js";
  *   a finding nor a failure; it is the shape a PARTIAL run has, and partial runs are
  *   first-class here.
  */
-export type UnmeasuredKind = "nothing-to-measure" | "probe-failed" | "not-attempted";
+export type UnmeasuredKind = (typeof MEASUREMENT_UNMEASURED_KINDS_WORDS)[number];
+
+/** One reason a figure may be absent: a word of the contract's MEASUREMENT_UNMEASURED_REASONS. */
+export type UnmeasuredCode = (typeof MEASUREMENT_UNMEASURED_REASONS_WORDS)[number];
 
 /** One term of the "why is there no figure" vocabulary. */
 export interface UnmeasuredTerm {
-  readonly code: string;
+  readonly code: UnmeasuredCode;
   readonly kind: UnmeasuredKind;
   /** Plain description, English. A UI localises from `code`; this is for logs and specs. */
   readonly description: string;
 }
 
 /**
- * Every reason a figure may be absent. These were derived from a sweep of 958 plugins — each
- * one is an outcome that sweep actually produced, not a hypothetical.
+ * Every reason a figure may be absent, in plain English. These were derived from a sweep of 958
+ * plugins — each one is an outcome that sweep actually produced, not a hypothetical. The words and
+ * their kinds are the contract's.
  */
-export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
-  {
-    code: "no-audio-in",
-    kind: "nothing-to-measure",
-    description: "No audio input port: an instrument, a generator or an analyser. Nothing to drive.",
-  },
-  {
-    code: "no-audio-out",
-    kind: "nothing-to-measure",
-    description: "No audio output port: a meter or a sink. Nothing to read.",
-  },
-  {
-    code: "silent-output",
-    kind: "nothing-to-measure",
-    description:
-      "Instantiated and driven, but emitted nothing under a stimulus that should have passed. " +
+const UNMEASURED_DESCRIPTIONS: Readonly<Record<UnmeasuredCode, string>> = {
+  "no-audio-in":
+    "No audio input port: an instrument, a generator or an analyser. Nothing to drive.",
+  "no-audio-out":
+    "No audio output port: a meter or a sink. Nothing to read.",
+  "silent-output":
+    "Instantiated and driven, but emitted nothing under a stimulus that should have passed. " +
       "A convolver with no impulse response, a vocoder with no carrier, a gate that never opened.",
-  },
-  {
-    code: "needs-carrier",
-    kind: "nothing-to-measure",
-    description: "Requires a second audio input (a carrier or side-chain) the prober did not supply.",
-  },
-  {
-    code: "needs-impulse-response",
-    kind: "nothing-to-measure",
-    description: "A convolver requiring an IR file the prober did not load.",
-  },
-  {
-    code: "unpinnable",
-    kind: "nothing-to-measure",
-    description:
-      "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
+  "needs-carrier":
+    "Requires a second audio input (a carrier or side-chain) the prober did not supply.",
+  "needs-impulse-response":
+    "A convolver requiring an IR file the prober did not load.",
+  "unpinnable":
+    "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
       "whitespace, a manifest using @base or a percent-encoded IRI, or a CLAP plugin with more parameters than the " +
       "host accepts. The plugin stays unpinned, never partly pinned.",
-  },
-  {
-    code: "no-voices",
-    kind: "nothing-to-measure",
-    description:
-      "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
+  "no-voices":
+    "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
       "cost with notes held cannot be taken.",
-  },
-  {
-    code: "notes-unplayable",
-    kind: "nothing-to-measure",
-    description: "An instrument whose note input reads no dialect the prober speaks (CLAP's or MIDI's): it cannot be played.",
-  },
-  {
-    code: "voices-unknown",
-    kind: "not-attempted",
-    description:
-      "An instrument that declares no voice capacity, measured by a run given no probe count (`--probe-notes`): " +
+  "notes-unplayable":
+    "An instrument whose note input reads no dialect the prober speaks (CLAP's or MIDI's): it cannot be played.",
+  "voices-unknown":
+    "An instrument that declares no voice capacity, measured by a run given no probe count (`--probe-notes`): " +
       "the run did not know how many notes to hold, so it timed none.",
-  },
-  {
-    code: "refused-instantiation",
-    kind: "probe-failed",
-    description: "The plugin would not instantiate at this rate or block size.",
-  },
-  {
-    code: "probe-crashed",
-    kind: "probe-failed",
-    description: "The probe worker died (signal or abort) while hosting this plugin.",
-  },
-  {
-    code: "probe-timeout",
-    kind: "probe-failed",
-    description: "The probe exceeded its per-plugin time limit and was abandoned.",
-  },
-  {
-    code: "non-finite-output",
-    kind: "probe-failed",
-    description: "Output contained NaN or infinity, so no onset or block time could be trusted.",
-  },
-  {
-    code: "not-installed",
-    kind: "probe-failed",
-    description:
-      "The URI was not present in this machine's LV2 world. A fact about this installation, " +
+  "refused-instantiation":
+    "The plugin would not instantiate at this rate or block size.",
+  "probe-crashed":
+    "The probe worker died (signal or abort) while hosting this plugin.",
+  "probe-timeout":
+    "The probe exceeded its per-plugin time limit and was abandoned.",
+  "non-finite-output":
+    "Output contained NaN or infinity, so no onset or block time could be trusted.",
+  "not-installed":
+    "The URI was not present in this machine's LV2 world. A fact about this installation, " +
       "not about the plugin — another host may well have it.",
-  },
-  {
-    code: "worker-nonconforming",
-    kind: "probe-failed",
-    description:
-      "The plugin's LV2_Worker_Interface leaves work or work_response NULL, which the LV2 worker " +
+  "worker-nonconforming":
+    "The plugin's LV2_Worker_Interface leaves work or work_response NULL, which the LV2 worker " +
       "specification does not allow: it was refused before any call, not measured.",
-  },
-  {
-    code: "probe-error",
-    kind: "probe-failed",
-    description:
-      "The probe reported a failure with no more specific term. Its own words are kept verbatim " +
+  "probe-error":
+    "The probe reported a failure with no more specific term. Its own words are kept verbatim " +
       "in the measurement's `unmeasuredDetail`, so a coarse code never destroys the detail.",
-  },
-  {
-    code: "not-attempted",
-    kind: "not-attempted",
-    description: "This run did not cover this plugin for this dimension. A partial run, not a finding.",
-  },
-];
+  "not-attempted":
+    "This run did not cover this plugin for this dimension. A partial run, not a finding.",
+};
 
-const UNMEASURED_BY_CODE: ReadonlyMap<string, UnmeasuredTerm> = new Map(
+/** Every reason a figure may be absent, in the contract's order, of the contract's kind. */
+export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = Object.values(MEASUREMENT_UNMEASURED_REASONS).map(
+  (reason) => ({ code: reason.word, kind: reason.group, description: UNMEASURED_DESCRIPTIONS[reason.word] }),
+);
+
+const UNMEASURED_BY_CODE: ReadonlyMap<string, UnmeasuredTerm> = new Map<string, UnmeasuredTerm>(
   UNMEASURED_TERMS.map((term) => [term.code, term]),
 );
 
@@ -192,25 +171,19 @@ export interface ScalingTerm {
   readonly description: string;
 }
 
-export const SCALING_TERMS: readonly ScalingTerm[] = [
-  {
-    code: "fixed-frame",
-    description: "Constant frame count at every rate — an FFT window. Milliseconds halve when the rate doubles.",
-  },
-  {
-    code: "fixed-time",
-    description: "Constant milliseconds at every rate — a look-ahead. Frames double when the rate doubles.",
-  },
-  { code: "zero", description: "No latency a mix can notice at any measured rate." },
-  {
-    code: "nonconforming",
-    description:
-      "Fits neither law at a magnitude that reaches a mix: the plugin changes what it does with " +
-      "the rate. Flagged rather than averaged; nothing may be projected from it.",
-  },
-  { code: "single-rate", description: "One usable reading, so no law can be fitted." },
-  { code: "unmeasured", description: "No rate produced a figure." },
-];
+/** A word of the contract's MEASUREMENT_LATENCY_SCALING. */
+export type ScalingCode = (typeof MEASUREMENT_LATENCY_SCALING_WORDS)[number];
+
+export const SCALING_TERMS: readonly ScalingTerm[] = described(MEASUREMENT_LATENCY_SCALING_WORDS, {
+  "fixed-frame": "Constant frame count at every rate — an FFT window. Milliseconds halve when the rate doubles.",
+  "fixed-time": "Constant milliseconds at every rate — a look-ahead. Frames double when the rate doubles.",
+  zero: "No latency a mix can notice at any measured rate.",
+  nonconforming:
+    "Fits neither law at a magnitude that reaches a mix: the plugin changes what it does with " +
+    "the rate. Flagged rather than averaged; nothing may be projected from it.",
+  "single-rate": "One usable reading, so no law can be fitted.",
+  unmeasured: "No rate produced a figure.",
+});
 
 const SCALING_CODES: ReadonlySet<string> = new Set(SCALING_TERMS.map((t) => t.code));
 
@@ -225,60 +198,55 @@ export function isKnownScalingCode(code: string): boolean {
  * detector's rather than the plugin's, and `informational-rate`, where only a reading below
  * the operational rates breaks the law (`lv2-measurement-interchange.md` §1a).
  */
-export const SCALING_NOTE_TERMS = [
-  {
-    code: "below-budget",
-    description:
-      "The readings fit no law, but every one of them is inside the per-channel latency budget, " +
-      "so the disagreement is measurement noise rather than plugin behaviour.",
-  },
-  {
-    code: "informational-rate",
-    description:
-      "The readings together fit no law, but those at the operational rates (48 kHz and up) do; " +
-      "the reading below them stays in perRate as information and does not flag the plugin.",
-  },
-] as const satisfies readonly ScalingTerm[];
+export const SCALING_NOTE_TERMS = described(MEASUREMENT_LATENCY_SCALING_NOTES_WORDS, {
+  "below-budget":
+    "The readings fit no law, but every one of them is inside the per-channel latency budget, " +
+    "so the disagreement is measurement noise rather than plugin behaviour.",
+  "informational-rate":
+    "The readings together fit no law, but those at the operational rates (48 kHz and up) do; " +
+    "the reading below them stays in perRate as information and does not flag the plugin.",
+});
 
 /** One of the {@link SCALING_NOTE_TERMS} codes — the words `latency.scalingNote` may carry. */
-export type ScalingNoteCode = (typeof SCALING_NOTE_TERMS)[number]["code"];
+export type ScalingNoteCode = (typeof MEASUREMENT_LATENCY_SCALING_NOTES_WORDS)[number];
 
 /**
  * Why one rate's reading was excluded from the fit and from every rate resolution. A
  * failed reading served as an exact answer is worse than no reading, because a zero reads
  * as confidence.
  */
-export const EXCLUSION_TERMS: readonly ScalingTerm[] = [
-  {
-    code: "impossible-zero",
-    description:
-      "Zero frames at this rate while another rate measured non-zero. Both scaling laws map zero " +
-      "to zero, so no single latency produces this; the onset detector was defeated.",
-  },
-];
+export const EXCLUSION_TERMS: readonly ScalingTerm[] = described(MEASUREMENT_LATENCY_EXCLUSIONS_WORDS, {
+  "impossible-zero":
+    "Zero frames at this rate while another rate measured non-zero. Both scaling laws map zero " +
+    "to zero, so no single latency produces this; the onset detector was defeated.",
+});
 
 // ---------------------------------------------------------------------------
 // How a figure was taken
 // ---------------------------------------------------------------------------
 
-/** The measurement methods the format has names for. */
+/** How a latency figure was taken: a word of the contract's MEASUREMENT_LATENCY_METHODS. */
+export type LatencyMethodCode = (typeof MEASUREMENT_LATENCY_METHODS_WORDS)[number];
+
+/** How a cost figure was taken: a word of the contract's MEASUREMENT_COST_METHODS. */
+export type CostMethodCode = (typeof MEASUREMENT_COST_METHODS_WORDS)[number];
+
+/** The measurement methods the format has names for: the latency methods, then the cost methods. */
 export const METHOD_TERMS: readonly ScalingTerm[] = [
-  {
-    code: "impulse-onset",
-    description:
+  ...described(MEASUREMENT_LATENCY_METHODS_WORDS, {
+    "impulse-onset":
       "Latency as the round-trip delay from a unit impulse to the first output sample above the " +
       "residual floor. Measures the plugin, not what it declares.",
-  },
-  {
-    code: "declared-port",
-    description: "Latency read from the plugin's own lv2:latency output port. What it CLAIMS.",
-  },
-  {
-    code: "block-time-percentile",
-    description:
+    "declared-port": "Latency read from the plugin's own lv2:latency output port. What it CLAIMS.",
+    "note-onset":
+      "An instrument's latency: the delay from a note on to the first output sample above the " +
+      "residual floor. Measures what the plugin does with a held note.",
+  }),
+  ...described(MEASUREMENT_COST_METHODS_WORDS, {
+    "block-time-percentile":
       "Cost as a percentile of per-block wall time under a sustained stimulus, warm-up blocks " +
       "discarded, normalised to nanoseconds per sample.",
-  },
+  }),
 ];
 
 const METHOD_CODES: ReadonlySet<string> = new Set(METHOD_TERMS.map((t) => t.code));
@@ -295,7 +263,7 @@ export function isKnownMethodCode(code: string): boolean {
  * hosting verdict — whether a plugin survives, whether its `run()` is RT-clean, what it
  * demands of a host — and merge under exactly the same per-plugin, per-DIMENSION precedence.
  */
-export const MEASUREMENT_DIMENSIONS = ["latency", "cost", "stability", "rtSafety", "features"] as const;
+export const MEASUREMENT_DIMENSIONS = MEASUREMENT_DIMENSIONS_WORDS;
 
 /**
  * The dimensions the standalone prober (`scan.py` + `benchmark.py`, driven by `lv2-measure.mjs`
@@ -321,19 +289,19 @@ export function readDimension(value: unknown): MeasurementDimension | undefined 
 }
 
 /**
- * The four ratings a verdict speaks (`lv2-measurement-interchange.md` §3b) — the ONE list; the
- * rating vocabulary (`rating.ts`) derives its type from it, so the document and the classifier
- * can never disagree on a word.
+ * The four ratings a verdict speaks (`lv2-measurement-interchange.md` §3b): the contract's
+ * MEASUREMENT_VERDICT_RATINGS. The rating vocabulary (`rating.ts`) derives its type from it, so
+ * the document and the classifier can never disagree on a word.
  */
-export const VERDICT_RATINGS = ["suitable", "conditional", "unknown", "unsuitable"] as const;
+export const VERDICT_RATINGS = MEASUREMENT_VERDICT_RATINGS_WORDS;
 export type VerdictRating = (typeof VERDICT_RATINGS)[number];
 
-/** How a host runs its plugins. */
-export const HOST_ISOLATIONS = ["in-process", "per-process", "shared-process"] as const;
+/** How a host runs its plugins: the contract's RESOURCE_HOST_ISOLATIONS. */
+export const HOST_ISOLATIONS = RESOURCE_HOST_ISOLATIONS_WORDS;
 export type HostIsolation = (typeof HOST_ISOLATIONS)[number];
 
-/** Whether a host aligns on a plugin's reported latency (`compensated`) or only passes it on. */
-export const HOST_LATENCY_HANDLING = ["compensated", "uncompensated"] as const;
+/** Whether a host aligns on a plugin's reported latency (`compensated`) or only passes it on: the contract's RESOURCE_HOST_LATENCY_HANDLING. */
+export const HOST_LATENCY_HANDLING = RESOURCE_HOST_LATENCY_HANDLING_WORDS;
 export type HostLatencyHandling = (typeof HOST_LATENCY_HANDLING)[number];
 
 /**
@@ -342,7 +310,7 @@ export type HostLatencyHandling = (typeof HOST_LATENCY_HANDLING)[number];
  * the caller gave (`--probe-notes`, the console's `SYNTH_VOICE_PROBE_NOTES`), used when the plugin declares
  * none or when the caller asked for that count whatever it declares.
  */
-export const VOICE_BASES = ["declared", "probe"] as const;
+export const VOICE_BASES = MEASUREMENT_VOICE_BASES_WORDS;
 export type VoiceBasis = (typeof VOICE_BASES)[number];
 
 export function isVoiceBasis(value: unknown): value is VoiceBasis {

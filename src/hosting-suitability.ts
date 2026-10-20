@@ -691,7 +691,7 @@ export function featureReasons(
     );
     if (missing.length > 0) {
       out.push(
-        reason("features", "objective", "unsuitable", HOSTING_CODE.featuresMissing, {
+        reason("features", "objective", "unsuitable", HOSTING_CODE.featuresMissingAtLoad, {
           features: missing.join(" "),
         }),
       );
