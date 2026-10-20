@@ -1,3 +1,16 @@
+plugin-qualify (0.13.0) unstable; urgency=medium
+
+  * Hosting codes and measurement vocabulary are read from omx-contract
+    instead of a hand-kept copy, so a code or word the contract adds arrives
+    without an edit here.
+  * A feature the host does not provide is now reported as
+    hosting.features.missing, the name the refusing host already writes.
+  * A plugin with CV ports is rated the same as one without: a CV port marks
+    nothing by itself, and the feature code it used to be flagged under is no
+    longer written.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 20 Oct 2026 16:00:00 +0000
+
 plugin-qualify (0.12.0) unstable; urgency=medium
 
   * The cost of an instrument is measured with notes held, at every rate (the
