@@ -541,7 +541,7 @@ describe("a soak is judged at EVERY rate it ran, by the classifier alone (§3)",
     const cv = classify(measured({}, { lv2Features: { cvPorts: 16 } }));
     expect(cv.rating).toBe(plain.rating);
     expect(cv.deciding?.code).toBe(plain.deciding?.code);
-    expect(cv.reasons.map((r) => r.code)).not.toContain("hosting.features.cv-ports");
+    expect(cv.reasons.map((r) => r.code)).toEqual(plain.reasons.map((r) => r.code));
   });
 });
 
