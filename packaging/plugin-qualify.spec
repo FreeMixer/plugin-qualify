@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.11.0
+Version: 0.12.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -68,6 +68,13 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 20 2026 Pau Aliagas <linuxnow@gmail.com> - 0.12.0-1
+- The cost of an instrument is measured with notes held, at every rate (the
+  voices are part of the figure).
+- lv2_measure plays an LV2 instrument through its MIDI input, so an instrument
+  is measured sounding, not silent.
+- The full classifier reads the note sweep, and an instrument's latency comes
+  from a note instead of from an impulse it never sounds on.
 * Sun Oct 18 2026 Pau Aliagas <linuxnow@gmail.com> - 0.11.0-1
 - The default rates and quanta of a qualification now come from omx-contract
   instead of a copy kept here
