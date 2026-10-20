@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.12.0
+Version: 0.13.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -68,6 +68,15 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 20 2026 Pau Aliagas <linuxnow@gmail.com> - 0.13.0-1
+- Hosting codes and measurement vocabulary are read from omx-contract instead
+  of a hand-kept copy, so a code or word the contract adds arrives without an
+  edit here.
+- A feature the host does not provide is now reported as
+  hosting.features.missing, the name the refusing host already writes.
+- A plugin with CV ports is rated the same as one without: a CV port marks
+  nothing by itself, and the feature code it used to be flagged under is no
+  longer written.
 * Tue Oct 20 2026 Pau Aliagas <linuxnow@gmail.com> - 0.12.0-1
 - The cost of an instrument is measured with notes held, at every rate (the
   voices are part of the figure).
