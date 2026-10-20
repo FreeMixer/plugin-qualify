@@ -290,7 +290,7 @@ describe("the disqualifiers", () => {
   it("a required feature we do not provide is unsuitable", () => {
     const v = classify(measured({}, { lv2Features: { required: ["http://example.org/ns/needs#something"] } }));
     expect(v.rating).toBe("unsuitable");
-    expect(v.deciding?.code).toBe(HOSTING_CODE.featuresMissing);
+    expect(v.deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
   });
 
   it("instance-access is refused as a host we will not become", () => {
@@ -327,7 +327,7 @@ describe("the disqualifiers", () => {
     try {
       const v = classify(measured({}, { lv2Features: need }));
       expect(v.rating).toBe("unsuitable");
-      expect(v.reasons.find((r) => r.code === HOSTING_CODE.featuresMissing)?.params).toEqual({ features: worker });
+      expect(v.reasons.find((r) => r.code === HOSTING_CODE.featuresMissingAtLoad)?.params).toEqual({ features: worker });
     } finally {
       list.splice(at, 0, worker);
     }
@@ -807,8 +807,8 @@ describe("host profiles — the host is a declared input, the measurements are n
 
   it("the provided features are the profile's: state#makePath passes mod-host, fails the console and jalv", () => {
     const d = measured({}, { lv2Features: { required: ["http://lv2plug.in/ns/ext/state#makePath"] } });
-    expect(classify(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
-    expect(onJalv(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
+    expect(classify(d).deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
+    expect(onJalv(d).deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
     expect(onModHost(d).rating).toBe("suitable");
   });
 
