@@ -96,6 +96,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@openmixer/omx-contract": "^2.16.0"
+    "@openmixer/omx-contract": "^2.18.0"
   }
 }
