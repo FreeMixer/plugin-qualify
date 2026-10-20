@@ -16,6 +16,20 @@
  */
 
 import { nonEmptyString } from "./guards.js";
+import {
+  MEASUREMENT_UNMEASURED_KINDS_WORDS,
+  MEASUREMENT_UNMEASURED_REASONS,
+  MEASUREMENT_LATENCY_SCALING_WORDS,
+  MEASUREMENT_LATENCY_SCALING_NOTES_WORDS,
+  MEASUREMENT_LATENCY_EXCLUSIONS_WORDS,
+  MEASUREMENT_LATENCY_METHODS_WORDS,
+  MEASUREMENT_COST_METHODS_WORDS,
+  MEASUREMENT_DIMENSIONS_WORDS,
+  MEASUREMENT_VERDICT_RATINGS_WORDS,
+  MEASUREMENT_VOICE_BASES_WORDS,
+  RESOURCE_HOST_ISOLATIONS_WORDS,
+  RESOURCE_HOST_LATENCY_HANDLING_WORDS,
+} from "@openmixer/omx-contract";
 
 // ---------------------------------------------------------------------------
 // Why a figure is absent
@@ -23,7 +37,7 @@ import { nonEmptyString } from "./guards.js";
 
 /**
  * What an absent figure means for a MERGE, and it is the only distinction that changes
- * behaviour:
+ * behaviour (omx-contract's `MEASUREMENT_UNMEASURED_KINDS`):
  *
  * - `nothing-to-measure` — a property of the PLUGIN. An instrument has no audio input to
  *   drive; a meter has no audio output to read. Any prober on any machine reaches the
@@ -35,7 +49,7 @@ import { nonEmptyString } from "./guards.js";
  *   a finding nor a failure; it is the shape a PARTIAL run has, and partial runs are
  *   first-class here.
  */
-export type UnmeasuredKind = "nothing-to-measure" | "probe-failed" | "not-attempted";
+export type UnmeasuredKind = (typeof MEASUREMENT_UNMEASURED_KINDS_WORDS)[number];
 
 /** One term of the "why is there no figure" vocabulary. */
 export interface UnmeasuredTerm {
@@ -46,111 +60,59 @@ export interface UnmeasuredTerm {
 }
 
 /**
- * Every reason a figure may be absent. These were derived from a sweep of 958 plugins — each
- * one is an outcome that sweep actually produced, not a hypothetical.
+ * The prose for each of omx-contract's `MEASUREMENT_UNMEASURED_REASONS` — the console needs
+ * more than the contract's terse `doc`, so the words stay here while the codes and kinds come
+ * from the contract (FreeMixer/plugin-qualify#120). `Record` over every reason's word makes an
+ * omitted description a build-time error, so a code this file does not yet describe cannot
+ * silently reach `UNMEASURED_TERMS` undescribed.
  */
-export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = [
-  {
-    code: "no-audio-in",
-    kind: "nothing-to-measure",
-    description: "No audio input port: an instrument, a generator or an analyser. Nothing to drive.",
-  },
-  {
-    code: "no-audio-out",
-    kind: "nothing-to-measure",
-    description: "No audio output port: a meter or a sink. Nothing to read.",
-  },
-  {
-    code: "silent-output",
-    kind: "nothing-to-measure",
-    description:
-      "Instantiated and driven, but emitted nothing under a stimulus that should have passed. " +
-      "A convolver with no impulse response, a vocoder with no carrier, a gate that never opened.",
-  },
-  {
-    code: "needs-carrier",
-    kind: "nothing-to-measure",
-    description: "Requires a second audio input (a carrier or side-chain) the prober did not supply.",
-  },
-  {
-    code: "needs-impulse-response",
-    kind: "nothing-to-measure",
-    description: "A convolver requiring an IR file the prober did not load.",
-  },
-  {
-    code: "unpinnable",
-    kind: "nothing-to-measure",
-    description:
-      "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
-      "whitespace, a manifest using @base or a percent-encoded IRI, or a CLAP plugin with more parameters than the " +
-      "host accepts. The plugin stays unpinned, never partly pinned.",
-  },
-  {
-    code: "no-voices",
-    kind: "nothing-to-measure",
-    description:
-      "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
-      "cost with notes held cannot be taken.",
-  },
-  {
-    code: "notes-unplayable",
-    kind: "nothing-to-measure",
-    description: "An instrument whose note input reads no dialect the prober speaks (CLAP's or MIDI's): it cannot be played.",
-  },
-  {
-    code: "voices-unknown",
-    kind: "not-attempted",
-    description:
-      "An instrument that declares no voice capacity, measured by a run given no probe count (`--probe-notes`): " +
-      "the run did not know how many notes to hold, so it timed none.",
-  },
-  {
-    code: "refused-instantiation",
-    kind: "probe-failed",
-    description: "The plugin would not instantiate at this rate or block size.",
-  },
-  {
-    code: "probe-crashed",
-    kind: "probe-failed",
-    description: "The probe worker died (signal or abort) while hosting this plugin.",
-  },
-  {
-    code: "probe-timeout",
-    kind: "probe-failed",
-    description: "The probe exceeded its per-plugin time limit and was abandoned.",
-  },
-  {
-    code: "non-finite-output",
-    kind: "probe-failed",
-    description: "Output contained NaN or infinity, so no onset or block time could be trusted.",
-  },
-  {
-    code: "not-installed",
-    kind: "probe-failed",
-    description:
-      "The URI was not present in this machine's LV2 world. A fact about this installation, " +
-      "not about the plugin — another host may well have it.",
-  },
-  {
-    code: "worker-nonconforming",
-    kind: "probe-failed",
-    description:
-      "The plugin's LV2_Worker_Interface leaves work or work_response NULL, which the LV2 worker " +
-      "specification does not allow: it was refused before any call, not measured.",
-  },
-  {
-    code: "probe-error",
-    kind: "probe-failed",
-    description:
-      "The probe reported a failure with no more specific term. Its own words are kept verbatim " +
-      "in the measurement's `unmeasuredDetail`, so a coarse code never destroys the detail.",
-  },
-  {
-    code: "not-attempted",
-    kind: "not-attempted",
-    description: "This run did not cover this plugin for this dimension. A partial run, not a finding.",
-  },
-];
+const UNMEASURED_DESCRIPTIONS = {
+  "no-audio-in": "No audio input port: an instrument, a generator or an analyser. Nothing to drive.",
+  "no-audio-out": "No audio output port: a meter or a sink. Nothing to read.",
+  "silent-output":
+    "Instantiated and driven, but emitted nothing under a stimulus that should have passed. " +
+    "A convolver with no impulse response, a vocoder with no carrier, a gate that never opened.",
+  "needs-carrier": "Requires a second audio input (a carrier or side-chain) the prober did not supply.",
+  "needs-impulse-response": "A convolver requiring an IR file the prober did not load.",
+  unpinnable:
+    "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
+    "whitespace, a manifest using @base or a percent-encoded IRI, or a CLAP plugin with more parameters than the " +
+    "host accepts. The plugin stays unpinned, never partly pinned.",
+  "no-voices":
+    "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
+    "cost with notes held cannot be taken.",
+  "notes-unplayable": "An instrument whose note input reads no dialect the prober speaks (CLAP's or MIDI's): it cannot be played.",
+  "voices-unknown":
+    "An instrument that declares no voice capacity, measured by a run given no probe count (`--probe-notes`): " +
+    "the run did not know how many notes to hold, so it timed none.",
+  "refused-instantiation": "The plugin would not instantiate at this rate or block size.",
+  "probe-crashed": "The probe worker died (signal or abort) while hosting this plugin.",
+  "probe-timeout": "The probe exceeded its per-plugin time limit and was abandoned.",
+  "non-finite-output": "Output contained NaN or infinity, so no onset or block time could be trusted.",
+  "not-installed":
+    "The URI was not present in this machine's LV2 world. A fact about this installation, " +
+    "not about the plugin — another host may well have it.",
+  "worker-nonconforming":
+    "The plugin's LV2_Worker_Interface leaves work or work_response NULL, which the LV2 worker " +
+    "specification does not allow: it was refused before any call, not measured.",
+  "probe-error":
+    "The probe reported a failure with no more specific term. Its own words are kept verbatim " +
+    "in the measurement's `unmeasuredDetail`, so a coarse code never destroys the detail.",
+  "not-attempted": "This run did not cover this plugin for this dimension. A partial run, not a finding.",
+} as const satisfies Record<(typeof MEASUREMENT_UNMEASURED_REASONS)[keyof typeof MEASUREMENT_UNMEASURED_REASONS]["word"], string>;
+
+/**
+ * Every reason a figure may be absent, generated from omx-contract's `MEASUREMENT_UNMEASURED_REASONS`
+ * (FreeMixer/plugin-qualify#120): each one is an outcome a sweep of 958 plugins actually produced,
+ * not a hypothetical.
+ */
+export const UNMEASURED_TERMS: readonly UnmeasuredTerm[] = Object.values(MEASUREMENT_UNMEASURED_REASONS).map(
+  (reason) => ({
+    code: reason.word,
+    kind: reason.group,
+    description: UNMEASURED_DESCRIPTIONS[reason.word],
+  }),
+);
 
 const UNMEASURED_BY_CODE: ReadonlyMap<string, UnmeasuredTerm> = new Map(
   UNMEASURED_TERMS.map((term) => [term.code, term]),

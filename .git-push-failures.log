@@ -1,0 +1,9 @@
+remote: error: GH013: Repository rule violations found for refs/heads/lane/plugin-qualify-120-cluster.        
+remote: Review all repository rules at https://github.com/FreeMixer/plugin-qualify/rules?ref=refs%2Fheads%2Flane%2Fplugin-qualify-120-cluster        
+remote: 
+remote: - Cannot create ref due to creations being restricted.        
+remote: 
+To github.com:FreeMixer/plugin-qualify.git
+ ! [remote rejected] HEAD -> lane/plugin-qualify-120-cluster (push declined due to repository rule violations)
+error: failed to push some refs to 'github.com:FreeMixer/plugin-qualify.git'
+2026-10-20T01:39:28Z post-commit push FAILED for lane/plugin-qualify-120-cluster (origin unreachable or rejected)
