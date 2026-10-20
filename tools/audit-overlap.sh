@@ -99,9 +99,10 @@ pair() { # <a> <b>
   echo "pair $a $b shared=$s a=$na b=$nb overlap=$(( m ? 100 * s / m : 0 ))% diff=$d strings=$l"
 }
 
-count() { # <id> <repo> <git grep args>...
+count() { # <id> <repo> <git grep args> -- <pathspec>...   (this audit's own two files are never counted)
   local id="$1" repo="$2"; shift 2
-  echo "count $id $repo $(git -C "${ROOT[$repo]}" grep -IE "$@" | wc -l)"
+  local self=(":(exclude)tools/audit-overlap.sh" ":(exclude)docs/audit-qualify-vs-compat.md")
+  echo "count $id $repo $(git -C "${ROOT[$repo]}" grep -IE "$@" "${self[@]}" | wc -l)"
 }
 
 audit() {
