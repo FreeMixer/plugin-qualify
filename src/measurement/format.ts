@@ -147,7 +147,7 @@ export interface MeasurementHost {
 
 /** How the latency figures in this document were taken. */
 export interface LatencyMethod {
-  /** A {@link ../vocabulary.METHOD_TERMS} code — `impulse-onset` or `declared-port`. */
+  /** A {@link ../vocabulary.METHOD_TERMS} code — `impulse-onset`, `declared-port` or `note-onset`. */
   readonly method: string;
   readonly blockFrames: number;
   /** What was fed in, in words. An onset measured through an opened gate is not the same
