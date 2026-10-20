@@ -128,6 +128,10 @@ audit() {
   pair q.lv2-manifest c.lv2-manifest
   pair q.lv2-lilv c.lv2-lilv
   count q.calls-omx-clap-scan qualify -e 'omx-clap-scan' -- src
+  # clap-qualify's whole scan mode (--json), which writes the document omx-clap-scan writes, plus labels and pages
+  unit q.scan-mode     qualify   c  native/clap-qualify.c put_labels scan_params scan_remote_controls scan_audio_ports \
+                                    scan_plugin put_file_error scan_file_entry scan_file list_add is_clap walk scan
+  count c.scan-labels-pages clap-core -i -e 'remote_controls|enum_labels|"labels"' -- src/scan.c
 
   # 2. deterministic input
   count q.lcg-nr      qualify   -e '1664525u' -- native
@@ -184,6 +188,11 @@ audit() {
   unit c.stage-bench  clap-core c  tests/stage_bench.c main
   pair q.pct-c q.pct-py
   pair q.cost-c c.stage-bench
+
+  # the probing programs plugin-hostd's probe runs as its children today, and what the move into its child deletes
+  whole q.prober-clap qualify c  native/clap-qualify.c
+  whole q.prober-lv2  qualify c  native/lv2-measure.c
+  whole q.benchmark   qualify py tools/benchmark.py
 
   # 7. mod-host in plugin-qualify: code that runs it, and words that name it
   count q.modhost-spawn qualify -e "spawn[A-Za-z]*\\(['\"]mod-host|execvp?\\(\"mod-host" -- src native tools bin
