@@ -535,10 +535,13 @@ describe("a soak is judged at EVERY rate it ran, by the classifier alone (§3)",
     expect(soakFindings(soak, { ...P, soakDeadDropDb: 30 })?.failures).toEqual(["dead@192000"]);
   });
 
-  it("CV ports disqualify, read off the count the sweep took", () => {
-    const v = classify(measured({}, { lv2Features: { cvPorts: 2 } }));
-    expect(v.rating).toBe("unsuitable");
-    expect(v.deciding?.code).toBe(HOSTING_CODE.featuresCv);
+  it("CV ports are hosted (each a mono audio port, any number against the auxiliary limit), so they mark nothing", () => {
+    // omx-clap-core#268: the host carries CV ports; the one refusal left is its own too-many-ports at hosting time
+    const plain = classify(measured());
+    const cv = classify(measured({}, { lv2Features: { cvPorts: 16 } }));
+    expect(cv.rating).toBe(plain.rating);
+    expect(cv.deciding?.code).toBe(plain.deciding?.code);
+    expect(cv.reasons.map((r) => r.code)).not.toContain("hosting.features.cv-ports");
   });
 });
 

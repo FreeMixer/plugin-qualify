@@ -696,9 +696,6 @@ export function featureReasons(
         }),
       );
     }
-    if ((features.cvPorts ?? 0) > 0) {
-      out.push(reason("features", "objective", "unsuitable", HOSTING_CODE.featuresCv));
-    }
   }
   if (descriptor.hasMidiIn && !instruments) {
     out.push(reason("features", "objective", "conditional", HOSTING_CODE.featuresMidiIn));
