@@ -4,7 +4,7 @@
 #
 # Check an installed plugin-qualify package qualifies CLAP and LV2 plugins with nothing set: the
 # prober, the measurer and the interposer are the package's own, found where it installed them, and
-# the scanner is the one its Recommends pulled in.
+# the scanner is the one its omx-clap-host dependency pulled in.
 #
 #   packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <dir holding rt-safe.lv2, rt-unsafe.lv2>
 #
