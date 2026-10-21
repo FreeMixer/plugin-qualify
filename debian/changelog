@@ -1,3 +1,20 @@
+plugin-qualify (0.13.0) unstable; urgency=medium
+
+  * The hosting codes are read from omx-clap-core's installed TypeScript
+    module instead of omx-contract (the contract split moved
+    data/hosting/*.json there): HOSTING_CODE is omx-clap-core's tables now,
+    found at pkg-config --variable=tsdir omx-clap-core, the fetched checkout,
+    or /usr/share/omx-clap-core/ts (OMX_CLAP_CORE_TSDIR overrides).
+  * Two writes stop, as omx-clap-core 0.13.0 did: a topology past the
+    auxiliary limit is hosting.topology.too-many-ports instead of the retired
+    extra-inputs-fed-silence, and a CLAP's feature list is no longer judged
+    (the "not an audio effect" refusal is dropped).
+  * omx-clap-host is now a hard dependency (the TypeScript module above is
+    read at import), not merely recommended. Floors: omx-contract >= 3.0.0,
+    omx-clap-lv2 >= 0.13.0.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Wed, 21 Oct 2026 03:30:00 +0000
+
 plugin-qualify (0.12.0) unstable; urgency=medium
 
   * The cost of an instrument is measured with notes held, at every rate (the

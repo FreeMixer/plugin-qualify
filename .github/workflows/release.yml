@@ -90,8 +90,9 @@ jobs:
           name: ${{ matrix.artifact }}
           path: pkgs
 
-      # the FreeMixer channel serves omx-clap-host, which the package Recommends for omx-clap-scan, and
-      # the CLAP headers the fixtures build against on Debian
+      # the FreeMixer channel serves omx-clap-host, which the package now depends on (the hosting codes'
+      # TypeScript module, read at import, and omx-clap-scan), and the CLAP headers the fixtures build
+      # against on Debian
       - name: Install the package (Fedora)
         if: startsWith(matrix.image, 'fedora')
         run: |
