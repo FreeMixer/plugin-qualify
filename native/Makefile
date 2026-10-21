@@ -33,10 +33,10 @@ CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.1.4
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
-OMX_CONTRACT_VERSION := 2.10.1
+OMX_CONTRACT_VERSION := 3.0.0
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
-OMX_CLAP_CORE_VERSION := 0.8.0
+OMX_CLAP_CORE_VERSION := 0.13.0
 # the omx-dsp headers the measurers (omx_lin_to_db_d) and omx-clap-core's provider read: the packages' floor
 OMX_DSP_VERSION := 0.21.0
 
