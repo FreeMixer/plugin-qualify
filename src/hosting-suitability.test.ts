@@ -290,7 +290,7 @@ describe("the disqualifiers", () => {
   it("a required feature we do not provide is unsuitable", () => {
     const v = classify(measured({}, { lv2Features: { required: ["http://example.org/ns/needs#something"] } }));
     expect(v.rating).toBe("unsuitable");
-    expect(v.deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
+    expect(v.deciding?.code).toBe(HOSTING_CODE.featuresMissing);
   });
 
   it("instance-access is refused as a host we will not become", () => {
@@ -327,7 +327,7 @@ describe("the disqualifiers", () => {
     try {
       const v = classify(measured({}, { lv2Features: need }));
       expect(v.rating).toBe("unsuitable");
-      expect(v.reasons.find((r) => r.code === HOSTING_CODE.featuresMissingAtLoad)?.params).toEqual({ features: worker });
+      expect(v.reasons.find((r) => r.code === HOSTING_CODE.featuresMissing)?.params).toEqual({ features: worker });
     } finally {
       list.splice(at, 0, worker);
     }
@@ -345,7 +345,7 @@ describe("the cautions cap at conditional and stay isolated", () => {
     ],
     ["a plugin linking a GUI toolkit", { stability: { linksGuiToolkit: true } }, {}, HOSTING_CODE.stabilityLinksGuiToolkit],
     ["a MIDI input fed an empty sequence", {}, { hasMidiIn: true }, HOSTING_CODE.featuresMidiIn],
-    ["a topology beyond the strip's legs", {}, { audioInputs: 3, audioOutputs: 2 }, HOSTING_CODE.topologyExtraInputs],
+    ["a topology beyond the strip's legs", {}, { audioInputs: 3, audioOutputs: 2 }, HOSTING_CODE.topologyTooManyPorts],
   ];
   for (const [label, m, d, code] of cautions) {
     it(`${label} is conditional, and conditional is isolated`, () => {
@@ -702,13 +702,19 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
     expect(codeOf(v, "latency")).toEqual([HOSTING_CODE.latencyUnmeasured]);
   });
 
+  it("a plugin with no audio-effect feature is no longer refused for its kind (omx-clap-core 0.13.0 drops the check, #130)", () => {
+    const v = classify(clapDescriptor({}, cleanClap({ features: ["instrument", "synthesizer"] })));
+    expect(v.rating).toBe("suitable");
+    expect(v.path).toBe("in-process");
+    expect(codeOf(v, "features")).toEqual([HOSTING_CODE.featuresProvided]);
+  });
+
   const cells: ReadonlyArray<readonly [string, Partial<PluginClapMeasurement>, string, string, Record<string, unknown>]> = [
     ["no main input", { mainInputChannels: 0 }, "unsuitable", HOSTING_CODE.topologyNoAudioInput, {}],
     ["no main output", { mainOutputChannels: 0 }, "unsuitable", HOSTING_CODE.topologyNoAudioOutput, {}],
     ["wider than a strip", { mainInputChannels: 6, mainOutputChannels: 6 }, "unsuitable", HOSTING_CODE.topologyWiderThanStrip, { ins: 6, outs: 6 }],
-    ["an auxiliary (sidechain) input refuses the plugin", { sidechainInputs: 1 }, "unsuitable", HOSTING_CODE.topologyExtraInputs, { ins: 2, outs: 2, sidechains: 1 }],
+    ["an auxiliary (sidechain) input refuses the plugin", { sidechainInputs: 1 }, "unsuitable", HOSTING_CODE.topologyTooManyPorts, { ins: 2, outs: 2, sidechains: 1 }],
     ["latency that lies at one rate", { latency: { ...cleanClap().latency, "96000": { declaredFrames: 64, measuredFrames: 71 } } }, "unsuitable", HOSTING_CODE.clapLatencyMismatch, { rate: 96000, declared: 64, measured: 71 }],
-    ["not an audio effect", { features: ["instrument", "synthesizer"] }, "unsuitable", HOSTING_CODE.clapNotAudioEffect, { features: "instrument synthesizer" }],
     ["init or activate failed headless", { headlessOk: false }, "unsuitable", HOSTING_CODE.clapHeadlessFailed, {}],
     ["an instrument: a note input", { noteInputs: 1 }, "unsuitable", HOSTING_CODE.clapNoteInput, { noteInputs: 1 }],
     ["a thread-check violation", { threadViolations: 2 }, "unsuitable", HOSTING_CODE.clapThreadViolation, { violations: 2 }],
@@ -810,8 +816,8 @@ describe("host profiles — the host is a declared input, the measurements are n
 
   it("the provided features are the profile's: state#makePath passes mod-host, fails the console and jalv", () => {
     const d = measured({}, { lv2Features: { required: ["http://lv2plug.in/ns/ext/state#makePath"] } });
-    expect(classify(d).deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
-    expect(onJalv(d).deciding?.code).toBe(HOSTING_CODE.featuresMissingAtLoad);
+    expect(classify(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
+    expect(onJalv(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
     expect(onModHost(d).rating).toBe("suitable");
   });
 
@@ -963,12 +969,11 @@ describe("each core refusal declares its one-line description beside it", () => 
 
   it("carries the lines the header renders, by value", () => {
     expect(CLAP_CORE_REFUSAL_DESCRIPTIONS).toEqual({
-      notAudioEffect: "the plugin is not an audio effect",
       noteInput: "the plugin declares a note input the configuration refuses",
       noAudioInput: "the plugin has no audio input",
       noAudioOutput: "the plugin has no audio output",
       widerThanStrip: "the plugin is wider than the strip",
-      extraInputs: "the plugin has extra inputs, fed silence",
+      tooManyPorts: "the plugin has more ports than the auxiliary limit allows",
       crashedLive: "the plugin crashed live on this rig",
       outputNonFinite: "the plugin produced non-finite output",
     });

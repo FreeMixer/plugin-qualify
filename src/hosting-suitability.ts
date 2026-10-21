@@ -148,12 +148,11 @@ export type HostingCode = (typeof HOSTING_CODE)[keyof typeof HOSTING_CODE];
  */
 export const CLAP_CORE_REFUSALS = {
   headlessFailed: "clapHeadlessFailed",
-  notAudioEffect: "clapNotAudioEffect",
   noteInput: "clapNoteInput",
   noAudioInput: "topologyNoAudioInput",
   noAudioOutput: "topologyNoAudioOutput",
   widerThanStrip: "topologyWiderThanStrip",
-  extraInputs: "topologyExtraInputs",
+  tooManyPorts: "topologyTooManyPorts",
   crashedLive: "stabilityCrashedLive",
   outputNonFinite: "outputNonFinite",
 } as const satisfies Record<string, keyof typeof HOSTING_CODE>;
@@ -164,12 +163,11 @@ export const CLAP_CORE_REFUSALS = {
  * refusal so the renderer holds no prose. A refusal without a line renders bare.
  */
 export const CLAP_CORE_REFUSAL_DESCRIPTIONS: { readonly [K in keyof typeof CLAP_CORE_REFUSALS]?: string } = {
-  notAudioEffect: "the plugin is not an audio effect",
   noteInput: "the plugin declares a note input the configuration refuses",
   noAudioInput: "the plugin has no audio input",
   noAudioOutput: "the plugin has no audio output",
   widerThanStrip: "the plugin is wider than the strip",
-  extraInputs: "the plugin has extra inputs, fed silence",
+  tooManyPorts: "the plugin has more ports than the auxiliary limit allows",
   crashedLive: "the plugin crashed live on this rig",
   outputNonFinite: "the plugin produced non-finite output",
 };
@@ -691,7 +689,7 @@ export function featureReasons(
     );
     if (missing.length > 0) {
       out.push(
-        reason("features", "objective", "unsuitable", HOSTING_CODE.featuresMissingAtLoad, {
+        reason("features", "objective", "unsuitable", HOSTING_CODE.featuresMissing, {
           features: missing.join(" "),
         }),
       );
@@ -818,7 +816,7 @@ export function hostingTopologyReasons(
     ];
   }
   return [
-    reason("topology", "objective", "conditional", HOSTING_CODE.topologyExtraInputs, { ins, outs }),
+    reason("topology", "objective", "conditional", HOSTING_CODE.topologyTooManyPorts, { ins, outs }),
   ];
 }
 
@@ -842,7 +840,7 @@ export function clapTopologyReasons(clap: PluginClapMeasurement | undefined, ins
     return [reason("topology", "objective", "unsuitable", HOSTING_CODE.topologyWiderThanStrip, { ins, outs })];
   }
   if (clap.sidechainInputs > 0) {
-    return [reason("topology", "objective", "unsuitable", HOSTING_CODE.topologyExtraInputs, { ins, outs, sidechains: clap.sidechainInputs })];
+    return [reason("topology", "objective", "unsuitable", HOSTING_CODE.topologyTooManyPorts, { ins, outs, sidechains: clap.sidechainInputs })];
   }
   return [reason("topology", "objective", "suitable", HOSTING_CODE.topologyMatched, { ins, outs })];
 }
@@ -896,11 +894,6 @@ export function clapFeatureReasons(
   }
   const out: HostingReason[] = [];
   const offered = profile.clapExtensions;
-  const kindHosted =
-    clap.features.includes(CLAP_FEATURE_AUDIO_EFFECT) || (profile.instruments && clap.features.includes(CLAP_FEATURE_INSTRUMENT));
-  if (!kindHosted) {
-    out.push(reason("features", "objective", "unsuitable", HOSTING_CODE.clapNotAudioEffect, { features: clap.features.join(" ") }));
-  }
   if (!clap.headlessOk) {
     out.push(reason("features", "objective", "unsuitable", HOSTING_CODE.clapHeadlessFailed));
   } else {
