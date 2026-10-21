@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.12.0
+Version: 0.13.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -21,8 +21,8 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
-BuildRequires: pkgconfig(omx-contract) >= 2.10.1
-BuildRequires: pkgconfig(omx-clap-lv2) >= 0.8.0
+BuildRequires: pkgconfig(omx-contract) >= 3.0.0
+BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
 
 Requires: nodejs >= 18
@@ -31,8 +31,9 @@ Requires: python3-lilv
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
 Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
-# omx-clap-scan, which lists the plugins in a .clap before each is qualified
-Recommends: omx-clap-host
+# the hosting codes' TypeScript module (src/hosting-codes.ts, read at import) and omx-clap-scan,
+# which lists the plugins in a .clap before each is qualified
+Requires: omx-clap-host >= 0.13.0
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
@@ -68,6 +69,19 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Wed Oct 21 2026 Pau Aliagas <linuxnow@gmail.com> - 0.13.0-1
+- The hosting codes are read from omx-clap-core's installed TypeScript
+  module instead of omx-contract (the contract split moved
+  data/hosting/*.json there): HOSTING_CODE is omx-clap-core's tables now,
+  found at pkg-config --variable=tsdir omx-clap-core, the fetched checkout,
+  or /usr/share/omx-clap-core/ts (OMX_CLAP_CORE_TSDIR overrides)
+- Two writes stop, as omx-clap-core 0.13.0 did: a topology past the
+  auxiliary limit is hosting.topology.too-many-ports instead of the retired
+  extra-inputs-fed-silence, and a CLAP's feature list is no longer judged
+  (the "not an audio effect" refusal is dropped)
+- omx-clap-host is now a hard dependency (the TypeScript module above is
+  read at import), not merely recommended. Floors: omx-contract >= 3.0.0,
+  omx-clap-lv2 >= 0.13.0
 * Tue Oct 20 2026 Pau Aliagas <linuxnow@gmail.com> - 0.12.0-1
 - The cost of an instrument is measured with notes held, at every rate (the
   voices are part of the figure).
