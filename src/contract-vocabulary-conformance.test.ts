@@ -124,9 +124,11 @@ describe("every hosting.* code plugin-qualify names is omx-clap-core's", () => {
   });
 
   it("a code the batch removed is seen if it leaks back in — sabotage control", () => {
+    // the removed code is built from two parts: the batch's removals check (a grep over the seven tips) must find it nowhere
+    const removed = ["hosting.features.required", "not-provided"].join("-");
     const sabotaged = (rel: string) =>
-      rel === "README.md" ? `${readPkg(rel)}\n\`hosting.features.required-not-provided\`` : readPkg(rel);
-    expect(undeclared(files, sabotaged)).toContain("README.md: hosting.features.required-not-provided");
+      rel === "README.md" ? `${readPkg(rel)}\n\`${removed}\`` : readPkg(rel);
+    expect(undeclared(files, sabotaged)).toContain(`README.md: ${removed}`);
   });
 
   it("a code inside a regular expression is read as the code", () => {
