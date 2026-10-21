@@ -4,64 +4,181 @@
  * The hosting verdict's message codes. Codes, never prose: the surface renders the operator's
  * locale.
  *
- * omx-contract declares every hosting code, one `HOSTING_<DIMENSION>_CODES` table per dimension
- * (its `data/hosting/<dimension>.json`). {@link HOSTING_CODE} is those tables flattened into one
- * `key: code` map, read from the contract at load: a code the contract does not declare cannot be
- * named here, and a dimension the contract adds arrives without an edit.
- *
- * {@link RETIRED_HOSTING_CODES} are codes the contract still declares and plugin-qualify no longer
- * writes or reads: they are left out of the map, so nothing here can name them.
+ * omx-clap-core declares every hosting code now (the contract split moved `data/hosting/*.json`
+ * there, byte for byte): one `HOSTING_<DIMENSION>_CODES` table per dimension, rendered into the
+ * TypeScript modules its package installs under `pkg-config --variable=tsdir omx-clap-core`
+ * (BUILDING.md) — `omx-clap-core-vocabulary.js` for the dimensions carried from omx-contract,
+ * `omx-clap-core-hosting.js` for `hosting.idle.*`, its own (both with a `.d.ts`). {@link
+ * HOSTING_CODE} is those tables flattened into one `key: code` map, loaded at import: a code
+ * neither module declares cannot be named here, and a dimension either adds arrives without an
+ * edit.
  */
-import * as contract from "@openmixer/omx-contract";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-type Contract = typeof contract;
+/** The two TypeScript modules omx-clap-core's `tsdir` carries, each a `HOSTING_<DIMENSION>_CODES` source. */
+const CLAP_CORE_TS_MODULES = ["omx-clap-core-vocabulary.js", "omx-clap-core-hosting.js"] as const;
+
+/** This package's own root, resolved from this module so it follows wherever it is installed. */
+const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+/** `native/fetch-deps.sh`'s own checkout of omx-clap-core, for a build with no omx-clap-core-devel installed. */
+const DEPS_TS_DIR = join(PACKAGE_ROOT, "native/deps/omx-clap-core/ts");
+
+/** Where `make install` of omx-clap-host puts them (BUILDING.md), for a run with no `pkg-config` binary at all. */
+const DEFAULT_SYSTEM_TS_DIR = "/usr/share/omx-clap-core/ts";
+
+/** `pkg-config --variable=tsdir omx-clap-core`, or `undefined` where pkg-config or the package is absent. */
+function pkgConfigTsDir(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  try {
+    const out = execFileSync(env.PKG_CONFIG ?? "pkg-config", ["--variable=tsdir", "omx-clap-core"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out === "" ? undefined : out;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
- * Codes the contract declares that plugin-qualify does not speak.
- *
- * `hosting.features.required-not-provided` named the fact `hosting.features.missing` names: a
- * required feature the host does not provide. The host that refuses the plugin is the authority
- * on the name, so plugin-qualify writes `hosting.features.missing` (the contract's
- * `featuresMissingAtLoad`) and drops its own. A retired code the contract no longer declares
- * fails the conformance test, so this list empties as the contract catches up.
+ * Where omx-clap-core's TypeScript modules are looked for, in order: `OMX_CLAP_CORE_TSDIR` when
+ * set (and only that), else `pkg-config --variable=tsdir omx-clap-core`, else the checkout
+ * `native/fetch-deps.sh` stages, else the path `make install` of omx-clap-host uses by default —
+ * a packaged plugin-qualify's runtime has no `pkg-config` binary to ask.
  */
-export const RETIRED_HOSTING_CODES = ["hosting.features.required-not-provided"] as const;
-type RetiredCode = (typeof RETIRED_HOSTING_CODES)[number];
+export function clapCoreTsDirCandidates(env: Readonly<Record<string, string | undefined>> = process.env): readonly string[] {
+  const set = env.OMX_CLAP_CORE_TSDIR;
+  if (set !== undefined && set !== "") return [set];
+  const fromPkgConfig = pkgConfigTsDir(env);
+  return [...(fromPkgConfig === undefined ? [] : [fromPkgConfig]), DEPS_TS_DIR, DEFAULT_SYSTEM_TS_DIR];
+}
 
-/** The contract's hosting tables, by export name: every `HOSTING_<DIMENSION>_CODES`. */
-type HostingTables = {
-  [Name in keyof Contract as Name extends `HOSTING_${string}_CODES` ? Name : never]: Contract[Name];
-};
+function locateClapCoreTsDir(): string {
+  const candidates = clapCoreTsDirCandidates();
+  const dir = candidates.find((d) => CLAP_CORE_TS_MODULES.every((m) => existsSync(join(d, m))));
+  if (dir === undefined) {
+    throw new Error(
+      `omx-clap-core's TypeScript modules (${CLAP_CORE_TS_MODULES.join(", ")}) were not found in any of: ` +
+        `${candidates.join(", ")}. Install omx-clap-core-devel (pkg-config omx-clap-core), set ` +
+        "OMX_CLAP_CORE_TSDIR to its tsdir, or run native/fetch-deps.sh.",
+    );
+  }
+  return dir;
+}
 
-type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
-
-/** Every hosting table's `key: code`, merged into one record. */
-type HostingCodeTable = UnionToIntersection<
-  {
-    [Name in keyof HostingTables]: {
-      readonly [Key in keyof HostingTables[Name] as HostingTables[Name][Key] extends { readonly code: RetiredCode }
-        ? never
-        : Key]: HostingTables[Name][Key] extends { readonly code: infer Code } ? Code : never;
-    };
-  }[keyof HostingTables]
->;
-
-/** True for an export name that is one of the contract's hosting tables. */
+/** True for an export name that is one of omx-clap-core's hosting tables. */
 export function isHostingTableName(name: string): boolean {
   return /^HOSTING_[A-Z0-9_]+_CODES$/.test(name);
 }
 
-function flatten(): HostingCodeTable {
+type HostingEntries = Record<string, { readonly code: string }>;
+
+async function loadHostingTables(): Promise<Record<string, HostingEntries>> {
+  const dir = locateClapCoreTsDir();
+  const tables: Record<string, HostingEntries> = {};
+  for (const name of CLAP_CORE_TS_MODULES) {
+    const mod: Record<string, unknown> = await import(pathToFileURL(join(dir, name)).href);
+    for (const [exportName, table] of Object.entries(mod)) {
+      if (isHostingTableName(exportName)) tables[exportName] = table as HostingEntries;
+    }
+  }
+  return tables;
+}
+
+function flatten(tables: Record<string, HostingEntries>): HostingCodeTable {
   const table: Record<string, string> = {};
-  for (const [name, entries] of Object.entries(contract)) {
-    if (!isHostingTableName(name)) continue;
-    for (const [key, entry] of Object.entries(entries as Record<string, { readonly code: string }>)) {
-      if ((RETIRED_HOSTING_CODES as readonly string[]).includes(entry.code)) continue;
-      if (key in table) throw new Error(`omx-contract declares the hosting key ${key} twice (${name})`);
+  for (const [name, entries] of Object.entries(tables)) {
+    for (const [key, entry] of Object.entries(entries)) {
+      if (key in table) throw new Error(`omx-clap-core declares the hosting key ${key} twice (${name})`);
       table[key] = entry.code;
     }
   }
   return Object.freeze(table) as unknown as HostingCodeTable;
 }
 
-export const HOSTING_CODE: HostingCodeTable = flatten();
+/**
+ * omx-clap-core's hosting codes, by key, across its two TypeScript modules — hand-kept here
+ * (not derived from a static import: the source is a runtime-resolved install directory, not an
+ * npm dependency) and held to the real modules by
+ * `src/contract-vocabulary-conformance.test.ts`, which turns red on any drift either way.
+ */
+export interface HostingCodeTable {
+  readonly clapExtensionsNotCovered: "hosting.clap.extensions-not-covered";
+  readonly clapFormatNotHosted: "hosting.clap.format-not-hosted";
+  readonly clapHeadlessFailed: "hosting.clap.headless-failed";
+  readonly clapLatencyMismatch: "hosting.clap.latency-mismatch";
+  readonly clapNoteInput: "hosting.clap.note-input";
+  readonly clapProcessError: "hosting.clap.process-error";
+  readonly clapThreadViolation: "hosting.clap.thread-violation";
+  readonly clapUnqualified: "hosting.clap.unqualified";
+  readonly costAboveCeiling: "hosting.cost.above-ceiling";
+  readonly costFieldsMissing: "hosting.cost.fields-missing";
+  readonly costSpiky: "hosting.cost.spiky-tail";
+  readonly costUnmeasured: "hosting.cost.unmeasured-at-rate-and-quantum";
+  readonly costWithinCeiling: "hosting.cost.within-ceiling";
+  readonly featuresAtomInUnfed: "hosting.features.atom-in-unfed";
+  readonly featuresDisqualifying: "hosting.features.host-not-provided";
+  readonly featuresMidiIn: "hosting.features.midi-in-fed-empty";
+  readonly featuresMissing: "hosting.features.missing";
+  readonly featuresPortsUnreadable: "hosting.features.ports-unreadable";
+  readonly featuresProvided: "hosting.features.all-provided";
+  readonly featuresUnscanned: "hosting.features.scan-predates-field";
+  readonly idleHoldRefused: "hosting.idle.hold-refused";
+  readonly latencyNonconforming: "hosting.latency.nonconforming";
+  readonly latencyParameterDependent: "hosting.latency.parameter-dependent";
+  readonly latencyResolved: "hosting.latency.resolved";
+  readonly latencyUnmeasured: "hosting.latency.unmeasured";
+  readonly outputNonFinite: "hosting.output.non-finite";
+  readonly overrideIsolated: "hosting.override.curator-isolated";
+  readonly patchBusy: "hosting.patch.busy";
+  readonly patchNotWritable: "hosting.patch.not-writable";
+  readonly patchTooLarge: "hosting.patch.too-large";
+  readonly presetNotFound: "hosting.preset.not-found";
+  readonly hostProvenanceDiffers: "hosting.provenance.host-differs";
+  readonly sweepControlDidNotFire: "hosting.provenance.sweep-control-did-not-fire";
+  readonly disabled: "hosting.disabled";
+  readonly linked: "hosting.linked";
+  readonly noRealisation: "hosting.no-realisation";
+  readonly realisedInProcess: "hosting.realised.in-process";
+  readonly unjudged: "hosting.unjudged";
+  readonly rtSafetyClean: "hosting.rt-safety.clean-under-sweep";
+  readonly rtSafetyNotReproducible: "hosting.rt-safety.not-reproducible";
+  readonly rtSafetyNotesClean: "hosting.rt-safety.clean-under-notes";
+  readonly rtSafetyNotesUnmeasured: "hosting.rt-safety.notes-unmeasured";
+  readonly rtSafetyNotesViolations: "hosting.rt-safety.violations-under-notes";
+  readonly rtSafetyUnmeasured: "hosting.rt-safety.unmeasured";
+  readonly rtSafetyViolations: "hosting.rt-safety.violations-in-run";
+  readonly stabilityBelowFloor: "hosting.stability.cycles-below-floor";
+  readonly stabilityCrashUnattributed: "hosting.stability.crash-unattributed";
+  readonly stabilityCrashedAttributed: "hosting.stability.crashed-attributed-plugin";
+  readonly stabilityCrashedLive: "hosting.stability.crashed-live-on-this-rig";
+  readonly stabilityLinksGuiToolkit: "hosting.stability.links-gui-toolkit";
+  readonly stabilitySoakFailedAtRate: "hosting.stability.soak-failed-at-rate";
+  readonly stabilitySoaked: "hosting.stability.soaked";
+  readonly stabilitySpawnsThreads: "hosting.stability.spawns-threads";
+  readonly stabilityUnmeasured: "hosting.stability.unmeasured";
+  readonly stabilityUnsoaked: "hosting.stability.unsoaked";
+  readonly stateNotACopy: "hosting.state.not-a-copy";
+  readonly statePathOnAudio: "hosting.state.path-on-audio";
+  readonly statePathOutside: "hosting.state.path-outside";
+  readonly statePathSymlink: "hosting.state.path-symlink";
+  readonly statePathTooLong: "hosting.state.path-too-long";
+  readonly statePathUnmakeable: "hosting.state.path-unmakeable";
+  readonly stateUnreadable: "hosting.state.unreadable";
+  readonly topologyAmbisonicConfig: "hosting.topology.ambisonic-config";
+  readonly topologyChannelMapUnknown: "hosting.topology.channel-map-unknown";
+  readonly topologyInstrument: "hosting.topology.instrument";
+  readonly topologyMatched: "hosting.topology.matched";
+  readonly topologyNoAudioInput: "hosting.topology.no-audio-input";
+  readonly topologyNoAudioOutput: "hosting.topology.no-audio-output";
+  readonly topologyPortTooWide: "hosting.topology.port-too-wide";
+  readonly topologyPortWithoutChannels: "hosting.topology.port-without-channels";
+  readonly topologyTooManyPorts: "hosting.topology.too-many-ports";
+  readonly topologyWiderThanStrip: "hosting.topology.wider-than-strip";
+  readonly workerNonconforming: "hosting.worker.nonconforming";
+}
+
+export const HOSTING_CODE: HostingCodeTable = flatten(await loadHostingTables());
