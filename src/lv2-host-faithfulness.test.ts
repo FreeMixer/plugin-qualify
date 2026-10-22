@@ -139,7 +139,7 @@ describe("the measuring host against the faithfulness fixtures", () => {
 
 /** The feature options a record names when no flag changed them: the measurement as it has always been. */
 const DEFAULT_FEATURE_OPTIONS = {
-  features: ["map", "unmap", "options", "bounded", "worker", "log"],
+  features: ["map", "unmap", "options", "bounded", "worker", "log", "rtmempool"],
   strict: false,
   block: { declares: ["bounded"], min: 1, max: 0, nominal: 0 },
   log: { mode: "silent" },
