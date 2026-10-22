@@ -27,7 +27,7 @@ describe("readProbeOutput: the three documents of plugin-hostd", () => {
     expect(o.grid[1]?.rtSafety).toMatchObject({ interposer: true, allocations: 0, locks: 0, syscalls: 0 });
     expect(o.machine.profile.meetsProtocol).toBe(true);
     expect(o.machine.class["cstatesLimited"]).toBe(true);
-    expect(o.offer.clapExtensions).toHaveLength(9);
+    expect(o.offer.clapExtensions).toHaveLength(20);
   });
 
   it("reads the crash and the refusal, which have steps and no figures to speak of", () => {
