@@ -15,7 +15,9 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as contract from "@openmixer/omx-contract";
 import { describe, expect, it } from "vitest";
-import { HOSTING_CODE, clapCoreTsDirCandidates, isHostingTableName } from "./hosting-codes.js";
+import { clapCoreTsDirCandidates, isHostingTableName } from "../tools/clap-core-tsdir.mjs";
+import { OUT as GENERATED_HOSTING_CODES, hostingCodesFileFrom } from "../tools/gen-hosting-codes.mjs";
+import { HOSTING_CODE } from "./hosting-codes.js";
 import {
   EXCLUSION_TERMS,
   HOST_ISOLATIONS,
@@ -32,7 +34,7 @@ import {
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF = "src/contract-vocabulary-conformance.test.ts";
 
-/** omx-clap-core's two TypeScript modules, read independently of `hosting-codes.ts`'s own loader. */
+/** omx-clap-core's two TypeScript modules, read independently of `tools/gen-hosting-codes.mjs`'s loader. */
 const CLAP_CORE_TS_MODULES = ["omx-clap-core-vocabulary.js", "omx-clap-core-hosting.js"] as const;
 
 function locateClapCoreTsDir(): string {
@@ -145,6 +147,11 @@ describe("HOSTING_CODE is omx-clap-core's hosting tables, in full", () => {
   it("every code in HOSTING_CODE is the contract's, and every contract code is in it", () => {
     const ours = new Set<string>(Object.values(HOSTING_CODE));
     expect([...ours].sort()).toEqual([...CONTRACT_CODES].sort());
+  });
+
+  it("src/hosting-codes.generated.ts is byte-identical to the generator's output from omx-clap-core", async () => {
+    const expected = await hostingCodesFileFrom(locateClapCoreTsDir());
+    expect(readFileSync(GENERATED_HOSTING_CODES, "utf8"), "stale: run node tools/gen-hosting-codes.mjs --write").toBe(expected);
   });
 
   it("the fact a host refuses for a missing feature is hosting.features.missing", () => {
