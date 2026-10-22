@@ -18,6 +18,7 @@ const char *const LV2_MEASURE_FEATURE_NAMES[OMX_LV2_FEATURE_KINDS] = {
   [OMX_LV2_F_WORKER] = "worker",
   [OMX_LV2_F_DEFAULT_STATE] = "default-state",
   [OMX_LV2_F_LOG] = "log",
+  [OMX_LV2_F_RTMEMPOOL] = "rtmempool",
 };
 
 /* bit d of block.declares */
@@ -31,8 +32,8 @@ static const char *const LOG_MODE_NAMES[] = {
 
 const char LV2_MEASURE_OPTIONS_HELP[] =
   "feature options (omx-clap-core's LV2 feature provider; the record's featureOptions names them):\n"
-  "  --features LIST        kinds offered: map,unmap,options,bounded,worker,default-state,log\n"
-  "                         (default: map,unmap,options,bounded,worker,log; empty: none)\n"
+  "  --features LIST        kinds offered: map,unmap,options,bounded,worker,default-state,log,rtmempool\n"
+  "                         (default: all but default-state; empty: none)\n"
   "  --strict               refuse a plugin requiring a feature not offered\n"
   "  --no-strict            hand it to its own instantiate without it (default)\n"
   "  --block-declares LIST  buf-size declarations when bounded is offered: bounded,fixed,pow2\n"
@@ -106,7 +107,7 @@ int lv2_measure_option_parse(struct lv2_measure_options *o, int argc, char **arg
   switch (f) {
     case 0:
       if (name_bits(v, LV2_MEASURE_FEATURE_NAMES, OMX_LV2_FEATURE_KINDS, &n) != 0)
-        return refuse(why, "--features takes map,unmap,options,bounded,worker,default-state,log");
+        return refuse(why, "--features takes map,unmap,options,bounded,worker,default-state,log,rtmempool");
       o->feature.features = n;
       break;
     case 1:

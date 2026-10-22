@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * omx-contract declares the hosting codes and the measurement words once; plugin-qualify reads
- * them. This file turns red on any hosting.* code or measurement word plugin-qualify writes or
- * reads that the contract lacks, and on any word list here that is not the contract's.
+ * omx-clap-core declares the hosting codes once (its two TypeScript modules); omx-contract
+ * declares the measurement words once; plugin-qualify reads them. This file turns red on any
+ * hosting.* code or measurement word plugin-qualify writes or reads that its owner lacks, and on
+ * any word list here that is not the contract's.
  *
  * The hosting codes are found by scanning every tracked text file for `hosting.<...>` tokens.
  * The measurement words are found where they are written: the unmeasured reasons, the methods and
  * the scaling laws, each by the shape its writer uses (TypeScript, C and Python alike).
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as contract from "@openmixer/omx-contract";
 import { describe, expect, it } from "vitest";
-import { HOSTING_CODE, RETIRED_HOSTING_CODES, isHostingTableName } from "./hosting-codes.js";
+import { HOSTING_CODE, clapCoreTsDirCandidates, isHostingTableName } from "./hosting-codes.js";
 import {
   EXCLUSION_TERMS,
   HOST_ISOLATIONS,
@@ -31,12 +32,30 @@ import {
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF = "src/contract-vocabulary-conformance.test.ts";
 
-/** Every code the contract declares, across all its hosting tables. */
-const CONTRACT_CODES: ReadonlySet<string> = new Set(
-  Object.entries(contract)
-    .filter(([name]) => isHostingTableName(name))
-    .flatMap(([, table]) => Object.values(table as Record<string, { readonly code: string }>).map((e) => e.code)),
-);
+/** omx-clap-core's two TypeScript modules, read independently of `hosting-codes.ts`'s own loader. */
+const CLAP_CORE_TS_MODULES = ["omx-clap-core-vocabulary.js", "omx-clap-core-hosting.js"] as const;
+
+function locateClapCoreTsDir(): string {
+  const dir = clapCoreTsDirCandidates().find((d) => CLAP_CORE_TS_MODULES.every((m) => existsSync(join(d, m))));
+  if (dir === undefined) throw new Error("omx-clap-core's TypeScript modules were not found for the conformance test");
+  return dir;
+}
+
+/** Every code omx-clap-core declares, across both its modules' hosting tables. */
+async function loadContractCodes(): Promise<ReadonlySet<string>> {
+  const dir = locateClapCoreTsDir();
+  const codes = new Set<string>();
+  for (const name of CLAP_CORE_TS_MODULES) {
+    const mod: Record<string, unknown> = await import(pathToFileURL(join(dir, name)).href);
+    for (const [exportName, table] of Object.entries(mod)) {
+      if (!isHostingTableName(exportName)) continue;
+      for (const entry of Object.values(table as Record<string, { readonly code: string }>)) codes.add(entry.code);
+    }
+  }
+  return codes;
+}
+
+const CONTRACT_CODES: ReadonlySet<string> = await loadContractCodes();
 
 /** `hosting.<dimension>` for every dimension a contract code names: a family, not a code. */
 const CONTRACT_FAMILIES: ReadonlySet<string> = new Set(
@@ -48,9 +67,6 @@ const NOT_CODES: Readonly<Record<string, string>> = {
   "hosting.jsonl": "the hosting sweep's output file",
   "hosting.rating": "the verdict's rating field, written as a path",
 };
-
-/** Retired codes may be named only where they are retired, and here. */
-const RETIRED_MAY_APPEAR_IN: readonly string[] = ["src/hosting-codes.ts", SELF];
 
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "deps", "__pycache__", ".pytest_cache"]);
 const TEXT = /\.(ts|mts|mjs|js|json|py|c|h|md|txt|sh|spec|ya?ml)$|^(README|BUILDING|changelog|Containerfile|Makefile)/;
@@ -80,9 +96,7 @@ function undeclared(files: readonly string[], read: (rel: string) => string): st
     if (rel === SELF) continue; // its tokens are the sabotages' fixtures
     for (const token of hostingTokens(read(rel))) {
       if (token in NOT_CODES) continue;
-      const retired = (RETIRED_HOSTING_CODES as readonly string[]).includes(token);
-      if (retired && !RETIRED_MAY_APPEAR_IN.includes(rel)) out.push(`${rel}: ${token} (retired)`);
-      else if (!retired && !CONTRACT_CODES.has(token) && !CONTRACT_FAMILIES.has(token)) out.push(`${rel}: ${token}`);
+      if (!CONTRACT_CODES.has(token) && !CONTRACT_FAMILIES.has(token)) out.push(`${rel}: ${token}`);
     }
   }
   return [...new Set(out)];
@@ -90,7 +104,7 @@ function undeclared(files: readonly string[], read: (rel: string) => string): st
 
 const readPkg = (rel: string): string => readFileSync(join(PKG, rel), "utf8");
 
-describe("every hosting.* code plugin-qualify names is omx-contract's", () => {
+describe("every hosting.* code plugin-qualify names is omx-clap-core's", () => {
   const files = trackedTextFiles();
 
   it("the scan reaches the sources, the tools, the native measurers and the docs — positive control", () => {
@@ -99,7 +113,7 @@ describe("every hosting.* code plugin-qualify names is omx-contract's", () => {
     expect(hostingTokens(readPkg("README.md")).length).toBeGreaterThan(0);
   });
 
-  it("no file names a hosting code the contract lacks, or a retired one", () => {
+  it("no file names a hosting code the contract lacks", () => {
     expect(undeclared(files, readPkg)).toEqual([]);
   });
 
@@ -109,10 +123,12 @@ describe("every hosting.* code plugin-qualify names is omx-contract's", () => {
     expect(undeclared(files, sabotaged)).toContain("src/hosting-suitability.ts: hosting.features.invented-here");
   });
 
-  it("a retired code outside its retirement is seen — sabotage control", () => {
+  it("a code the batch removed is seen if it leaks back in — sabotage control", () => {
+    // the removed code is built from two parts: the batch's removals check (a grep over the seven tips) must find it nowhere
+    const removed = ["hosting.features.required", "not-provided"].join("-");
     const sabotaged = (rel: string) =>
-      rel === "README.md" ? `${readPkg(rel)}\n\`hosting.features.required-not-provided\`` : readPkg(rel);
-    expect(undeclared(files, sabotaged)).toContain("README.md: hosting.features.required-not-provided (retired)");
+      rel === "README.md" ? `${readPkg(rel)}\n\`${removed}\`` : readPkg(rel);
+    expect(undeclared(files, sabotaged)).toContain(`README.md: ${removed}`);
   });
 
   it("a code inside a regular expression is read as the code", () => {
@@ -125,22 +141,15 @@ describe("every hosting.* code plugin-qualify names is omx-contract's", () => {
   });
 });
 
-describe("HOSTING_CODE is the contract's hosting tables, less the retired codes", () => {
-  it("every code in HOSTING_CODE is the contract's, and every contract code but the retired is in it", () => {
+describe("HOSTING_CODE is omx-clap-core's hosting tables, in full", () => {
+  it("every code in HOSTING_CODE is the contract's, and every contract code is in it", () => {
     const ours = new Set<string>(Object.values(HOSTING_CODE));
-    const wanted = [...CONTRACT_CODES].filter((c) => !(RETIRED_HOSTING_CODES as readonly string[]).includes(c));
-    expect([...ours].sort()).toEqual(wanted.sort());
-  });
-
-  it("each retired code is one the contract still declares: a spent retirement is deleted", () => {
-    for (const code of RETIRED_HOSTING_CODES) expect(CONTRACT_CODES.has(code), code).toBe(true);
+    expect([...ours].sort()).toEqual([...CONTRACT_CODES].sort());
   });
 
   it("the fact a host refuses for a missing feature is hosting.features.missing", () => {
-    const code: "hosting.features.missing" = HOSTING_CODE.featuresMissingAtLoad;
+    const code: "hosting.features.missing" = HOSTING_CODE.featuresMissing;
     expect(code).toBe("hosting.features.missing");
-    // @ts-expect-error the retired key is not in the table
-    expect(HOSTING_CODE.featuresMissing).toBeUndefined();
   });
 });
 

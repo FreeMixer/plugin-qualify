@@ -99,7 +99,7 @@ export interface MeasureOptions {
  * them: the provider's kinds (`--features`), its buf-size declarations (`--block-declares`) and its log
  * modes (`--log`). A conformance test reads both.
  */
-export const LV2_FEATURE_KINDS = ["map", "unmap", "options", "bounded", "worker", "default-state", "log"] as const;
+export const LV2_FEATURE_KINDS = ["map", "unmap", "options", "bounded", "worker", "default-state", "log", "rtmempool"] as const;
 export const LV2_BLOCK_DECLARATIONS = ["bounded", "fixed", "pow2"] as const;
 export const LV2_LOG_MODES = ["silent", "route", "capture"] as const;
 
