@@ -14,9 +14,9 @@
  * edit.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 /** The two TypeScript modules omx-clap-core's `tsdir` carries, each a `HOSTING_<DIMENSION>_CODES` source. */
 const CLAP_CORE_TS_MODULES = ["omx-clap-core-vocabulary.js", "omx-clap-core-hosting.js"] as const;
@@ -80,7 +80,10 @@ async function loadHostingTables(): Promise<Record<string, HostingEntries>> {
   const dir = locateClapCoreTsDir();
   const tables: Record<string, HostingEntries> = {};
   for (const name of CLAP_CORE_TS_MODULES) {
-    const mod: Record<string, unknown> = await import(pathToFileURL(join(dir, name)).href);
+    // The modules are self-contained ES modules in a directory with no package.json: Node 18 reads such a .js as
+    // CommonJS and refuses `export`, so the source is imported as a data: module, which is a module on every Node.
+    const source = readFileSync(join(dir, name), "utf8");
+    const mod: Record<string, unknown> = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
     for (const [exportName, table] of Object.entries(mod)) {
       if (isHostingTableName(exportName)) tables[exportName] = table as HostingEntries;
     }
