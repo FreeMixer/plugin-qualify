@@ -50,7 +50,7 @@ void lv2_measure_options_init(struct lv2_measure_options *o);
  * these flags (`*i` untouched), -1 refused with `*why` (a static string) saying what was wrong.
  *
  *   --features LIST        the kinds offered, comma-separated (map, unmap, options, bounded, worker,
- *                          default-state, log); empty offers none
+ *                          default-state, log, rtmempool); empty offers none
  *   --strict, --no-strict  refuse a plugin requiring a feature not offered, or hand it over without
  *   --block-declares LIST  the buf-size declarations made when bounded is offered: bounded, fixed,
  *                          pow2; empty makes none

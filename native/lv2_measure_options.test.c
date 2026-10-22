@@ -75,7 +75,7 @@ static void test_defaults_build_the_former_array(void) {
   static const char *const former[] = {LV2_URID__map, LV2_URID__unmap, LV2_OPTIONS__options,
                                        LV2_BUF_SIZE__boundedBlockLength, LV2_WORKER__schedule, LV2_LOG__log};
   CHECK(f != NULL, "the defaults build");
-  CHECK(count(f) == 6, "the defaults build six features, got %zu", count(f));
+  CHECK(count(f) == 9, "the defaults build the six former features and the three rtmempool entries, got %zu", count(f));
   for (size_t k = 0; f && k < 6 && k < count(f); k++)
     CHECK(!strcmp(f[k]->URI, former[k]), "entry %zu is %s, got %s", k, former[k], f[k]->URI);
   CHECK(find(f, LV2_STATE__loadDefaultState) == NULL, "state:loadDefaultState is not offered");
@@ -114,19 +114,19 @@ static void test_flags_reach_the_array(void) {
           find(f, LV2_BUF_SIZE__boundedBlockLength),
         "--features map,options,bounded builds exactly those three");
   CHECK(parse(&o, "--features", "", &why) == 1 && o.feature.features == 0, "--features '' offers none");
-  CHECK(parse(&o, "--features", "map,unmap,options,bounded,worker,default-state,log", &why) == 1 &&
+  CHECK(parse(&o, "--features", "map,unmap,options,bounded,worker,default-state,log,rtmempool", &why) == 1 &&
           o.feature.features == OMX_LV2_FEATURES_ALL,
         "every kind by name");
 
   lv2_measure_options_init(&o);
   CHECK(parse(&o, "--block-declares", "bounded,fixed,pow2", &why) == 1, "--block-declares takes a list");
   f = omx_lv2_features_build(&b, &o.feature, 48000.0, 64, 64, &sched);
-  CHECK(count(f) == 8 && !strcmp(f[6]->URI, LV2_BUF_SIZE__fixedBlockLength) &&
-          !strcmp(f[7]->URI, LV2_BUF_SIZE__powerOf2BlockLength),
-        "fixed and power-of-2 are declared after the kinds");
+  CHECK(count(f) == 11 && !strcmp(f[7]->URI, LV2_BUF_SIZE__fixedBlockLength) &&
+          !strcmp(f[8]->URI, LV2_BUF_SIZE__powerOf2BlockLength),
+        "fixed and power-of-2 are declared after the first rtmempool entry, the other two spellings last");
   CHECK(parse(&o, "--block-declares", "", &why) == 1, "--block-declares '' makes none");
   f = omx_lv2_features_build(&b, &o.feature, 48000.0, 64, 64, &sched);
-  CHECK(count(f) == 5 && find(f, LV2_BUF_SIZE__boundedBlockLength) == NULL, "no declaration, no bounded");
+  CHECK(count(f) == 8 && find(f, LV2_BUF_SIZE__boundedBlockLength) == NULL, "no declaration, no bounded");
 
   lv2_measure_options_init(&o);
   CHECK(parse(&o, "--block-min", "16", &why) == 1 && parse(&o, "--block-max", "2048", &why) == 1 &&
@@ -215,7 +215,7 @@ static char *printed(const struct lv2_measure_options *o, const char *capture) {
 static void test_record(void) {
   struct lv2_measure_options o;
   lv2_measure_options_init(&o);
-  const char *want = ",\"featureOptions\":{\"features\":[\"map\",\"unmap\",\"options\",\"bounded\",\"worker\",\"log\"],"
+  const char *want = ",\"featureOptions\":{\"features\":[\"map\",\"unmap\",\"options\",\"bounded\",\"worker\",\"log\",\"rtmempool\"],"
                      "\"strict\":false,\"block\":{\"declares\":[\"bounded\"],\"min\":1,\"max\":0,\"nominal\":0},"
                      "\"log\":{\"mode\":\"silent\"}}";
   const char *got = printed(&o, NULL);
