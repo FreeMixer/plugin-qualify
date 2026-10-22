@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.13.0
+Version: 0.13.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -71,6 +71,12 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 22 2026 Pau Aliagas <linuxnow@gmail.com> - 0.13.1-1
+- HOSTING_CODE is build-time data (src/hosting-codes.generated.ts, written by
+  tools/gen-hosting-codes.mjs from omx-clap-core's tables): no browser-reachable
+  module imports a node: module, so a browser bundle of the public subpaths
+  builds again (#134)
+
 * Wed Oct 21 2026 Pau Aliagas <linuxnow@gmail.com> - 0.13.0-1
 - The hosting codes are read from omx-clap-core's installed TypeScript
   module instead of omx-contract (the contract split moved
