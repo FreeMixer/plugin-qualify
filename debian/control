@@ -19,7 +19,7 @@ Rules-Requires-Root: no
 
 Package: plugin-qualify
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, nodejs (>= 18), python3, plugin-hostd (>= 0.4.0~), omx-clap-host (>= 0.13.0~)
+Depends: ${misc:Depends}, ${shlibs:Depends}, nodejs (>= 18), python3, plugin-hostd (>= 0.4.0~), omx-clap-host (>= 0.13.0~), libomx-clap-core-dev (>= 0.14.0~)
 Recommends: python3-lilv, mod-host
 Description: find out whether an audio plugin is safe to run live
  A plugin that glitches on stage is worse than one you never installed.
