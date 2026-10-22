@@ -28,6 +28,7 @@ import {
 } from "./clap-qualify.js";
 import { qualifyClap } from "./direct-prober.support.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
+import { clapFeatureReasons } from "./hosting-suitability.js";
 import {
   OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
   OMX_CLAP_HOST_EXTENSIONS,
@@ -58,9 +59,24 @@ const SYNTH = join(FIXTURES, "synth.clap");
 const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
 const SYNTH_STRICT = join(FIXTURES, "synth-strict.clap");
+const REQUIRES_VOICE_INFO = join(FIXTURES, "requires-voice-info.clap");
+const REQUIRES_TIMER = join(FIXTURES, "requires-timer.clap");
+const REQUIRES_THREAD_POOL = join(FIXTURES, "requires-thread-pool.clap");
 const SAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const UNSAFE_ID = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), SAFE, UNSAFE, SYNTH, SYNTH_ALLOC, SYNTH_MIDI, SYNTH_STRICT].every((p) => existsSync(p));
+const BUILT = [
+  clapQualifyToolPath(),
+  rtInterposePath(),
+  SAFE,
+  UNSAFE,
+  SYNTH,
+  SYNTH_ALLOC,
+  SYNTH_MIDI,
+  SYNTH_STRICT,
+  REQUIRES_VOICE_INFO,
+  REQUIRES_TIMER,
+  REQUIRES_THREAD_POOL,
+].every((p) => existsSync(p));
 
 const scratch = mkdtempSync(join(tmpdir(), "clap-qualify-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -242,6 +258,33 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
   live("the prober offers exactly the console's CLAP host extensions", () => {
     const [l] = qualifyClap(SAFE, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
     expect(l!.hostExtensions).toEqual(OMX_CLAP_HOST_EXTENSIONS);
+  });
+
+  describe("a plugin that needs one of the eleven extensions beyond the original six (#133)", () => {
+    const suitable = [{ dimension: "features", kind: "objective", rating: "suitable", code: HOSTING_CODE.featuresProvided, params: {} }];
+
+    live("clap.voice-info at init() qualifies, never hosting.clap.headless-failed", () => {
+      const [l] = qualifyClap(REQUIRES_VOICE_INFO, "org.freemixer.plugin-qualify.fixture.requires-voice-info", {
+        rates: [QUALIFY_RATES[0]!],
+      });
+      expect(l!.clap.headlessOk).toBe(true);
+      expect(clapFeatureReasons(l!.clap, OPENMIXER_CONSOLE_PROFILE, false)).toEqual(suitable);
+    });
+
+    live("clap.timer-support's register and unregister at init() qualifies", () => {
+      const [l] = qualifyClap(REQUIRES_TIMER, "org.freemixer.plugin-qualify.fixture.requires-timer", { rates: [QUALIFY_RATES[0]!] });
+      expect(l!.clap.headlessOk).toBe(true);
+      expect(clapFeatureReasons(l!.clap, OPENMIXER_CONSOLE_PROFILE, false)).toEqual(suitable);
+    });
+
+    live("clap.thread-pool actually runs the plugin's tasks inside process(), qualifies with no process error", () => {
+      const [l] = qualifyClap(REQUIRES_THREAD_POOL, "org.freemixer.plugin-qualify.fixture.requires-thread-pool", {
+        rates: [QUALIFY_RATES[0]!],
+      });
+      expect(l!.clap.headlessOk).toBe(true);
+      expect(l!.clap.processErrors).toBe(0);
+      expect(clapFeatureReasons(l!.clap, OPENMIXER_CONSOLE_PROFILE, false)).toEqual(suitable);
+    });
   });
 
   live("without the interposer nothing is counted, and the verdict is unknown, never clean", () => {
