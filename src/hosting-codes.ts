@@ -4,64 +4,18 @@
  * The hosting verdict's message codes. Codes, never prose: the surface renders the operator's
  * locale.
  *
- * omx-contract declares every hosting code, one `HOSTING_<DIMENSION>_CODES` table per dimension
- * (its `data/hosting/<dimension>.json`). {@link HOSTING_CODE} is those tables flattened into one
- * `key: code` map, read from the contract at load: a code the contract does not declare cannot be
- * named here, and a dimension the contract adds arrives without an edit.
- *
- * {@link RETIRED_HOSTING_CODES} are codes the contract still declares and plugin-qualify no longer
- * writes or reads: they are left out of the map, so nothing here can name them.
+ * omx-clap-core declares every hosting code: one `HOSTING_<DIMENSION>_CODES` table per dimension,
+ * in the TypeScript modules its package installs under `pkg-config --variable=tsdir omx-clap-core`
+ * (BUILDING.md). {@link HOSTING_CODE} is those tables flattened into one `key: code` map, written
+ * as plain data into `hosting-codes.generated.ts` by `tools/gen-hosting-codes.mjs` at build time:
+ * a code omx-clap-core does not declare cannot be named here, and this module reads no file and
+ * imports no `node:` module, so every public subpath that reaches it bundles for a browser.
+ * `src/contract-vocabulary-conformance.test.ts` holds the generated map to omx-clap-core's real
+ * modules, either way.
  */
-import * as contract from "@openmixer/omx-contract";
+import { HOSTING_CODE } from "./hosting-codes.generated.js";
 
-type Contract = typeof contract;
+export { HOSTING_CODE };
 
-/**
- * Codes the contract declares that plugin-qualify does not speak.
- *
- * `hosting.features.required-not-provided` named the fact `hosting.features.missing` names: a
- * required feature the host does not provide. The host that refuses the plugin is the authority
- * on the name, so plugin-qualify writes `hosting.features.missing` (the contract's
- * `featuresMissingAtLoad`) and drops its own. A retired code the contract no longer declares
- * fails the conformance test, so this list empties as the contract catches up.
- */
-export const RETIRED_HOSTING_CODES = ["hosting.features.required-not-provided"] as const;
-type RetiredCode = (typeof RETIRED_HOSTING_CODES)[number];
-
-/** The contract's hosting tables, by export name: every `HOSTING_<DIMENSION>_CODES`. */
-type HostingTables = {
-  [Name in keyof Contract as Name extends `HOSTING_${string}_CODES` ? Name : never]: Contract[Name];
-};
-
-type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
-
-/** Every hosting table's `key: code`, merged into one record. */
-type HostingCodeTable = UnionToIntersection<
-  {
-    [Name in keyof HostingTables]: {
-      readonly [Key in keyof HostingTables[Name] as HostingTables[Name][Key] extends { readonly code: RetiredCode }
-        ? never
-        : Key]: HostingTables[Name][Key] extends { readonly code: infer Code } ? Code : never;
-    };
-  }[keyof HostingTables]
->;
-
-/** True for an export name that is one of the contract's hosting tables. */
-export function isHostingTableName(name: string): boolean {
-  return /^HOSTING_[A-Z0-9_]+_CODES$/.test(name);
-}
-
-function flatten(): HostingCodeTable {
-  const table: Record<string, string> = {};
-  for (const [name, entries] of Object.entries(contract)) {
-    if (!isHostingTableName(name)) continue;
-    for (const [key, entry] of Object.entries(entries as Record<string, { readonly code: string }>)) {
-      if ((RETIRED_HOSTING_CODES as readonly string[]).includes(entry.code)) continue;
-      if (key in table) throw new Error(`omx-contract declares the hosting key ${key} twice (${name})`);
-      table[key] = entry.code;
-    }
-  }
-  return Object.freeze(table) as unknown as HostingCodeTable;
-}
-
-export const HOSTING_CODE: HostingCodeTable = flatten();
+/** {@link HOSTING_CODE}'s type: each key's literal code. */
+export type HostingCodeTable = typeof HOSTING_CODE;

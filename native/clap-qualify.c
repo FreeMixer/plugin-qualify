@@ -33,10 +33,17 @@
  * is nanoseconds per sample, a warm-up head dropped, its median and 95th percentile; the run is
  * not under the interposer's count.
  *
- * The host offers exactly the extensions in HOST_EXTENSIONS and nothing else, so a plugin that
- * needs more fails headless here rather than on the desk; `--offer` adds those of OFFERABLE a
- * host such as omx-clap-host offers too (their host functions answer nothing). A plugin calling a
- * main-thread host function from inside `process()` is a thread violation.
+ * The host offers exactly the extensions in HOST_EXTENSIONS — omx-clap-core's own host object,
+ * `clap_host_extensions.h` — and nothing else, so a plugin that needs more fails headless here
+ * rather than on the desk; `--offer` adds those of OFFERABLE a host such as omx-clap-host offers
+ * too (their host functions answer nothing). A plugin calling a main-thread host function from
+ * inside `process()` is a thread violation. The eleven beyond the original six are headless the
+ * way the library's host object is: timer-support and posix-fd-support register and unregister
+ * but never fire (no event loop runs here), thread-pool runs every task on the calling thread
+ * inside `process()` exactly as the library does, tail and the three `changed` notifications
+ * (note-name, voice-info, and the surround/ambisonic layout, which also answers its draft id) take
+ * the call and nothing more, event-registry answers false (no event space beyond the core one),
+ * and note-ports answers every dialect the prober itself speaks.
  *
  * Exit status: 0 every plugin was measured, 2 usage, or the file or the plugin could not be loaded
  * (the line still prints with what was read).
@@ -97,11 +104,23 @@ _Static_assert(HOST_PARAM_COUNT_MAX <= MAX_PARAMS, "the prober reads every param
  * peak sits far above that leakage and far below any arrival a plugin means. */
 #define ONSET_OF_PEAK 1e-3f
 
-/* what the host offers, in the order the document lists it */
+/* what the host offers, in the order omx-clap-core's clap_host_extensions.h lists it */
 static const char *const HOST_EXTENSIONS[] = {
   CLAP_EXT_LOG, CLAP_EXT_THREAD_CHECK, CLAP_EXT_LATENCY, CLAP_EXT_PARAMS, CLAP_EXT_AUDIO_PORTS, CLAP_EXT_STATE,
+  CLAP_EXT_NOTE_PORTS, CLAP_EXT_NOTE_NAME, CLAP_EXT_VOICE_INFO, CLAP_EXT_EVENT_REGISTRY,
+  CLAP_EXT_TIMER_SUPPORT, CLAP_EXT_POSIX_FD_SUPPORT, CLAP_EXT_THREAD_POOL, CLAP_EXT_TAIL,
+  CLAP_EXT_SURROUND, CLAP_EXT_AMBISONIC, CLAP_EXT_AUDIO_PORTS_CONFIG,
 };
 #define HOST_EXTENSION_COUNT (sizeof HOST_EXTENSIONS / sizeof HOST_EXTENSIONS[0])
+
+/* every dialect a note the sweep can speak, for clap.note-ports' supported_dialects: the host offers all four, as
+ * omx-clap-core's own host object does with note inputs configured (OMX_CLAP_HOST_NOTE_DIALECTS) */
+#define HOST_NOTE_DIALECTS (CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE | CLAP_NOTE_DIALECT_MIDI2)
+
+/* timer-support and posix-fd-support: registrations the prober accepts and never fires, since no event loop runs
+ * here; bounded the way the library's are (OMX_CLAP_TIMERS, OMX_CLAP_FDS), reset with g_host each plugin */
+#define HOST_TIMERS 16
+#define HOST_FDS 16
 
 /* what --offer may add, each by its id and the draft id a plugin may still ask for, in the order the document lists them */
 static const struct { const char *id, *compat; } OFFERABLE[] = {
@@ -153,10 +172,26 @@ static int interposer_find(struct interposer *ip) {
 static struct {
   int in_process;
   uint32_t thread_violations;
+  const clap_plugin_t *plugin;
+  const clap_plugin_thread_pool_t *plugin_thread_pool;
+  int in_exec;
+  struct { int used; clap_id id; } timers[HOST_TIMERS];
+  clap_id timer_next_id;
+  struct { int used, fd; clap_posix_fd_flags_t flags; } fds[HOST_FDS];
 } g_host;
 
 static void main_thread_only(void) {
   if (g_host.in_process) g_host.thread_violations++;
+}
+
+/* true on the main thread (and counts the violation otherwise): the gate register/unregister and the fd calls take,
+ * since a call off it must refuse rather than merely be noted */
+static int on_main_thread(void) {
+  if (g_host.in_process) {
+    g_host.thread_violations++;
+    return 0;
+  }
+  return 1;
 }
 
 static void host_log(const clap_host_t *h, clap_log_severity severity, const char *msg) {
@@ -184,6 +219,113 @@ static const clap_host_audio_ports_t g_audio_ports = { host_ports_rescan_support
 
 static void host_state_mark_dirty(const clap_host_t *h) { (void)h; main_thread_only(); }
 static const clap_host_state_t g_state = { host_state_mark_dirty };
+
+/* clap.note-ports: the host supports every dialect the note sweep speaks; a rescan is taken and nothing more, since
+ * the prober reads a plugin's note ports once, at open */
+static uint32_t host_note_ports_supported_dialects(const clap_host_t *h) { (void)h; return HOST_NOTE_DIALECTS; }
+static void host_note_ports_rescan(const clap_host_t *h, uint32_t f) { (void)h; (void)f; main_thread_only(); }
+static const clap_host_note_ports_t g_note_ports = { host_note_ports_supported_dialects, host_note_ports_rescan };
+
+static void host_note_name_changed(const clap_host_t *h) { (void)h; main_thread_only(); }
+static const clap_host_note_name_t g_note_name = { host_note_name_changed };
+
+static void host_voice_info_changed(const clap_host_t *h) { (void)h; main_thread_only(); }
+static const clap_host_voice_info_t g_voice_info = { host_voice_info_changed };
+
+/* the prober reads no event space but the core one, so every query answers false, as the library's does */
+static bool host_event_registry_query(const clap_host_t *h, const char *space_name, uint16_t *space_id) {
+  (void)h;
+  (void)space_name;
+  if (space_id) *space_id = UINT16_MAX;
+  main_thread_only();
+  return false;
+}
+static const clap_host_event_registry_t g_event_registry = { host_event_registry_query };
+
+/* timer-support and posix-fd-support: a registration the prober accepts, headless — no tick ever calls on_timer or
+ * on_fd back, since no event loop runs here */
+static bool host_register_timer(const clap_host_t *h, uint32_t period_ms, clap_id *timer_id) {
+  (void)h;
+  (void)period_ms;
+  if (!on_main_thread() || !timer_id) return false;
+  for (uint32_t i = 0; i < HOST_TIMERS; i++)
+    if (!g_host.timers[i].used) {
+      g_host.timers[i].used = 1;
+      g_host.timers[i].id = g_host.timer_next_id++;
+      *timer_id = g_host.timers[i].id;
+      return true;
+    }
+  return false;
+}
+static bool host_unregister_timer(const clap_host_t *h, clap_id timer_id) {
+  (void)h;
+  if (!on_main_thread()) return false;
+  for (uint32_t i = 0; i < HOST_TIMERS; i++)
+    if (g_host.timers[i].used && g_host.timers[i].id == timer_id) {
+      g_host.timers[i].used = 0;
+      return true;
+    }
+  return false;
+}
+static const clap_host_timer_support_t g_timer_support = { host_register_timer, host_unregister_timer };
+
+static int host_fd_slot(int fd) {
+  for (uint32_t i = 0; i < HOST_FDS; i++)
+    if (g_host.fds[i].used && g_host.fds[i].fd == fd) return (int)i;
+  return -1;
+}
+static bool host_register_fd(const clap_host_t *h, int fd, clap_posix_fd_flags_t flags) {
+  (void)h;
+  if (!on_main_thread() || fd < 0 || host_fd_slot(fd) >= 0) return false;
+  for (uint32_t i = 0; i < HOST_FDS; i++)
+    if (!g_host.fds[i].used) {
+      g_host.fds[i].used = 1;
+      g_host.fds[i].fd = fd;
+      g_host.fds[i].flags = flags;
+      return true;
+    }
+  return false;
+}
+static bool host_modify_fd(const clap_host_t *h, int fd, clap_posix_fd_flags_t flags) {
+  (void)h;
+  const int i = fd < 0 ? -1 : host_fd_slot(fd);
+  if (!on_main_thread() || i < 0) return false;
+  g_host.fds[i].flags = flags;
+  return true;
+}
+static bool host_unregister_fd(const clap_host_t *h, int fd) {
+  (void)h;
+  const int i = fd < 0 ? -1 : host_fd_slot(fd);
+  if (!on_main_thread() || i < 0) return false;
+  g_host.fds[i].used = 0;
+  return true;
+}
+static const clap_host_posix_fd_support_t g_posix_fd_support = { host_register_fd, host_modify_fd, host_unregister_fd };
+
+/* thread-pool: [audio-thread], so gated on the process() window rather than on_main_thread; every task runs before
+ * the call returns, one after another on the calling thread, exactly as omx-clap-core's own host object runs them */
+static bool host_request_exec(const clap_host_t *h, uint32_t num_tasks) {
+  (void)h;
+  if (!g_host.in_process || !g_host.plugin_thread_pool || !g_host.plugin_thread_pool->exec || g_host.in_exec) return false;
+  g_host.in_exec = 1;
+  for (uint32_t i = 0; i < num_tasks; i++) g_host.plugin_thread_pool->exec(g_host.plugin, i);
+  g_host.in_exec = 0;
+  return true;
+}
+static const clap_host_thread_pool_t g_thread_pool = { host_request_exec };
+
+/* tail: [audio-thread], no thread-check — the prober reads no tail figure back, the call is taken and nothing more */
+static void host_tail_changed(const clap_host_t *h) { (void)h; }
+static const clap_host_tail_t g_tail = { host_tail_changed };
+
+/* surround and ambisonic: a layout changed notification taken and nothing more, since the prober describes a
+ * plugin's ports once, at open */
+static void host_layout_changed(const clap_host_t *h) { (void)h; main_thread_only(); }
+static const clap_host_surround_t g_surround = { host_layout_changed };
+static const clap_host_ambisonic_t g_ambisonic = { host_layout_changed };
+
+static void host_configs_rescan(const clap_host_t *h) { (void)h; main_thread_only(); }
+static const clap_host_audio_ports_config_t g_audio_ports_config = { host_configs_rescan };
 
 /* the offerable extensions: main-thread host functions that answer nothing */
 static void host_preset_error(const clap_host_t *h, uint32_t kind, const char *location, const char *key, int32_t error,
@@ -215,6 +357,19 @@ static const void *host_get_extension(const clap_host_t *h, const char *id) {
   if (!strcmp(id, CLAP_EXT_PARAMS)) return &g_params;
   if (!strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &g_audio_ports;
   if (!strcmp(id, CLAP_EXT_STATE)) return &g_state;
+  if (!strcmp(id, CLAP_EXT_NOTE_PORTS)) return &g_note_ports;
+  if (!strcmp(id, CLAP_EXT_NOTE_NAME)) return &g_note_name;
+  if (!strcmp(id, CLAP_EXT_VOICE_INFO)) return &g_voice_info;
+  if (!strcmp(id, CLAP_EXT_EVENT_REGISTRY)) return &g_event_registry;
+  if (!strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &g_timer_support;
+  if (!strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &g_posix_fd_support;
+  if (!strcmp(id, CLAP_EXT_THREAD_POOL)) return &g_thread_pool;
+  if (!strcmp(id, CLAP_EXT_TAIL)) return &g_tail;
+  /* the draft ids of the two layout extensions, answered as their own; the declared list names the final ids only,
+   * as omx-clap-core's own host object does */
+  if (!strcmp(id, CLAP_EXT_SURROUND) || !strcmp(id, CLAP_EXT_SURROUND_COMPAT)) return &g_surround;
+  if (!strcmp(id, CLAP_EXT_AMBISONIC) || !strcmp(id, CLAP_EXT_AMBISONIC_COMPAT)) return &g_ambisonic;
+  if (!strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &g_audio_ports_config;
   for (size_t k = 0; k < OFFERABLE_COUNT; k++)
     if (g_offered[k] && (!strcmp(id, OFFERABLE[k].id) || !strcmp(id, OFFERABLE[k].compat))) return OFFERED_OBJECT[k];
   return NULL;
@@ -1398,6 +1553,8 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     return 2;
   }
   f.headless_ok = 1;
+  g_host.plugin = p;
+  g_host.plugin_thread_pool = p->get_extension(p, CLAP_EXT_THREAD_POOL);
   integrity_layout(p, &pin);
   const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
   f.note_inputs = notes ? notes->count(p, true) : 0;
