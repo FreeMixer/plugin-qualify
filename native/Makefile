@@ -30,15 +30,15 @@ PKG_CONFIG ?= pkg-config
 BUILD ?= build
 
 CLAP_REF := 1.2.6
-PLUGIN_HOSTD_REF := v0.1.4
+PLUGIN_HOSTD_REF := v0.7.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
 OMX_CONTRACT_VERSION := 3.0.0
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
-OMX_CLAP_CORE_VERSION := 0.13.0
+OMX_CLAP_CORE_VERSION := 0.14.0
 # the omx-dsp headers the measurers (omx_lin_to_db_d) and omx-clap-core's provider read: the packages' floor
-OMX_DSP_VERSION := 0.21.0
+OMX_DSP_VERSION := 0.25.0
 
 ifeq ($(shell $(PKG_CONFIG) --exists clap && echo true),true)
 CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
