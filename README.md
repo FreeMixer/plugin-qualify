@@ -181,7 +181,7 @@ names the options it ran under, `featureOptions`:
 
 | flag | what it sets | default |
 | --- | --- | --- |
-| `--features LIST` | the kinds offered: `map`, `unmap`, `options`, `bounded`, `worker`, `default-state`, `log` (empty: none) | all but `default-state` |
+| `--features LIST` | the kinds offered: `map`, `unmap`, `options`, `bounded`, `worker`, `default-state`, `log`, `rtmempool` (empty: none) | all but `default-state` |
 | `--strict` / `--no-strict` | refuse a plugin requiring a feature not offered (the record's `refusedFeature` names it), or hand it to its own instantiate without it | `--no-strict` |
 | `--block-declares LIST` | the buf-size declarations made when `bounded` is offered: `bounded`, `fixed`, `pow2` (empty: none) | `bounded` |
 | `--block-min N` | `bufsz:minBlockLength`; 0 is the run's block | 1 |

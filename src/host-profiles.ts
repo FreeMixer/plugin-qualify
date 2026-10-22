@@ -42,8 +42,7 @@ export const OMX_INPROCESS_FEATURES: readonly string[] = [
  * than on the desk. The list's home is the CLAP library — libomx-clap-core's own
  * `clap_host_extensions.h`, what its host object offers — and this is its mirror, held equal to the
  * header at the pinned omx-clap-host (by the console's conformance test), so the verdict never
- * promises more or less than the host provides. Nothing else: no `gui`, no `timer-support`, no
- * `posix-fd-support`, no `thread-pool`.
+ * promises more or less than the host provides. Nothing else: no `gui`.
  */
 export const OMX_CLAP_HOST_EXTENSIONS: readonly string[] = [
   "clap.log",
@@ -52,6 +51,17 @@ export const OMX_CLAP_HOST_EXTENSIONS: readonly string[] = [
   "clap.params",
   "clap.audio-ports",
   "clap.state",
+  "clap.note-ports",
+  "clap.note-name",
+  "clap.voice-info",
+  "clap.event-registry",
+  "clap.timer-support",
+  "clap.posix-fd-support",
+  "clap.thread-pool",
+  "clap.tail",
+  "clap.surround/4",
+  "clap.ambisonic/3",
+  "clap.audio-ports-config",
 ];
 
 /**

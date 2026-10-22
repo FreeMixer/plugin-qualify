@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@openmixer/omx-contract':
-        specifier: ^2.20.0
-        version: 2.20.0
+        specifier: ^3.0.0
+        version: 3.0.0
     devDependencies:
       '@types/node':
         specifier: ^24.9.0
@@ -27,8 +27,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
 
-  '@openmixer/omx-contract@2.20.0':
-    resolution: {integrity: sha512-sCvyqcVRWzW4WyouI379qVJjMOHsjcfV70/MWAdPOvpykd2nsm4bpd2jZ80HeZkBCnUQu7l780NDnkrd/Ef8aA==}
+  '@openmixer/omx-contract@3.0.0':
+    resolution: {integrity: sha512-gC2dzLF4PuCp+k7Cv6PoGKz/sdn9lkN95AA2l0fzmEsS35EeojFxwKxn4Exfmfe6xi9eZYjA6NxKGG3z//hosA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -467,7 +467,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
 
-  '@openmixer/omx-contract@2.20.0':
+  '@openmixer/omx-contract@3.0.0':
     dependencies:
       ajv: 8.20.0
 

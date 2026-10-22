@@ -39,7 +39,11 @@ import { clapQualifyToolPath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** The plugins of omx-clap-host 0.10.0's fake.clap, in the order its scan lists them. */
-const FAKE_NAMES = ["wide", "sidechain", "notes", "passthrough", "widen", "auxout"];
+const FAKE_NAMES = [
+  "wide", "sidechain", "notes", "passthrough", "widen", "auxout", "zero-port", "too-wide", "two-mains", "many-aux",
+  "aux-wide", "aux-max", "mono-stereo", "stereo-mono", "surround", "surround-bad", "surround-plain", "surround-short",
+  "ambisonic", "ambisonic-bad", "configs", "configurable", "surround-refuses",
+];
 /** A system CLAP directory that does not exist: a host with plugins in /usr/lib/clap (omx-clap-host installs some) must not change what a test finds. */
 const NO_SYSTEM = { [CLAP_SYSTEM_DIR_ENV]: "/nonexistent/omx-no-system-clap" };
 const FAKE_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "fake.json"), "utf8");
@@ -70,7 +74,7 @@ function answering(stdout: string, status = 0): { run: ClapScanRun; calls: strin
 }
 
 describe("parseClapScan — the tool's document, refused when it is not one", () => {
-  it("the real fake.clap golden: one file, the six plugins", () => {
+  it("the real fake.clap golden: one file, the plugins omx-clap-core 0.14.0 builds into it", () => {
     const doc = parseClapScan(FAKE_JSON);
     expect(doc.files).toHaveLength(1);
     const file = doc.files[0]!;
@@ -105,7 +109,7 @@ describe("clapScanDescriptors — the interchange rows", () => {
 
   it("ports are channels summed, a note input is the MIDI flag", () => {
     expect([byId("passthrough").audioInputs, byId("passthrough").audioOutputs]).toEqual([2, 2]);
-    expect([byId("wide").audioInputs, byId("wide").audioOutputs]).toEqual([4, 4]);
+    expect([byId("wide").audioInputs, byId("wide").audioOutputs]).toEqual([6, 6]);
     expect(byId("sidechain").audioInputs).toBe(3);
     expect(byId("passthrough").hasMidiIn).toBe(false);
     expect(byId("notes").hasMidiIn).toBe(true);
