@@ -24,6 +24,9 @@ BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 BuildRequires: pkgconfig(omx-contract) >= 3.0.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
+# the hosting codes: the build writes src/hosting-codes.generated.ts from the TypeScript modules omx-clap-core
+# 0.14.0 installs under its tsdir (tools/gen-hosting-codes.mjs); nothing reads them at run time
+BuildRequires: pkgconfig(omx-clap-core) >= 0.14.0
 
 Requires: nodejs >= 18
 Requires: python3
@@ -33,9 +36,6 @@ Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified
 Requires: omx-clap-host >= 0.13.0
-# the hosting codes' TypeScript modules (src/hosting-codes.ts, read at import): omx-clap-core 0.14.0 installs them
-# under /usr/share/omx-clap-core/ts, in its -devel package
-Requires: omx-clap-core-devel >= 0.14.0
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
