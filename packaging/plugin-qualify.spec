@@ -31,9 +31,11 @@ Requires: python3-lilv
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
 Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
-# the hosting codes' TypeScript module (src/hosting-codes.ts, read at import) and omx-clap-scan,
-# which lists the plugins in a .clap before each is qualified
+# omx-clap-scan, which lists the plugins in a .clap before each is qualified
 Requires: omx-clap-host >= 0.13.0
+# the hosting codes' TypeScript modules (src/hosting-codes.ts, read at import): omx-clap-core 0.14.0 installs them
+# under /usr/share/omx-clap-core/ts, in its -devel package
+Requires: omx-clap-core-devel >= 0.14.0
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
