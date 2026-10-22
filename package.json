@@ -77,12 +77,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && node tools/gen-hosting-codes.mjs --build && tsc -p tsconfig.json",
     "prepare": "npm run build",
     "test": "vitest run src",
     "lint": "tsc -p tsconfig.lint.json",
     "test:py": "python3 -m pytest tools -q",
-    "check:generated": "node tools/gen-python-declarations.mjs --check",
+    "check:generated": "node tools/gen-python-declarations.mjs --check && node tools/gen-hosting-codes.mjs --check",
     "check:private-refs": "tools/private-refs-check.sh && tools/private-refs-check.sh --self-test"
   },
   "devDependencies": {
