@@ -333,6 +333,48 @@ describe("the disqualifiers", () => {
     }
     expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
   });
+
+  // omx-clap-core #94 (0.15): the adapter offers state:mapPath and state:freePath at instantiate.
+  it("state:mapPath and state:freePath are provided: a plugin requiring either is suitable", () => {
+    const mapPath = "http://lv2plug.in/ns/ext/state#mapPath";
+    const freePath = "http://lv2plug.in/ns/ext/state#freePath";
+    expect(OMX_INPROCESS_FEATURES).toContain(mapPath);
+    expect(OMX_INPROCESS_FEATURES).toContain(freePath);
+    expect(classify(measured({}, { lv2Features: { required: [mapPath] } })).rating).toBe("suitable");
+    expect(classify(measured({}, { lv2Features: { required: [freePath] } })).rating).toBe("suitable");
+  });
+
+  it("taking state:mapPath or state:freePath out of the list turns a plugin requiring it unsuitable", () => {
+    const list = OMX_INPROCESS_FEATURES as string[];
+    for (const feature of ["http://lv2plug.in/ns/ext/state#mapPath", "http://lv2plug.in/ns/ext/state#freePath"]) {
+      const at = list.indexOf(feature);
+      expect(at).toBeGreaterThanOrEqual(0);
+      list.splice(at, 1);
+      try {
+        const v = classify(measured({}, { lv2Features: { required: [feature] } }));
+        expect(v.rating).toBe("unsuitable");
+        expect(v.deciding?.code).toBe(HOSTING_CODE.featuresMissing);
+      } finally {
+        list.splice(at, 0, feature);
+      }
+    }
+  });
+
+  // omx-clap-core #94 (0.15): the adapter's ports are its own memory, so in-place is never
+  // attempted — a plugin requiring lv2core:inPlaceBroken is never let down.
+  it("lv2core:inPlaceBroken is counted met: a plugin requiring it, alone, is suitable", () => {
+    const v = classify(measured({}, { lv2Features: { required: ["http://lv2plug.in/ns/lv2core#inPlaceBroken"] } }));
+    expect(v.rating).toBe("suitable");
+  });
+
+  it("inPlaceBroken forgives only itself: a genuinely unmet feature alongside it still refuses", () => {
+    const unmet = "http://example.org/ns/needs#something";
+    const v = classify(
+      measured({}, { lv2Features: { required: ["http://lv2plug.in/ns/lv2core#inPlaceBroken", unmet] } }),
+    );
+    expect(v.rating).toBe("unsuitable");
+    expect(v.reasons.find((r) => r.code === HOSTING_CODE.featuresMissing)?.params).toEqual({ features: unmet });
+  });
 });
 
 describe("the cautions cap at conditional and stay isolated", () => {

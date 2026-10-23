@@ -33,6 +33,8 @@ export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/worker#schedule",
   "http://lv2plug.in/ns/ext/state#loadDefaultState",
   "http://lv2plug.in/ns/ext/log#log",
+  "http://lv2plug.in/ns/ext/state#mapPath",
+  "http://lv2plug.in/ns/ext/state#freePath",
 ];
 
 /**
