@@ -38,7 +38,7 @@ step at a time, and what is not ours to start.
 
 Each step is its own pull request, with its own test and the arm that breaks it. Nothing here moves a figure.
 
-1. **Cost keyed by rate and quantum, in this package alone (no hostd needed).** `format.ts` 1.4 adds `perRateQuantum`
+1. **Cost keyed by rate and quantum, in this package alone (no hostd needed).** `format.ts` 1.6 adds `perRateQuantum`
    (rate string, then quantum string) beside `perRate`, which stays readable and is written as the reference
    quantum's entry. `benchmark.py` already takes `--quanta`; the cost pass runs one block size per quantum and the
    merge keeps them apart. `hostingCostReasons` reads `[rate][quantum]` and, for a document of the old format only,
