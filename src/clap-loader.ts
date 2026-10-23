@@ -479,7 +479,7 @@ export function discoverAllTargets(options: DiscoverAllOptions = {}): PluginTarg
   if (bundles.length > 0) {
     throw new ClapScanError(
       `--all cannot measure LV2 from this entry point and ${String(bundles.length)} LV2 bundle(s) are on the LV2 path ` +
-        `(first: ${bundles[0]}); name the plugins or bundles to qualify instead, or unset LV2_PATH to an empty directory`,
+        `(first: ${bundles[0]}); name the plugins or bundles to qualify instead, or set LV2_PATH to an empty directory`,
     );
   }
   return discoverClapTargets(options);
