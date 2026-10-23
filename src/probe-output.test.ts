@@ -30,6 +30,17 @@ describe("readProbeOutput: the three documents of plugin-hostd", () => {
     expect(o.offer.clapExtensions).toHaveLength(20);
   });
 
+  it("reads the 1.1 instrument document: cost.voices travels, latency.method and heard do not", () => {
+    const o = readFixture("instrument-notes");
+    expect(o.formatVersion).toBe("1.1");
+    expect(o.grid[0]?.cost?.voices).toEqual({ held: 16, basis: "declared", capacity: 16 });
+    expect(o.grid[1]?.cost?.voices).toEqual({ held: 32, basis: "probe" });
+    expect(o.grid[2]?.cost).toBeUndefined();
+    expect(o.grid[2]?.latency).toEqual({ declaredFrames: 0, measuredFrames: 1 });
+    expect(Object.keys(o.grid[2]?.latency ?? {})).not.toContain("method");
+    expect(Object.keys(o.grid[2]?.latency ?? {})).not.toContain("heard");
+  });
+
   it("reads the crash and the refusal, which have steps and no figures to speak of", () => {
     const crash = readFixture("plugin-crash");
     expect(crash.run.complete).toBe(false);

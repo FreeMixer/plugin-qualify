@@ -203,6 +203,27 @@ describe("the fixtures of plugin-hostd", () => {
     expect(judgeProbeOutput(skipped.output, [OMX_CLAP_HOST_PROFILE]).hosts[0]?.verdict).toMatchObject({ measured: true, rating: "suitable" });
   });
 
+  it("the 1.1 instrument document carries cost.voices through to the judgment, at the rate and quantum it was measured", () => {
+    const o = readFixture("instrument-notes");
+    const j = judgeProbeOutput(o, [OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE]);
+    expect(j.hosts.map((h) => h.verdict)).toEqual([
+      { uri: "urn:clap:org.example.pad", host: "omx-clap-host", measured: true, rating: "unknown", qualified: false, deciding: HOSTING_CODE.clapExtensionsNotCovered },
+      { uri: "urn:clap:org.example.pad", host: "openmixer-console", measured: true, rating: "unknown", qualified: false, deciding: HOSTING_CODE.clapExtensionsNotCovered },
+    ]);
+    expect(j.hosts[0]?.cost).toMatchObject({ rate: 48000, quantum: 128, voices: { held: 16, basis: "declared", capacity: 16 } });
+    // openmixer-console measures at 96000/1024, a point the fixture's grid does not hold at all
+    expect(j.hosts[1]?.cost.voices).toBeUndefined();
+
+    // sabotage: a cost.voices.held the reader did not actually carry through would leave this green
+    const doc = fixtureJson("instrument-notes");
+    doc["grid"][0]["cost"]["voices"]["held"] = 9;
+    const read = readProbeOutput(JSON.stringify(doc));
+    if (!read.ok) throw new Error(read.problem);
+    const sabotaged = judgeProbeOutput(read.output, [OMX_CLAP_HOST_PROFILE]);
+    expect(sabotaged.hosts[0]?.cost.voices).toEqual({ held: 9, basis: "declared", capacity: 16 });
+    expect(sabotaged.hosts[0]?.cost.voices).not.toEqual(j.hosts[0]?.cost.voices);
+  });
+
   it("an LV2 plugin is judged on the interposer's counts, under its URI", () => {
     const doc = fixtureJson("success-msi");
     doc["plugin"] = { format: "lv2", id: "urn:example:plate" };
