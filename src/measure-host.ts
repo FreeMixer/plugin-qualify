@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * Reading what the measuring host (`lv2_measure`) prints and supervising how long it may take.
- * Pure functions: the runner spawns, these decide.
+ * Reading what the measuring host (`lv2_measure`) prints. Pure functions: the runner spawns,
+ * these decide.
  */
 import { isRecord } from "./measurement/guards.js";
-import { SOAK_SWEEP_DB, SOAK_SWEEP_RATIO, SOAK_TIMEOUT_FLOOR_S, SOAK_TIMEOUT_MARGIN } from "./qualify-declarations.js";
 
 /**
  * Where `text` stops being JSON, scanning ONE value from `i`; returns the index just past the
@@ -90,23 +89,4 @@ export function extractJsonRecord(stdout: string): Record<string, unknown> | und
     }
   }
   return undefined;
-}
-
-/**
- * The wall-clock limit for a soak of `soakAudioS` audio seconds, from the calibration soak's
- * measured speed: `wallPerAudio * soakAudioS * SOAK_TIMEOUT_MARGIN + SOAK_TIMEOUT_FLOOR_S`,
- * rounded up. Refuses (throws) on a calibration that measured nothing: a guessed limit is the
- * fixed 900 s again.
- */
-export function soakTimeoutSeconds(calibration: { wallSeconds: number; audioSeconds: number }, soakAudioS: number): number {
-  const { wallSeconds, audioSeconds } = calibration;
-  if (!(wallSeconds > 0) || !(audioSeconds > 0) || !(soakAudioS > 0)) {
-    throw new Error("soakTimeoutSeconds: calibration measured no speed");
-  }
-  return Math.ceil((wallSeconds / audioSeconds) * soakAudioS * SOAK_TIMEOUT_MARGIN + SOAK_TIMEOUT_FLOOR_S);
-}
-
-/** The environment that bounds the host's soak sweep to the declared ranges. */
-export function soakSweepEnv(): Record<string, string> {
-  return { OMX_SWEEP_DB: String(SOAK_SWEEP_DB), OMX_SWEEP_RATIO: String(SOAK_SWEEP_RATIO) };
 }
