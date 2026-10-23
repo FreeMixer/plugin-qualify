@@ -410,6 +410,14 @@ describe("clap-qualify, live — an instrument is played: the note sweep", () =>
     expect(r.status).toBe(2);
     expect(r.stdout).toBe("");
   });
+
+  live("--probe-notes 0 and --hold 0 are refused, not read as not given", () => {
+    for (const flag of ["--probe-notes", "--hold"]) {
+      const r = spawnSync(clapQualifyToolPath(), ["--rates", "48000", flag, "0", SYNTH], { encoding: "utf8" });
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+    }
+  });
 });
 
 describe("plugin-qualify --all, live — the standard CLAP search path", () => {
