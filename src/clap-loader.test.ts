@@ -392,6 +392,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     const lv2Dir = join(scratch, "both", "lv2");
     touch("both/clap/x.clap");
     mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
+    writeFileSync(join(lv2Dir, "gain.lv2", "manifest.ttl"), "");
     const { run, calls } = answering(none);
     const env = { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir, ...NO_SYSTEM };
     expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(ClapScanError);
@@ -414,6 +415,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     if (!existsSync(join(PKG, "dist", "index.js"))) return;
     const lv2Dir = join(scratch, "cli", "lv2");
     mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
+    writeFileSync(join(lv2Dir, "gain.lv2", "manifest.ttl"), "");
     const r = spawnSync(process.execPath, [bin, "--all"], {
       encoding: "utf8",
       env: { ...process.env, HOME: join(scratch, "cli", "home"), LV2_PATH: lv2Dir, CLAP_PATH: join(scratch, "cli", "none"), ...NO_SYSTEM },
