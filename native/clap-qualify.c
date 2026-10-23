@@ -463,8 +463,10 @@ struct facts {
   uint64_t note_allocations, note_locks, note_syscalls;
   struct omx_rt_event note_rt_events[OMX_RT_EV_MAX];
   int n_note_rt_events;
-  /* the cost arm, per rate; `cost_notes` is whether it played notes (an instrument) or noise */
+  /* the cost arm, per rate; `cost_notes` is whether it played notes (an instrument) or noise;
+   * `cost_notes_unplayable` is an instrument whose notes the prober could not play at all, timed on neither */
   int cost_notes;
+  int cost_notes_unplayable;
   struct cost_at cost[MAX_RATES];
 };
 
@@ -1056,7 +1058,8 @@ static const char *const BASIS_NAME[] = { [BASIS_NONE] = NULL, [BASIS_DECLARED] 
 /* the cost arm: per rate, its figures in nanoseconds per sample and the notes it held, or why it has none */
 static void put_cost(const struct facts *f, uint32_t frames) {
   fprintf(g_out, ",\"cost\":{\"stimulus\":\"%s\",\"blockFrames\":%u,\"warmupBlocks\":%u,\"percentile\":%.0f,\"perRate\":{",
-          f->cost_notes ? "notes-held" : "noise", frames, COST_WARMUP_BLOCKS, COST_PERCENTILE);
+          f->cost_notes ? "notes-held" : f->cost_notes_unplayable ? "notes-unplayable" : "noise",
+          frames, COST_WARMUP_BLOCKS, COST_PERCENTILE);
   for (uint32_t r = 0; r < f->n_rates; r++) {
     const struct cost_at *c = &f->cost[r];
     fprintf(g_out, "%s\"%.0f\":{", r ? "," : "", f->rates[r]);
@@ -1602,6 +1605,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     if (!strcmp(*ft, CLAP_PLUGIN_FEATURE_INSTRUMENT)) instrument_feature = 1;
   const int instrument = f.note_inputs > 0 && (f.main_in == 0 || instrument_feature);
   f.cost_notes = instrument && f.note_dialect != NULL;
+  f.cost_notes_unplayable = instrument && f.note_dialect == NULL;
   for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++) {
     if (instrument && !f.note_dialect) {
       f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";

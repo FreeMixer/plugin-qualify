@@ -94,10 +94,11 @@ export function isClapCostFigure(at: ClapCostAtRate): at is ClapCostFigure {
 
 /**
  * The cost arm: every rate timed with every parameter swept, an effect fed noise and an instrument
- * holding notes (`notes-held`), each rate's figures or the reason it has none.
+ * holding notes (`notes-held`), each rate's figures or the reason it has none. `notes-unplayable` is
+ * an instrument whose note input is in no dialect the prober speaks: timed on neither notes nor noise.
  */
 export interface ClapCostReading {
-  readonly stimulus: "notes-held" | "noise";
+  readonly stimulus: "notes-held" | "noise" | "notes-unplayable";
   readonly blockFrames: number;
   readonly warmupBlocks: number;
   /** The percentile `nsPerSampleP95` is taken at. */
@@ -281,7 +282,7 @@ function readCostAtRate(v: unknown, where: string, notes: boolean): ClapCostAtRa
 function readCost(v: unknown): ClapCostReading {
   if (!isRecord(v)) return bad("cost is not an object");
   const stimulus = str(v, "stimulus", "cost");
-  if (stimulus !== "notes-held" && stimulus !== "noise") return bad(`cost stimulus ${stimulus}`);
+  if (stimulus !== "notes-held" && stimulus !== "noise" && stimulus !== "notes-unplayable") return bad(`cost stimulus ${stimulus}`);
   const perRateIn = v["perRate"];
   if (!isRecord(perRateIn)) return bad("cost has no perRate map");
   const perRate: Record<string, ClapCostAtRate> = {};

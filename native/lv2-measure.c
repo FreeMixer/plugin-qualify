@@ -1113,13 +1113,14 @@ int main(int argc, char **argv) {
 
   /* ---- the note sweep: a plugin with a MIDI input, played, counted apart ---- */
   struct {
-    int played, nonfinite, n_seen;
+    int played, nonfinite, n_seen, rig_failed;
     long events;
     uint64_t allocs, locks, syscalls;
     struct omx_rt_event seen[OMX_RT_EV_MAX];
   } ns = {0};
   if (H->midi_port >= 0) {
     struct rig *ni = rig_open(H, rate, block, 1);
+    if (ni == NULL) ns.rig_failed = 1;
     if (ni != NULL) {
       fill_input(ni, &rng, use_noise, block, rate, 0);
       lilv_instance_activate(ni->inst);
@@ -1201,8 +1202,12 @@ int main(int argc, char **argv) {
          (unsigned long long)syscalls, (unsigned long long)syscalls_min);
   emit_rt_events(seen, n_seen);
   fprintf(jout, "]");
-  /* the note sweep: not applicable without a MIDI input, its counts only under the interposer */
-  if (!ns.played) {
+  /* the note sweep: not applicable without a MIDI input, its counts only under the interposer.
+   * A MIDI port that would not instantiate for the sweep is not "no MIDI input" — say why instead. */
+  if (!ns.played && ns.rig_failed) {
+    fprintf(jout, ",\"noteSweep\":{\"applicable\":false,\"unmeasuredReason\":\"rig-open-failed\","
+            "\"unmeasuredDetail\":\"the note-sweep instance would not instantiate\"}");
+  } else if (!ns.played) {
     fprintf(jout, ",\"noteSweep\":{\"applicable\":false}");
   } else {
     const int counted = rt_present && rt_present();

@@ -23,6 +23,8 @@
  *                          reads MIDI too, so a host sends it all notes off as controller 123, never a wildcard.
  *                          It also has a stepped parameter (a mode, 0 to 3) and aborts on a value between two
  *                          steps, which no host sends.
+ *   synth-unplayable.clap  built with -DFIXTURE_NOTE_UNSPOKEN, the safe one whose note port speaks MIDI-MPE
+ *                          alone: a note input in no dialect the prober speaks, so the cost arm cannot play it.
  *
  * Each voice costs a sine per sample, so the cost grows with the notes held.
  *
@@ -49,6 +51,9 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_NO_WILDCARDS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-strict"
 #define FIXTURE_NAME "synth refusing wildcard notes"
+#elif defined FIXTURE_NOTE_UNSPOKEN
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-unplayable"
+#define FIXTURE_NAME "synth whose note port speaks a dialect the prober does not"
 #elif defined FIXTURE_VOICE_CAPACITY && FIXTURE_VOICE_CAPACITY == 0
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-no-voices"
 #define FIXTURE_NAME "synth declaring no voices"
@@ -228,6 +233,9 @@ static bool notes_get(const clap_plugin_t *p, uint32_t index, bool is_input, cla
 #ifdef FIXTURE_MIDI_ONLY
   info->supported_dialects = CLAP_NOTE_DIALECT_MIDI;
   info->preferred_dialect = CLAP_NOTE_DIALECT_MIDI;
+#elif defined FIXTURE_NOTE_UNSPOKEN
+  info->supported_dialects = CLAP_NOTE_DIALECT_MIDI_MPE;
+  info->preferred_dialect = CLAP_NOTE_DIALECT_MIDI_MPE;
 #else
   info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
   info->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
