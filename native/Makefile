@@ -96,7 +96,8 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
-	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so
+	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
+	$(BUILD)/fixtures/lv2/zero-path.lv2/zero-path.so
 
 $(BUILD) $(BUILD)/fixtures:
 	mkdir -p $@
@@ -219,6 +220,15 @@ $(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-h
 		fixtures/host-faithfulness.lv2/manifest.ttl fixtures/host-faithfulness.lv2/host-faithfulness.ttl
 	mkdir -p $(@D)
 	cp fixtures/host-faithfulness.lv2/manifest.ttl fixtures/host-faithfulness.lv2/host-faithfulness.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# issue #90's canary: a zero-size atom:Path overread (mod-host PR #98, 7e1f143); the fixture lives at
+# the repo root (fixtures/zero-path.lv2), not under native/fixtures/, because src/*.test.ts load it by
+# bundle path too
+$(BUILD)/fixtures/lv2/zero-path.lv2/zero-path.so: ../fixtures/zero-path.lv2/zero-path.c \
+		../fixtures/zero-path.lv2/manifest.ttl ../fixtures/zero-path.lv2/zero-path.ttl
+	mkdir -p $(@D)
+	cp ../fixtures/zero-path.lv2/manifest.ttl ../fixtures/zero-path.lv2/zero-path.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
