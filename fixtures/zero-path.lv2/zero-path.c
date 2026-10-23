@@ -4,7 +4,15 @@
  * pass-through that emits, on its notify port, a patch:Set whose value is an atom:Path of body
  * size ZERO — what NAM does with no model loaded (mod-host PR #98, 7e1f143). Emitted on the first
  * cycle after activate and then every 32 cycles, so a racked instance keeps feeding mod-host's
- * feedback relay (RunPostPonedEvents, POSTPONED_PROCESS_OUTPUT_BUFFER). */
+ * feedback relay (RunPostPonedEvents, POSTPONED_PROCESS_OUTPUT_BUFFER).
+ *
+ * The #98 bug is NAM's own: it keeps a copy of the model path it last told the host about, sized
+ * to that path, and rereads that copy's first byte every block to decide whether a model is
+ * loaded, never checking the copy is non-empty first. `path_copy` reproduces exactly that — one
+ * byte read past a zero-length allocation, every block, with no model ever loaded. Fixing it
+ * (bounds-check `path_len` before the read) is the sabotage arm: the overread, and the crash a
+ * sanitizer build catches it with, both disappear. */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <lv2/core/lv2.h>
@@ -25,6 +33,8 @@ typedef struct {
     LV2_Atom_Forge forge;
     LV2_URID patch_Set, patch_property, patch_value, atom_Path, model;
     unsigned cycle;
+    uint8_t *path_copy; /* NAM's own cache of the model path; never loaded, so always zero-length */
+    uint32_t path_len;
 } Z;
 
 static LV2_Handle instantiate(const LV2_Descriptor *d, double rate, const char *path,
@@ -41,6 +51,8 @@ static LV2_Handle instantiate(const LV2_Descriptor *d, double rate, const char *
     z->patch_value = map->map(map->handle, LV2_PATCH__value);
     z->atom_Path = map->map(map->handle, LV2_ATOM__Path);
     z->model = map->map(map->handle, ZP_URI "#model");
+    z->path_len = 0; /* no model loaded */
+    z->path_copy = malloc(z->path_len);
     (void)d; (void)rate; (void)path;
     return z;
 }
@@ -62,6 +74,9 @@ static void run(LV2_Handle h, uint32_t n)
 {
     Z *z = h;
     if (z->in && z->out) memmove(z->out, z->in, n * sizeof(float));
+    /* the #98 overread: read the cached model path's first byte with no length check. */
+    volatile uint8_t probe = z->path_copy[0];
+    (void)probe;
     if (!z->notify) return;
     const uint32_t cap = z->notify->atom.size;
     lv2_atom_forge_set_buffer(&z->forge, (uint8_t *)z->notify, cap);
@@ -79,7 +94,7 @@ static void run(LV2_Handle h, uint32_t n)
     lv2_atom_forge_pop(&z->forge, &seq);
 }
 
-static void cleanup(LV2_Handle h) { free(h); }
+static void cleanup(LV2_Handle h) { free(((Z *)h)->path_copy); free(h); }
 
 static const LV2_Descriptor desc = { ZP_URI, instantiate, connect_port, activate, run, NULL, cleanup, NULL };
 LV2_SYMBOL_EXPORT const LV2_Descriptor *lv2_descriptor(uint32_t i) { return i == 0 ? &desc : NULL; }
