@@ -1,0 +1,302 @@
+{
+  "format": "plugin-hostd.probe-output",
+  "formatVersion": "1.1",
+  "run": {
+    "id": "msi-20261019T101500Z-3571140",
+    "startedAt": "2026-10-19T10:15:00+02:00",
+    "elapsedMs": 96410,
+    "complete": true,
+    "outcome": "probe.ok",
+    "reason": "reference",
+    "protocol": {
+      "name": "plugin-hostd.probe-protocol",
+      "version": 1
+    },
+    "tools": {
+      "runner": "plugin-hostd-probe 0.5.0",
+      "child": "clap-qualify"
+    },
+    "via": "runner"
+  },
+  "plugin": {
+    "format": "clap",
+    "id": "org.example.pad",
+    "name": "Pad",
+    "vendor": "Example",
+    "version": "2.0.1"
+  },
+  "binary": {
+    "path": "/usr/lib64/clap/example-pad.clap",
+    "sha256": "7d1b0c55e1f3a9b8c2d4e6f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c",
+    "files": [
+      {
+        "path": "example-pad.clap",
+        "sha256": "7d1b0c55e1f3a9b8c2d4e6f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c"
+      }
+    ]
+  },
+  "machine": {
+    "class": {
+      "arch": "x86_64",
+      "family": "intel",
+      "coreBand": "17-32",
+      "clockBand": "4.5GHz+",
+      "preemptRt": false,
+      "cstatesLimited": true
+    },
+    "profile": {
+      "governor": "performance",
+      "turbo": true,
+      "smt": true,
+      "preempt": "PREEMPT_DYNAMIC",
+      "cpuidle": [
+        {
+          "cpu": 22,
+          "state": "POLL",
+          "latencyUs": 0,
+          "disabled": false,
+          "usageDelta": 118
+        },
+        {
+          "cpu": 22,
+          "state": "C1_ACPI",
+          "latencyUs": 1,
+          "disabled": false,
+          "usageDelta": 40210
+        },
+        {
+          "cpu": 22,
+          "state": "C2_ACPI",
+          "latencyUs": 127,
+          "disabled": true,
+          "usageDelta": 0
+        },
+        {
+          "cpu": 22,
+          "state": "C3_ACPI",
+          "latencyUs": 1048,
+          "disabled": true,
+          "usageDelta": 0
+        }
+      ],
+      "meetsProtocol": true,
+      "declaredName": "omx-live-rig"
+    },
+    "pinnedCpus": "22",
+    "reference": {
+      "rig": "msi",
+      "image": "omx-ref-2026-10"
+    }
+  },
+  "offer": {
+    "id": "default",
+    "realtime": "none"
+  },
+  "limits": {
+    "set": "default",
+    "applied": [
+      {
+        "limit": "wall-clock",
+        "value": 600,
+        "unit": "s",
+        "by": "supervisor"
+      },
+      {
+        "limit": "cpu-time",
+        "value": 540,
+        "unit": "s",
+        "by": "rlimit"
+      },
+      {
+        "limit": "memory",
+        "value": 2147483648,
+        "unit": "bytes",
+        "by": "cgroup"
+      },
+      {
+        "limit": "tasks",
+        "value": 64,
+        "unit": "count",
+        "by": "cgroup"
+      },
+      {
+        "limit": "files",
+        "value": 256,
+        "unit": "count",
+        "by": "rlimit"
+      },
+      {
+        "limit": "file-size",
+        "value": 67108864,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "core-dump",
+        "value": 0,
+        "unit": "bytes",
+        "by": "rlimit"
+      },
+      {
+        "limit": "rt-priority",
+        "value": 0,
+        "by": "rlimit"
+      },
+      {
+        "limit": "cpus",
+        "value": "22",
+        "by": "affinity"
+      },
+      {
+        "limit": "no-new-privs",
+        "by": "prctl"
+      },
+      {
+        "limit": "network",
+        "value": "none",
+        "by": "netns"
+      }
+    ],
+    "unavailable": []
+  },
+  "steps": [
+    {
+      "step": "hash",
+      "outcome": "probe.ok",
+      "elapsedMs": 4
+    },
+    {
+      "step": "instantiate",
+      "outcome": "probe.ok",
+      "elapsedMs": 31
+    },
+    {
+      "step": "lifecycle",
+      "outcome": "probe.ok",
+      "elapsedMs": 2210
+    },
+    {
+      "step": "latency",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 310
+    },
+    {
+      "step": "cost",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 30020
+    },
+    {
+      "step": "rt-safety",
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 4100
+    },
+    {
+      "step": "latency",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 305
+    },
+    {
+      "step": "cost",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 30011
+    },
+    {
+      "step": "rt-safety",
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "elapsedMs": 4080
+    },
+    {
+      "step": "note-sweep",
+      "outcome": "probe.not-attempted",
+      "elapsedMs": 0,
+      "detail": "no note input"
+    }
+  ],
+  "grid": [
+    {
+      "rate": 48000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 1,
+        "method": "note-onset",
+        "heard": true
+      },
+      "cost": {
+        "unit": "ns-per-sample",
+        "median": 212.4,
+        "percentile": {
+          "p": 95,
+          "value": 237.9
+        },
+        "min": 201.8,
+        "max": 446.0,
+        "blocks": 11250,
+        "warmupBlocks": 64,
+        "voices": {
+          "held": 16,
+          "basis": "declared",
+          "capacity": 16
+        }
+      }
+    },
+    {
+      "rate": 96000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 1,
+        "method": "note-onset",
+        "heard": true
+      },
+      "cost": {
+        "unit": "ns-per-sample",
+        "median": 208.9,
+        "percentile": {
+          "p": 95,
+          "value": 234.0
+        },
+        "min": 198.5,
+        "max": 438.7,
+        "blocks": 22500,
+        "warmupBlocks": 64,
+        "voices": {
+          "held": 32,
+          "basis": "probe"
+        }
+      }
+    },
+    {
+      "rate": 192000,
+      "quantum": 128,
+      "outcome": "probe.ok",
+      "latency": {
+        "declaredFrames": 0,
+        "measuredFrames": 1,
+        "method": "note-onset",
+        "heard": false
+      }
+    }
+  ],
+  "behaviour": {
+    "lifecycle": {
+      "cycles": 30,
+      "instantiated": 30,
+      "failed": 0
+    }
+  }
+}
