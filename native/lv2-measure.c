@@ -40,10 +40,18 @@
  * stdout so a plugin's own banner cannot tear it. The "host" object in the record says what the
  * host did, so a test can prove each injection landed.
  *
- * WHAT IT DOES NOT DO. It does not soak — the spec's stability dimension also wants a
- * continuous run at least as long as the operator's longest show, which is hours and
- * belongs in a scheduled sweep rather than here. A plugin passing this program still
- * reads `unknown` until it has been soaked, and that is deliberate.
+ * SOAK MODE IS A DIFFERENT PASS. Set `OMX_SOAK_SECONDS` and the program takes neither of the
+ * passes above: one instance, run continuously for that many seconds, its controls swept
+ * slowly across the same bounded ranges while every one-second window is checked for a
+ * finite output, a level that has not decayed from where it started, and process RSS that
+ * has not grown. The record carries a `soak` object in place of `rtSafety`/`stability`.
+ *
+ * WHAT IT LEAVES TO A SCHEDULE. The stability dimension's real question is a continuous run
+ * across the whole catalog, at every rate, for as long as the operator's longest show — hours,
+ * repeated on a schedule, never once here. Sizing and running that schedule, and folding its
+ * output into one line per plugin, is outside this program (`sweep-jsonl.ts` reads the result).
+ * A plugin this program measured without `OMX_SOAK_SECONDS` still reads `unknown` for stability
+ * until a scheduled soak has measured it.
  *
  *   make -C native              (builds native/build/lv2_measure; the Makefile carries the line)
  *   LD_PRELOAD=$PWD/native/build/rt_interpose.so native/build/lv2_measure [flags] <uri> [rate] [block] [cycles] [repeats]
