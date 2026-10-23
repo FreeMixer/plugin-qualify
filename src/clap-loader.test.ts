@@ -410,9 +410,13 @@ describe("--all — both formats, and a search directory that cannot be read", (
     expect(calls.map((c) => c[2])).toEqual([clapDir]);
   });
 
-  it("the command exits 2 with both formats present", () => {
+  it("the command exits 2 with both formats present", (ctx) => {
     const bin = join(PKG, "bin", "plugin-qualify.mjs");
-    if (!existsSync(join(PKG, "dist", "index.js"))) return;
+    if (!existsSync(join(PKG, "dist", "index.js"))) {
+      if (process.env["CI"]) throw new Error("dist/ is missing: CI builds it before running tests");
+      ctx.skip("dist/ is missing: run the package build first");
+      return;
+    }
     const lv2Dir = join(scratch, "cli", "lv2");
     mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
     writeFileSync(join(lv2Dir, "gain.lv2", "manifest.ttl"), "");
