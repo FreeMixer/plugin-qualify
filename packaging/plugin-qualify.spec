@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.13.1
+Version: 0.14.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -73,6 +73,14 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 24 2026 Pau Aliagas <linuxnow@gmail.com> - 0.14.0-1
+- The scanners write a scanned descriptor per plugin into descriptor_dir
+  ($XDG_STATE_HOME/omx/descriptors), named <id>@<version>-<sha256 first 12>.json,
+  validated against omx-contract's descriptor schema and written atomically;
+  clap-qualify --json also prints the binary hash, port types, note dialects and
+  the latency extension (#140). The package requires python3-jsonschema.
+- Audit of plugin-qualify against omx-clap-core's compat tables, with
+  audit-overlap.sh and its CI self-test (#124).
 * Thu Oct 22 2026 Pau Aliagas <linuxnow@gmail.com> - 0.13.1-1
 - HOSTING_CODE is build-time data (src/hosting-codes.generated.ts, written by
   tools/gen-hosting-codes.mjs from omx-clap-core's tables): no browser-reachable
