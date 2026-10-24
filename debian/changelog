@@ -1,3 +1,15 @@
+plugin-qualify (0.14.0) unstable; urgency=medium
+
+  * The scanners write a scanned descriptor per plugin into descriptor_dir
+    ($XDG_STATE_HOME/omx/descriptors), named <id>@<version>-<sha256 first 12>.json,
+    validated against omx-contract's descriptor schema and written atomically;
+    clap-qualify --json also prints the binary hash, port types, note dialects
+    and the latency extension (#140). The package requires python3-jsonschema.
+  * Audit of plugin-qualify against omx-clap-core's compat tables, with
+    audit-overlap.sh and its CI self-test (#124).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sat, 24 Oct 2026 13:12:05 +0200
+
 plugin-qualify (0.13.1) unstable; urgency=medium
 
   * HOSTING_CODE is build-time data (src/hosting-codes.generated.ts, written
