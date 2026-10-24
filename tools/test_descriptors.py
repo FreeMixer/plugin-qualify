@@ -183,6 +183,14 @@ class Writing(unittest.TestCase):
         self.assertEqual([os.path.basename(p) for p in written], ["org.example.other@1-aaaaaaaaaaaa.json"])
         self.assertEqual([(r[0], r[1]) for r in refused], [("org.freemixer.plugin-qualify.fixture.controls", DESCRIPTOR_CODE_BINARY_UNHASHED)])
 
+    def test_the_cli_reads_the_scan_from_stdin_when_the_dash_follows_the_options(self):
+        out_dir = os.path.join(self.dir, "out")
+        r = subprocess.run([sys.executable, os.path.join(TOOLS, "descriptors.py"), "clap", "--descriptor-dir", out_dir, "-"],
+                           input=json.dumps(controls_scan(SHA_A)), capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(os.listdir(out_dir), ["org.freemixer.plugin-qualify.fixture.controls@1-aaaaaaaaaaaa.json"])
+
     def test_the_cli_reads_a_scan_document_and_exits_2_on_a_refusal(self):
         scan = os.path.join(self.dir, "scan.json")
         with open(scan, "w", encoding="utf-8") as f:

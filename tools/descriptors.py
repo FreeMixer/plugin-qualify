@@ -355,7 +355,10 @@ def main(argv=None):
     where = ap.add_mutually_exclusive_group()
     where.add_argument("--descriptor-dir", help="where the descriptors go (descriptor_dir)")
     where.add_argument("--system", action="store_true", help=f"a system service's directory, {DESCRIPTOR_DIR_SYSTEM}")
-    args = ap.parse_args(argv)
+    # intermixed: `clap --descriptor-dir DIR -` puts the scan after an option, and parse_args on Python 3.11
+    # and 3.12.3 (Debian bookworm, Ubuntu noble) fills the optional positional with its default first and
+    # then refuses the `-` as unrecognized; later interpreters accept it. Intermixed parsing reads it on all.
+    args = ap.parse_intermixed_args(argv)
     try:
         text = sys.stdin.read() if args.scan == "-" else open(args.scan, encoding="utf-8").read()
         scan = json.loads(text)
