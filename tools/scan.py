@@ -115,11 +115,23 @@ def fnum(node):
             return None
 
 
+def each(nodes):
+    """Every element of a lilv collection (None is empty), walked by the binding's own begin, is_end and next,
+    which every version has: the Python iteration of some does not hold for every collection."""
+    if nodes is None:
+        return []
+    if isinstance(nodes, (list, tuple)):
+        return list(nodes)
+    out = []
+    it = nodes.begin()
+    while not it.is_end():
+        out.append(it.next())
+    return out
+
+
 def first(nodes):
     """First element of a lilv Nodes collection, or None."""
-    if nodes is None:
-        return None
-    for n in nodes:
+    for n in each(nodes):
         return n
     return None
 
@@ -347,7 +359,7 @@ class Scanner:
 
     def designation_meaning(self, port):
         """The meaning an lv2:designation names; `unknown` with none; absent (None) for one with no word."""
-        des = [str(d) for d in (port.get_value(self.u[LV2 + "designation"]) or [])]
+        des = [str(d) for d in each(port.get_value(self.u[LV2 + "designation"]))]
         if not des:
             return "unknown"
         for d in des:
@@ -429,12 +441,12 @@ class Scanner:
             sha256 = desc.file_sha256(lib_path) if lib_path else None
         except desc.DescriptorRefused:
             sha256 = None  # refused by its code when it is written: no name without the binary's hash
-        data = sorted(os.path.basename(str(u)) for u in (plugin.get_data_uris() or []))
+        data = sorted(os.path.basename(str(u)) for u in each(plugin.get_data_uris()))
         ttl = next((f for f in data if f != "manifest.ttl"), "manifest.ttl")
         bundle_seg = desc.link_segment(os.path.basename(bundle))
         link = f"{bundle_seg}/{desc.link_segment(ttl)}"
 
-        types = [str(t) for t in (plugin.get_value(self.u["http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]) or [])]
+        types = [str(t) for t in each(plugin.get_value(self.u["http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]))]
         features = [CLASS_FEATURES[t] for t in types if t in CLASS_FEATURES]
         p = {"id": uri, "uri": uri, "name": str(plugin.get_name())}
         author = plugin.get_author_name()
@@ -492,8 +504,8 @@ class Scanner:
         needs = {}
         if timed:
             needs["tempo"] = needs["transport"] = True
-        required = [str(f) for f in (plugin.get_required_features() or [])]
-        optional = [str(f) for f in (plugin.get_optional_features() or [])]
+        required = [str(f) for f in each(plugin.get_required_features())]
+        optional = [str(f) for f in each(plugin.get_optional_features())]
         ext = {}
         if required:
             ext["required"] = sorted(set(required))
@@ -528,7 +540,8 @@ class Scanner:
             except desc.DescriptorRefused as e:
                 sys.stderr.write(f"descriptor refused: {p.get_uri()}: {e.code}: {e.problem}\n")
             except Exception as e:  # noqa: BLE001 - one plugin's bad data never stops the scan
-                sys.stderr.write(f"not described: {p.get_uri()}: {e}\n")
+                line = e.__traceback__.tb_next.tb_lineno if e.__traceback__ and e.__traceback__.tb_next else "?"
+                sys.stderr.write(f"not described: {p.get_uri()}: {type(e).__name__}: {e} (scan.py:{line})\n")
         return out
 
     def plugin_version(self, plugin):
