@@ -8,7 +8,7 @@
 FROM registry.fedoraproject.org/fedora:44
 
 RUN dnf -y install --setopt=install_weak_deps=False \
-      nodejs npm python3 python3-lilv lilv lv2 mod-host \
+      nodejs npm python3 python3-lilv python3-jsonschema lilv lv2 mod-host \
       git gcc make pkgconf-pkg-config libasan \
       jack-audio-connection-kit-devel readline-devel fftw-devel lilv-devel \
     && dnf clean all

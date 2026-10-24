@@ -17,7 +17,18 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { type ClapDescriptorParam, type ClapDescriptorRow, clapScanDescriptors, parseClapScan } from "./clap-loader.js";
-import { DESCRIPTOR_CODE_SCHEMA, DESCRIPTOR_HASH_PREFIX } from "./qualify-declarations.js";
+import {
+  DESCRIPTOR_CODE_BINARY_UNHASHED,
+  DESCRIPTOR_CODE_DIR_UNWRITABLE,
+  DESCRIPTOR_CODE_SCHEMA,
+  DESCRIPTOR_CODE_SCHEMA_MISSING,
+  DESCRIPTOR_DIR_KEY,
+  DESCRIPTOR_DIR_STATE_SUBDIR,
+  DESCRIPTOR_DIR_SYSTEM,
+  DESCRIPTOR_HASH_PREFIX,
+  DESCRIPTOR_SCHEMA_ENV,
+  DESCRIPTOR_SCHEMA_INSTALLED,
+} from "./qualify-declarations.js";
 import { clapQualifyToolPath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -229,5 +240,32 @@ describe("the CLAP fixture set through clap-qualify and descriptors.py", () => {
     expect(w.status).toBe(2);
     expect(w.stderr).toContain(`descriptor refused: org.freemixer.plugin-qualify.fixture.controls: ${DESCRIPTOR_CODE_SCHEMA}: ports/0/role`);
     expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+  });
+});
+
+describe("the README states the directory, its key and the name as the code declares them", () => {
+  const readme = readFileSync(join(PKG, "README.md"), "utf8");
+  it("the key, the user and system defaults, the file name and the codes", () => {
+    expect(readme).toContain(`the key \`${DESCRIPTOR_DIR_KEY}\``);
+    expect(readme).toContain(`\`$XDG_STATE_HOME/${DESCRIPTOR_DIR_STATE_SUBDIR}\`, else \`~/.local/state/${DESCRIPTOR_DIR_STATE_SUBDIR}\``);
+    expect(readme).toContain(`\`${DESCRIPTOR_DIR_SYSTEM}\``);
+    expect(readme).toContain(`\`<id>@<version>-<sha256 first ${DESCRIPTOR_HASH_PREFIX}>.json\``);
+    for (const code of [DESCRIPTOR_CODE_SCHEMA, DESCRIPTOR_CODE_BINARY_UNHASHED, DESCRIPTOR_CODE_DIR_UNWRITABLE, DESCRIPTOR_CODE_SCHEMA_MISSING]) {
+      expect(readme).toContain(`\`${code}\``);
+    }
+    expect(readme).toContain(`\`${DESCRIPTOR_SCHEMA_INSTALLED}\``);
+    expect(readme).toContain(`\`${DESCRIPTOR_SCHEMA_ENV}\``);
+  });
+
+  it("the writer resolves the same defaults the README states", () => {
+    const run = spawnSync("python3", ["-c",
+      "import sys; sys.path.insert(0, sys.argv[1]); import descriptors as d; "
+      + "print(d.descriptor_dir(env={'XDG_STATE_HOME': '/s'})); print(d.descriptor_dir(env={}, home='/h')); print(d.descriptor_dir(system=True))",
+      join(PKG, "tools")], { encoding: "utf8" });
+    expect(run.stdout.trim().split("\n")).toEqual([
+      `/s/${DESCRIPTOR_DIR_STATE_SUBDIR}`,
+      `/h/.local/state/${DESCRIPTOR_DIR_STATE_SUBDIR}`,
+      DESCRIPTOR_DIR_SYSTEM,
+    ]);
   });
 });

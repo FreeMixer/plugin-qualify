@@ -28,6 +28,8 @@ BuildRequires: pkgconfig(omxdsp) >= 0.21.0
 Requires: nodejs >= 18
 Requires: python3
 Requires: python3-lilv
+# the scanned descriptors are held to omx-contract's schema before they are written (tools/descriptors.py)
+Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
 Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
