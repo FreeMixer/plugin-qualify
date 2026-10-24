@@ -60,7 +60,7 @@ jobs:
 
       - name: Python tools
         run: |
-          python -m pip install --quiet pytest
+          python -m pip install --quiet pytest jsonschema
           pnpm test:py
 
       - name: The packed package carries its build
