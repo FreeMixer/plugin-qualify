@@ -147,6 +147,35 @@ export const LV2_HOSTING_LIFECYCLES = 30;
 export const LV2_HOSTING_REPEATS = 3;
 export const LV2_HOSTING_TIMEOUT_S = 240;
 
+/**
+ * The scanned descriptors (owner spec 6.6 and 6.9): both scanners write one file per plugin into the
+ * directory the key `descriptor_dir` names, `<id>@<version>-<binary sha256 first DESCRIPTOR_HASH_PREFIX>.json`.
+ * With no directory named it is `$XDG_STATE_HOME/<DESCRIPTOR_DIR_STATE_SUBDIR>`, else
+ * `~/.local/state/<DESCRIPTOR_DIR_STATE_SUBDIR>`; a system service's is `DESCRIPTOR_DIR_SYSTEM`.
+ */
+export const DESCRIPTOR_DIR_KEY = "descriptor_dir";
+export const DESCRIPTOR_DIR_STATE_SUBDIR = "omx/descriptors";
+export const DESCRIPTOR_DIR_SYSTEM = "/var/lib/omx/descriptors";
+export const DESCRIPTOR_HASH_PREFIX = 12;
+
+/**
+ * The one descriptor schema both scanners hold a file to: omx-contract's, named by `DESCRIPTOR_SCHEMA_ENV`
+ * when set (a test, or a checkout pointing at another contract), else the omx-contract package this one
+ * depends on, else `DESCRIPTOR_SCHEMA_INSTALLED`. A written descriptor requires `DESCRIPTOR_SCHEMA_FLOOR`.
+ */
+export const DESCRIPTOR_SCHEMA_ENV = "OMX_CONTRACT_SCHEMA";
+export const DESCRIPTOR_SCHEMA_INSTALLED = "/usr/share/omx-contract/omx-contract.schema.json";
+export const DESCRIPTOR_SCHEMA_FLOOR = ">= 3.0.0";
+
+/**
+ * Why a scanned descriptor is not written. A file the schema refuses is omx-contract's own
+ * `contract.file.invalid`; the others are the scanners' own.
+ */
+export const DESCRIPTOR_CODE_SCHEMA = "contract.file.invalid";
+export const DESCRIPTOR_CODE_SCHEMA_MISSING = "qualify.descriptor.schema-missing";
+export const DESCRIPTOR_CODE_BINARY_UNHASHED = "qualify.descriptor.binary-unhashed";
+export const DESCRIPTOR_CODE_DIR_UNWRITABLE = "qualify.descriptor.dir-unwritable";
+
 
 
 

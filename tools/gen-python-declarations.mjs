@@ -35,9 +35,21 @@ const PY_NAMES = [
   'PLUGIN_TIMEOUT_S',
   'BOOT_TIMEOUT_S',
   'COST_TIMEOUT_S',
+  'DESCRIPTOR_DIR_KEY',
+  'DESCRIPTOR_DIR_STATE_SUBDIR',
+  'DESCRIPTOR_DIR_SYSTEM',
+  'DESCRIPTOR_HASH_PREFIX',
+  'DESCRIPTOR_SCHEMA_ENV',
+  'DESCRIPTOR_SCHEMA_INSTALLED',
+  'DESCRIPTOR_SCHEMA_FLOOR',
+  'DESCRIPTOR_CODE_SCHEMA',
+  'DESCRIPTOR_CODE_SCHEMA_MISSING',
+  'DESCRIPTOR_CODE_BINARY_UNHASHED',
+  'DESCRIPTOR_CODE_DIR_UNWRITABLE',
 ];
 
-const py = (v) => (Array.isArray(v) ? `(${v.join(', ')})` : String(v));
+/** A Python literal: a tuple, a string (JSON's quoting is Python's for these ASCII words) or a number. */
+const py = (v) => (Array.isArray(v) ? `(${v.join(', ')})` : typeof v === 'string' ? JSON.stringify(v) : String(v));
 
 /** `decl` defaults to the built declarations; a test passes moved ones to prove the Python side follows. */
 export function declarationsFile(decl = D) {
