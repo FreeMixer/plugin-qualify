@@ -13,17 +13,25 @@ parameter are captured: classic LV2 **control ports** (set via mod-host
 `param_set <id> <symbol> <value>`) and LV2 **Patch properties** (`lv2:Parameter`
 flagged `patch:writable`, set via `patch_set <id> <uri> <value>`).
 
+Beside the catalog, every plugin scanned is written as a scanned descriptor (omx-contract's
+descriptor words, `descriptors.py`) into `descriptor_dir`: `--descriptor-dir`, else `--system`'s
+directory, else `$XDG_STATE_HOME/omx/descriptors`, else `~/.local/state/omx/descriptors`.
+
 Usage:
   scan.py                       # scan all installed plugins -> stdout JSON
   scan.py --out catalog.json    # write to a file
   scan.py URI [URI ...]         # scan only these URIs (faster, for tests)
   scan.py --annotate catalog.json   # refresh only the DECLARED fields, in place
+  scan.py --descriptor-dir DIR  # the scanned descriptors go here
+  scan.py --no-descriptors      # the catalog only
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 
+import descriptors as desc
 from lv2_presets import read_presets
 
 LV2 = "http://lv2plug.in/ns/lv2core#"
@@ -36,6 +44,9 @@ PATCH = "http://lv2plug.in/ns/ext/patch#"
 ATOM = "http://lv2plug.in/ns/ext/atom#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
 MIDI = "http://lv2plug.in/ns/ext/midi#"
+PG = "http://lv2plug.in/ns/ext/port-groups#"
+PARAM = "http://lv2plug.in/ns/ext/parameters#"
+TIME = "http://lv2plug.in/ns/ext/time#"
 
 # An output control port designated lv2:latency reports the plugin's own latency
 # (in frames) — the truth a host delay-compensates by, and what openmixer reads to
@@ -61,6 +72,30 @@ KNOWN_UNITS = {
     UNITS + "bpm": "BPM", UNITS + "midiNote": "note", UNITS + "frame": "fr",
 }
 
+# LV2 unit URI -> the descriptor's unit word; any other unit, or none, is `unknown`
+DESCRIPTOR_UNITS = {
+    UNITS + "db": "dB", UNITS + "hz": "Hz", UNITS + "s": "s", UNITS + "ms": "ms",
+    UNITS + "min": "min", UNITS + "pc": "%", UNITS + "semitone12TET": "st", UNITS + "cent": "cents",
+    UNITS + "degree": "deg", UNITS + "coef": "x", UNITS + "oct": "oct", UNITS + "bpm": "bpm",
+    UNITS + "midiNote": "midiNote", UNITS + "frame": "frames",
+}
+
+# lv2:designation -> the descriptor's meaning, where the meaning carries the LV2 term's name
+DESIGNATED_MEANINGS = {
+    **{PARAM + m: m for m in ("gain", "threshold", "ratio", "attack", "release", "hold", "decay", "frequency",
+                              "cutoffFrequency", "resonance", "bypass", "wetDryRatio", "delay")},
+    LV2 + "enabled": "enabled",
+}
+
+# LV2 classes -> the descriptor's plugin features; a plugin of none of them is an audio effect
+CLASS_FEATURES = {
+    LV2 + "InstrumentPlugin": "instrument",
+    LV2 + "AnalyserPlugin": "analyzer",
+    LV2 + "MIDIPlugin": "note-effect",
+}
+
+NUMERIC_PATCH_RANGES = ("Float", "Double", "Int", "Long")
+
 
 def fnum(node):
     """float(node) tolerant of None and integer/string-typed nodes.
@@ -80,11 +115,23 @@ def fnum(node):
             return None
 
 
+def each(nodes):
+    """Every element of a lilv collection (None is empty), walked by the binding's own begin, is_end and next,
+    which every version has: the Python iteration of some does not hold for every collection."""
+    if nodes is None:
+        return []
+    if isinstance(nodes, (list, tuple)):
+        return list(nodes)
+    out = []
+    it = nodes.begin()
+    while not it.is_end():
+        out.append(it.next())
+    return out
+
+
 def first(nodes):
     """First element of a lilv Nodes collection, or None."""
-    if nodes is None:
-        return None
-    for n in nodes:
+    for n in each(nodes):
         return n
     return None
 
@@ -144,6 +191,8 @@ class Scanner:
             RDFS + "label", RDFS + "range", MIDI + "MidiEvent",
             LV2 + "designation", LATENCY, REPORTS_LATENCY,
             MINIMUM, MAXIMUM, DEFAULT,
+            LV2 + "isSideChain", LV2 + "name", PG + "group", TIME + "Position",
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
         )}
 
     def is_a(self, port, uri):
@@ -306,6 +355,195 @@ class Scanner:
         out["owningRpm"] = owning_rpm(bp)
         return out
 
+    # ---- the scanned descriptor ----
+
+    def designation_meaning(self, port):
+        """The meaning an lv2:designation names; `unknown` with none; absent (None) for one with no word."""
+        des = [str(d) for d in each(port.get_value(self.u[LV2 + "designation"]))]
+        if not des:
+            return "unknown"
+        for d in des:
+            if d in DESIGNATED_MEANINGS:
+                return DESIGNATED_MEANINGS[d]
+        return None
+
+    def port_group(self, port):
+        """The pg:group a port belongs to, by its name, as a one-step group path."""
+        g = first(port.get_value(self.u[PG + "group"]))
+        if g is None:
+            return None
+        label = first(self.w.find_nodes(g, self.u[LV2 + "name"], None)) or first(self.w.find_nodes(g, self.u[RDFS + "label"], None))
+        return [str(label)] if label is not None and str(label) else None
+
+    def descriptor_unit(self, port):
+        un = first(port.get_value(self.u[UNITS + "unit"]))
+        return DESCRIPTOR_UNITS.get(str(un), "unknown") if un is not None else "unknown"
+
+    def descriptor_control(self, port, link, readonly=False):
+        """An input (or, readonly, an output) control port as a descriptor control."""
+        d, mn, mx = port.get_range()
+        mnf, mxf, df = fnum(mn), fnum(mx), fnum(d)
+        sym = str(port.get_symbol())
+        nm = port.get_name()
+        c = {"id": sym, "name": str(nm) if nm is not None else sym}
+        sps = self.scale_points(port)
+        if self.has(port, LV2 + "toggled"):
+            c["kind"] = "toggle"
+            if df is not None:
+                c["default"] = df > 0
+        elif self.has(port, PP + "trigger"):
+            c["kind"] = "trigger"
+        elif self.has(port, LV2 + "enumeration") and sps:
+            ids = desc.choice_ids([sp["label"] for sp in sps])
+            c["kind"] = "choice"
+            c["ids"] = ids
+            if all(sp["label"] for sp in sps):
+                c["labels"] = [sp["label"] for sp in sps]
+            c["values"] = [sp["value"] for sp in sps]
+            for i, sp in enumerate(sps):
+                if df is not None and sp["value"] == df:
+                    c["default"] = ids[i]
+        else:
+            # an LV2 port's range defaults to 0..1 where it declares none (the catalog row's own rule)
+            integer = self.has(port, LV2 + "integer")
+            travel = {
+                "min": mnf if mnf is not None else 0.0,
+                "max": mxf if mxf is not None else 1.0,
+                "unit": self.descriptor_unit(port),
+                "scale": "log" if self.has(port, PP + "logarithmic") else "stepped" if integer else "linear",
+            }
+            if integer:
+                travel["step"] = 1
+            if df is not None:
+                travel["default"] = df
+            c["kind"] = "travel"
+            c["travel"] = travel
+        group = self.port_group(port)
+        if group:
+            c["group"] = group
+        meaning = self.designation_meaning(port)
+        if meaning is not None:
+            c["meaning"] = meaning
+        if self.has(port, PP + "notOnGUI"):
+            c["hidden"] = True
+        if readonly:
+            c["readonly"] = True
+        c["source"] = {"from": f"{link}#{desc.link_symbol(sym)}"}
+        return c
+
+    def descriptor(self, plugin):
+        """The plugin as a scanned descriptor, and the SHA-256 of its binary: `(doc, sha256)`."""
+        uri = str(plugin.get_uri())
+        bundle = bundle_path(plugin) or ""
+        lib = plugin.get_library_uri()
+        lib_path = lib.get_path() if lib is not None else None
+        try:
+            sha256 = desc.file_sha256(lib_path) if lib_path else None
+        except desc.DescriptorRefused:
+            sha256 = None  # refused by its code when it is written: no name without the binary's hash
+        data = sorted(os.path.basename(str(u)) for u in each(plugin.get_data_uris()))
+        ttl = next((f for f in data if f != "manifest.ttl"), "manifest.ttl")
+        bundle_seg = desc.link_segment(os.path.basename(bundle))
+        link = f"{bundle_seg}/{desc.link_segment(ttl)}"
+
+        types = [str(t) for t in each(plugin.get_value(self.u["http://www.w3.org/1999/02/22-rdf-syntax-ns#type"]))]
+        features = [CLASS_FEATURES[t] for t in types if t in CLASS_FEATURES]
+        p = {"id": uri, "uri": uri, "name": str(plugin.get_name())}
+        author = plugin.get_author_name()
+        if author is not None and str(author):
+            p["vendor"] = str(author)
+        version = self.plugin_version(plugin)
+        if version is not None:
+            p["version"] = f"{version[0]}.{version[1]}"
+        comment = declared_comment(plugin, self.w)
+        if comment:
+            p["doc"] = comment
+        p["features"] = list(dict.fromkeys(features)) or ["audio-effect"]
+        d = desc.head("lv2", p)
+
+        controls, ports = [], []
+        latency_symbol, timed = None, False
+        for i in range(plugin.get_num_ports()):
+            port = plugin.get_port_by_index(i)
+            sym = str(port.get_symbol())
+            nm = port.get_name()
+            name = str(nm) if nm is not None else sym
+            direction = "in" if self.is_a(port, LV2 + "InputPort") else "out"
+            if self.is_a(port, LV2 + "AudioPort"):
+                ports.append({"id": sym, "name": name, "kind": "audio", "direction": direction,
+                              "role": "sidechain" if self.has(port, LV2 + "isSideChain") else "main", "channels": 1})
+            elif self.is_a(port, LV2 + "CVPort"):
+                ports.append({"id": sym, "name": name, "kind": "cv", "direction": direction})
+            elif self.is_a(port, LV2 + "ControlPort"):
+                if direction == "out" and latency_symbol is None and self.is_latency_port(port):
+                    latency_symbol = sym
+                    continue
+                controls.append(self.descriptor_control(port, link, readonly=direction == "out"))
+            elif self.is_a(port, ATOM + "AtomPort"):
+                try:
+                    midi = bool(port.supports_event(self.u[MIDI + "MidiEvent"]))
+                    timed = timed or (direction == "in" and bool(port.supports_event(self.u[TIME + "Position"])))
+                except Exception:  # noqa: BLE001
+                    midi = False
+                if midi:
+                    ports.append({"id": sym, "name": name, "kind": "midi", "direction": direction})
+
+        writable = []
+        for prm in self.patch_params(plugin):
+            writable.append({"uri": prm["uri"], "label": prm["name"], "range": prm["datatype"]})
+            if prm["datatype"] in NUMERIC_PATCH_RANGES and "min" in prm and "max" in prm:
+                travel = {"min": prm["min"], "max": prm["max"], "unit": "unknown", "scale": "linear"}
+                if "default" in prm:
+                    travel["default"] = prm["default"]
+                controls.append({"id": desc.link_symbol(prm["symbol"]), "name": prm["name"], "kind": "travel",
+                                 "travel": travel, "meaning": "unknown",
+                                 "source": {"from": f"{link}#{desc.link_symbol(prm['symbol'])}"}})
+        d["controls"] = controls
+        d["ports"] = ports
+
+        needs = {}
+        if timed:
+            needs["tempo"] = needs["transport"] = True
+        required = [str(f) for f in each(plugin.get_required_features())]
+        optional = [str(f) for f in each(plugin.get_optional_features())]
+        ext = {}
+        if required:
+            ext["required"] = sorted(set(required))
+        if optional:
+            ext["optional"] = sorted(set(optional))
+        if ext:
+            needs["extensions"] = ext
+        if needs:
+            d["needs"] = needs
+        d["latency"] = {"reports": latency_symbol is not None}
+
+        bag = {"rdf:type": str(plugin.get_class().get_uri())}
+        if latency_symbol is not None:
+            bag["lv2:latency"] = latency_symbol
+        if writable:
+            bag["patch:writable"] = writable
+        d["extensions"] = {"lv2": bag}
+        lib_name = os.path.basename(lib_path) if lib_path else "manifest.ttl"
+        d["source"] = {"from": f"{bundle_seg}/{desc.link_segment(lib_name)}#lv2_descriptor"}
+        return d, sha256
+
+    def descriptors(self, uris=None):
+        """`(doc, sha256)` for every plugin `scan` would describe."""
+        plugins = self.w.get_all_plugins()
+        chosen = [plugins.get_by_uri(self.w.new_uri(u)) for u in uris] if uris else list(plugins)
+        out = []
+        for p in chosen:
+            if p is None:
+                continue
+            try:
+                out.append(self.descriptor(p))
+            except desc.DescriptorRefused as e:
+                sys.stderr.write(f"descriptor refused: {p.get_uri()}: {e.code}: {e.problem}\n")
+            except Exception as e:  # noqa: BLE001 - one plugin's bad data never stops the scan
+                line = e.__traceback__.tb_next.tb_lineno if e.__traceback__ and e.__traceback__.tb_next else "?"
+                sys.stderr.write(f"not described: {p.get_uri()}: {type(e).__name__}: {e} (scan.py:{line})\n")
+        return out
+
     def plugin_version(self, plugin):
         """(minor, micro) from lv2:minorVersion / lv2:microVersion, or None.
 
@@ -395,6 +633,11 @@ def main():
     ap.add_argument("--out", help="write JSON here (default: stdout)")
     ap.add_argument("--annotate", metavar="FILE",
                     help="refresh only the DECLARED fields of an existing catalog, in place")
+    where = ap.add_mutually_exclusive_group()
+    where.add_argument("--descriptor-dir", help="where the scanned descriptors go (descriptor_dir)")
+    where.add_argument("--system", action="store_true",
+                       help=f"a system service's descriptor_dir, {desc.DESCRIPTOR_DIR_SYSTEM}")
+    where.add_argument("--no-descriptors", action="store_true", help="write the catalog only")
     args = ap.parse_args()
     if args.annotate:
         with open(args.annotate, encoding="utf-8") as f:
@@ -408,7 +651,18 @@ def main():
             f"annotated {len(catalog)} plugins in {args.annotate}: "
             f"{changed} declared fields changed, {absent} not installed here\n")
         return
-    catalog = Scanner().scan(args.uris or None)
+    scanner = Scanner()
+    catalog = scanner.scan(args.uris or None)
+    refused = 0
+    if not args.no_descriptors:
+        try:
+            validator = desc.SchemaValidator()
+        except desc.DescriptorRefused as e:
+            sys.exit(f"{e.code}: {e.problem}")
+        directory = desc.descriptor_dir(args.descriptor_dir, args.system)
+        written, bad = desc.write_all(directory, scanner.descriptors(args.uris or None), validator)
+        refused = len(bad)
+        sys.stderr.write(f"wrote {len(written)} descriptors -> {directory}\n")
     text = json.dumps(catalog, indent=2, ensure_ascii=False)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
@@ -426,6 +680,8 @@ def main():
             sys.stderr.write(f"wrote {len(uris)} URIs -> {uri_path}\n")
     else:
         print(text)
+    if refused:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

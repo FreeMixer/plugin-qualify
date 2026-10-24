@@ -193,6 +193,40 @@ names the options it ran under, `featureOptions`:
 The defaults are the measurement as it has always been, so a verdict reached under them does not
 move. `lv2_measure --help` lists the same flags.
 
+## Scanned descriptors
+
+Both scanners also write what each plugin states about itself as a scanned descriptor: one JSON file per
+plugin in omx-contract's descriptor words (identity, controls, ports, what it needs from a host, whether it
+reports latency), held to omx-contract's descriptor schema before it is written. A descriptor holds no
+measurement and no verdict; those are the qualification record's.
+
+The files go into the descriptor directory, the key `descriptor_dir`:
+
+| | where |
+| --- | --- |
+| named | `--descriptor-dir <dir>` |
+| a user (the default) | `$XDG_STATE_HOME/omx/descriptors`, else `~/.local/state/omx/descriptors` |
+| a system service | `/var/lib/omx/descriptors` (`--system`) |
+
+Each file is named `<id>@<version>-<sha256 first 12>.json`: the CLAP id or the LV2 URI, the version the
+plugin states (`unversioned` when it states none) and the SHA-256 of its binary (the `.clap`, or the LV2
+bundle's `lv2:binary`), with every character other than letters, digits, `.`, `_` and `-` written `_`. The hash
+keys which file describes which binary: a changed binary is a new file, and the old one stays as history.
+
+```
+tools/scan.py --out catalog.json                                     # LV2: the catalog, and the descriptors beside it
+tools/scan.py --descriptor-dir ./descriptors urn:my:plugin           # one plugin, into a directory of your own
+native/build/clap-qualify --json ./my-fx.clap | tools/descriptors.py clap --descriptor-dir ./descriptors
+```
+
+`scan.py --no-descriptors` writes the catalog only. A descriptor the schema refuses is not written and is
+reported as `contract.file.invalid`, omx-contract's code; a plugin whose binary cannot be read is
+`qualify.descriptor.binary-unhashed`; a directory that cannot be written is `qualify.descriptor.dir-unwritable`;
+no schema found is `qualify.descriptor.schema-missing`. Any of them makes the run exit `2`, and the other
+plugins are still written. The schema is the omx-contract package plugin-qualify depends on, else
+`/usr/share/omx-contract/omx-contract.schema.json`; `OMX_CONTRACT_SCHEMA` names another one, for a test. The
+writer needs Python's `jsonschema` (`python3-jsonschema`).
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own
