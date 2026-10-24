@@ -1193,8 +1193,9 @@ static void put_integrity(const char *named, const char *version, const char *sh
  * `clap-qualify --json <path>...` lists what CLAP files hold, in the scan document the CLAP loader
  * reads (`src/clap-loader.ts`): every plugin of every factory, initialised and never activated, with
  * its parameters, an enum parameter's labels as the plugin renders them, its remote-control pages,
- * its audio and note ports and latency. Each file is scanned in a child, so a plugin that crashes
- * or hangs is reported and the scan goes on.
+ * its audio ports (with their port type) and note ports (with their dialects) and latency, and each
+ * file's SHA-256, the key `tools/descriptors.py clap` names the plugin's scanned descriptor by. Each
+ * file is scanned in a child, so a plugin that crashes or hangs is reported and the scan goes on.
  */
 
 #define SCAN_TIMEOUT_S 30
@@ -1329,7 +1330,47 @@ static void scan_audio_ports(const clap_plugin_t *p) {
       info.name[sizeof info.name - 1] = '\0';
       fprintf(g_out, "%s{\"id\":%u,\"name\":", first ? "" : ",", info.id);
       put_string(info.name);
-      fprintf(g_out, ",\"role\":\"%s\",\"channels\":%u}", (info.flags & CLAP_AUDIO_PORT_IS_MAIN) ? "main" : "aux", info.channel_count);
+      fprintf(g_out, ",\"role\":\"%s\",\"channels\":%u,\"port_type\":", (info.flags & CLAP_AUDIO_PORT_IS_MAIN) ? "main" : "aux", info.channel_count);
+      if (info.port_type) put_string(info.port_type);
+      else fputs("null", g_out);
+      fputc('}', g_out);
+      first = 0;
+    }
+    fputc(']', g_out);
+  }
+  fputc('}', g_out);
+}
+
+static const struct { uint32_t bit; const char *name; } NOTE_DIALECTS[] = {
+  { CLAP_NOTE_DIALECT_CLAP, "clap" },
+  { CLAP_NOTE_DIALECT_MIDI, "midi" },
+  { CLAP_NOTE_DIALECT_MIDI_MPE, "midi_mpe" },
+  { CLAP_NOTE_DIALECT_MIDI2, "midi2" },
+};
+
+/* each note port with the dialects it supports, as clap_note_port_info states them */
+static void scan_note_ports(const clap_plugin_t *p, const clap_plugin_note_ports_t *notes) {
+  fputs("\"note_port_info\":{", g_out);
+  for (int dir = 0; dir < 2; dir++) {
+    const bool input = dir == 0;
+    const uint32_t n = notes ? notes->count(p, input) : 0;
+    int first = 1;
+    fprintf(g_out, "%s\"%s\":[", dir ? "," : "", input ? "inputs" : "outputs");
+    for (uint32_t i = 0; i < n; i++) {
+      clap_note_port_info_t info;
+      memset(&info, 0, sizeof info);
+      if (!notes->get(p, i, input, &info)) continue;
+      info.name[sizeof info.name - 1] = '\0';
+      fprintf(g_out, "%s{\"id\":%u,\"name\":", first ? "" : ",", info.id);
+      put_string(info.name);
+      fputs(",\"dialects\":[", g_out);
+      int d1 = 1;
+      for (size_t k = 0; k < sizeof NOTE_DIALECTS / sizeof NOTE_DIALECTS[0]; k++) {
+        if (!(info.supported_dialects & NOTE_DIALECTS[k].bit)) continue;
+        fprintf(g_out, "%s\"%s\"", d1 ? "" : ",", NOTE_DIALECTS[k].name);
+        d1 = 0;
+      }
+      fputs("]}", g_out);
       first = 0;
     }
     fputc(']', g_out);
@@ -1366,9 +1407,12 @@ static void scan_plugin(const clap_plugin_factory_t *factory, const clap_plugin_
   scan_audio_ports(p);
   const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
   fprintf(g_out, ",\"note_ports\":{\"inputs\":%u,\"outputs\":%u}", notes ? notes->count(p, true) : 0, notes ? notes->count(p, false) : 0);
-  /* a plugin not yet activated may say 0, so 0 is left out as unknown */
+  fputc(',', g_out);
+  scan_note_ports(p, notes);
+  /* a plugin not yet activated may say 0, so 0 is left out as unknown; whether it reports a latency at all is the extension */
   const clap_plugin_latency_t *latency = p->get_extension(p, CLAP_EXT_LATENCY);
   const uint32_t frames = latency ? latency->get(p) : 0;
+  fprintf(g_out, ",\"latency_extension\":%s", latency ? "true" : "false");
   if (frames) fprintf(g_out, ",\"latency\":%u", frames);
   fputc('}', g_out);
   p->destroy(p);
@@ -1402,6 +1446,14 @@ static void scan_file_entry(const char *path) {
   int first = 1;
   fputs("{\"path\":", g_out);
   put_string(path);
+  /* the bytes the plugins were read from, the key a scanned descriptor is named by */
+  char sha256[PHD_SHA256_HEX_LEN + 1];
+  const int fd = open(open_as, O_RDONLY | O_CLOEXEC);
+  if (fd >= 0 && phd_pin_fd_digest(fd, sha256) == 0) {
+    fputs(",\"sha256\":", g_out);
+    put_string(sha256);
+  }
+  if (fd >= 0) close(fd);
   fputs(",\"plugins\":[", g_out);
   for (uint32_t i = 0; i < n; i++) {
     const clap_plugin_descriptor_t *d = factory->get_plugin_descriptor(factory, i);

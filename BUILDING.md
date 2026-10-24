@@ -2,7 +2,8 @@
 
 You need Node.js 20 or newer (the tool itself runs on 18) and pnpm 10 (`npm install -g pnpm@10`, or `corepack enable`). The
 Python tools need Python 3 and, to scan real plugins, the lilv bindings (`python3-lilv` on Fedora,
-`python3-lilv` on Debian). The tests use `pytest`.
+`python3-lilv` on Debian), and `jsonschema` (`python3-jsonschema`) to write the scanned descriptors. The tests
+use `pytest`.
 
 ```
 pnpm install            # also compiles src/ into dist/
