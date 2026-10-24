@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.14.0
+Version: 0.14.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -73,6 +73,11 @@ packaging/build.sh %{buildroot} %{_prefix}/lib
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 24 2026 Pau Aliagas <linuxnow@gmail.com> - 0.14.1-1
+- descriptors.py reads its scan argument intermixed with the options: on
+  Python 3.11 and 3.12.3 (Debian bookworm, Ubuntu noble) `clap --descriptor-dir
+  DIR -` was refused as an unrecognized argument, which also failed the 0.14.0
+  npm publish (#144).
 * Sat Oct 24 2026 Pau Aliagas <linuxnow@gmail.com> - 0.14.0-1
 - The scanners write a scanned descriptor per plugin into descriptor_dir
   ($XDG_STATE_HOME/omx/descriptors), named <id>@<version>-<sha256 first 12>.json,
