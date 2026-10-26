@@ -15,9 +15,13 @@
  *                   FIXTURE_LEAK one frame ahead of it (omx-pitch's tap at 44.1 kHz).
  *                   It declares d through the latency extension.
  *   undeclared-delay.clap the same, built with -DFIXTURE_UNDECLARED too: it declares no latency.
+ *   crashes-at-load.clap built with -DFIXTURE_CRASHES_AT_LOAD, the gain whose init() raises SIGSEGV: a host
+ *                   that loads it dies before it can list a parameter.
+ *   hangs.clap      built with -DFIXTURE_HANGS, the gain whose process() never returns.
  *
  * Nothing else differs, so a verdict that tells them apart is the interposer's count and nothing else.
  */
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +37,12 @@
 #elif defined FIXTURE_DELAY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.leaky-delay"
 #define FIXTURE_NAME "delay with a leak ahead of its arrival"
+#elif defined FIXTURE_CRASHES_AT_LOAD
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.crashes-at-load"
+#define FIXTURE_NAME "gain that crashes when it is loaded"
+#elif defined FIXTURE_HANGS
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.hangs"
+#define FIXTURE_NAME "gain whose process never returns"
 #elif defined FIXTURE_INFO_FAILS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.info-fails"
 #define FIXTURE_NAME "gain whose get_info fails"
@@ -82,7 +92,13 @@ struct gain {
 #define FIXTURE_LEAK -2.1e-5f
 #endif
 
-static bool gain_init(const clap_plugin_t *p) { (void)p; return true; }
+static bool gain_init(const clap_plugin_t *p) {
+  (void)p;
+#ifdef FIXTURE_CRASHES_AT_LOAD
+  raise(SIGSEGV);
+#endif
+  return true;
+}
 static void gain_destroy(const clap_plugin_t *p) { free(p->plugin_data); }
 static bool gain_activate(const clap_plugin_t *p, double rate, uint32_t min, uint32_t max) {
   (void)p; (void)rate; (void)min; (void)max;
@@ -109,6 +125,9 @@ static void gain_event(struct gain *g, const clap_event_header_t *e) {
 
 static clap_process_status gain_process(const clap_plugin_t *p, const clap_process_t *proc) {
   struct gain *g = p->plugin_data;
+#ifdef FIXTURE_HANGS
+  for (volatile int spin = 1; spin;) {}
+#endif
   const uint32_t n = proc->in_events->size(proc->in_events);
   for (uint32_t i = 0; i < n; i++) gain_event(g, proc->in_events->get(proc->in_events, i));
   if (proc->audio_inputs_count < 1 || proc->audio_outputs_count < 1) return CLAP_PROCESS_ERROR;
