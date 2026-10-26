@@ -381,6 +381,11 @@ describe("the hosting pass (the native lv2_measure)", () => {
     expect(hostingLine("urn:a", { status: 0, stdout: "{not json\n" })).toEqual({ uri: "urn:a", exit: 0, parseError: true });
   });
 
+  it("repairs a line a plugin printed its own banner into, with extractJsonRecord (plugin-qualify#35)", () => {
+    const torn = '{"uri":"urn:a","found":true,using block size: 0\nconvolver disabled\n"rate":48000}\n';
+    expect(hostingLine("urn:a", { status: 0, stdout: torn })).toEqual({ uri: "urn:a", found: true, rate: 48000, exit: 0 });
+  });
+
   const line = {
     uri: "urn:a",
     found: true,
