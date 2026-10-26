@@ -62,8 +62,7 @@ plugin-qualify --help                         # every option and its default
 ```
 
 `--format json` prints the verdicts as JSON; `--out <dir>` writes the full measurement document.
-`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin;
-`--no-host-sweep` measures offline only, without mod-host. The `Containerfile` builds an image
+`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin. The `Containerfile` builds an image
 with lilv, mod-host and the ASan mod-host, if you do not want to install them yourself.
 
 A named LV2 plugin is measured the same way as a CLAP one: through the probe runner, then judged from the probe
