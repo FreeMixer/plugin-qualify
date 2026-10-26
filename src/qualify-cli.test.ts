@@ -46,15 +46,18 @@ describe("parseQualifyArgs — the named-plugin path is first-class", () => {
     expect(a.args.targets).toEqual([ZERO_PATH_URI]);
     expect(a.args.rates).toEqual(QUALIFY_RATES);
     expect(a.args.quanta).toEqual(QUALIFY_QUANTA);
-    expect(a.args.hostSweep).toBe(true);
     expect(a.args.format).toBe("text");
   });
 
   it("a bundle path is a target like a URI", () => {
-    const a = parseQualifyArgs([ZERO_PATH_BUNDLE, "--no-host-sweep", "--format", "json"]);
+    const a = parseQualifyArgs([ZERO_PATH_BUNDLE, "--format", "json"]);
     expect(a.ok && a.args.targets).toEqual([ZERO_PATH_BUNDLE]);
-    expect(a.ok && a.args.hostSweep).toBe(false);
     expect(a.ok && a.args.format).toBe("json");
+  });
+
+  it("the removed --no-host-sweep flag is refused, never silently ignored", () => {
+    const a = parseQualifyArgs([ZERO_PATH_URI, "--no-host-sweep"]);
+    expect(a).toEqual({ ok: false, error: "unknown option --no-host-sweep" });
   });
 
   it("--all takes no targets; targets and --all together are refused, as is neither", () => {
