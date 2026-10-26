@@ -26,3 +26,4 @@ export * from "./qualification-record.js";
 export * from "./probe-runner.js";
 export * from "./judge-cli.js";
 export * from "./whole-file.js";
+export * from "./qualify-sync.js";
