@@ -38,7 +38,6 @@ export const QUALIFY_OPTIONS: readonly QualifyOption[] = [
   { flag: "--out", value: "dir", describe: "write one interchange JSON document per run into this directory" },
   { flag: "--format", value: OUTPUT_FORMATS.join("|"), describe: "json = the verdicts as JSON; text = plugin, verdict, deciding reason", default: "text" },
   { flag: "--isolate", describe: "a fresh worker per plugin, so a crash or hang takes only that plugin" },
-  { flag: "--no-host-sweep", describe: "offline lilv measurement only; no mod-host hosting sweep" },
   {
     flag: "--host-profile",
     value: "file|id",

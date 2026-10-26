@@ -31,7 +31,6 @@ export interface QualifyArgs {
   readonly pins?: string;
   readonly format: OutputFormat;
   readonly isolate: boolean;
-  readonly hostSweep: boolean;
   /** `--host-profile` specs (a shipped id or a profile file), in order, once each. */
   readonly hostProfiles: readonly string[];
   readonly help: boolean;
@@ -99,7 +98,6 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
       ...(pins === undefined ? {} : { pins }),
       format: format as OutputFormat,
       isolate: seen.has("--isolate"),
-      hostSweep: !seen.has("--no-host-sweep"),
       hostProfiles,
       help,
     },
