@@ -102,7 +102,8 @@ function noteSweepOfProbeOutput(output: ProbeOutput, rt: ClapRtSafetyReading): C
   };
 }
 
-function integrityOfProbeOutput(output: ProbeOutput): IntegrityMeasurement {
+/** The pin a probe output took: its files and layout, or why it has none. */
+export function integrityOfProbeOutput(output: ProbeOutput): IntegrityMeasurement {
   const { files, layout, unpinnable } = output.binary;
   if (layout === undefined || files.length === 0) {
     return { unmeasuredReason: unpinnable === undefined ? "probe-error" : "unpinnable", unmeasuredDetail: unpinnable ?? "the probe output holds no layout pin" };

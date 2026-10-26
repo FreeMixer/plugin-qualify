@@ -11,8 +11,7 @@
  * `--all` finds the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
  * `/usr/lib/clap`). `plugin-qualify judge` judges probe outputs already written.
  */
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync } from "node:fs";
 
 import {
   ClapScanError,
@@ -36,6 +35,7 @@ import {
   resolveTargets,
   writeQualification,
   textTable,
+  writeFileWhole,
 } from "../dist/index.js";
 
 /**
@@ -49,16 +49,7 @@ function writePins(path, file) {
     process.stderr.write(`plugin-qualify: no pin was taken, ${path} is left as it was\n`);
     return;
   }
-  mkdirSync(dirname(path), { recursive: true });
-  // the bytes on disk before the name moves, so a crash leaves the old file or the whole new one
-  const fd = openSync(`${path}.new`, "w");
-  try {
-    writeSync(fd, file.text);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(`${path}.new`, path);
+  writeFileWhole(path, file.text);
   process.stderr.write(`plugin-qualify: ${file.written.length} pin${file.written.length === 1 ? "" : "s"} written to ${path}\n`);
 }
 
