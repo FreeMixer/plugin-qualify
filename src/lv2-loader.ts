@@ -55,7 +55,8 @@ const LV2_DEFAULT_DIRS = [".lv2", "/usr/lib/lv2", "/usr/lib64/lv2", "/usr/local/
 
 /**
  * Every `.lv2` bundle directly under the LV2 search path (`LV2_PATH`, else lilv's defaults). An
- * absent directory holds none; any other fs error propagates for the caller to name.
+ * absent directory holds none; any other fs error propagates for the caller to name. A bundle is
+ * a directory holding `manifest.ttl`: a dangling `.lv2` symlink or a plain `.lv2` file is not one.
  */
 export function lv2BundlesOnPath(env: Readonly<Record<string, string | undefined>>, home: string = homedir()): string[] {
   const named = (env["LV2_PATH"] ?? "").split(":").filter((d) => d !== "");
@@ -70,7 +71,17 @@ export function lv2BundlesOnPath(env: Readonly<Record<string, string | undefined
       if (code === "ENOENT" || code === "ENOTDIR") continue;
       throw e;
     }
-    for (const n of names.sort()) if (n.endsWith(".lv2")) bundles.push(join(dir, n));
+    for (const n of names.sort()) {
+      if (!n.endsWith(".lv2")) continue;
+      const path = join(dir, n);
+      let isBundle: boolean;
+      try {
+        isBundle = statSync(path).isDirectory() && existsSync(join(path, "manifest.ttl"));
+      } catch {
+        isBundle = false; // a dangling symlink
+      }
+      if (isBundle) bundles.push(path);
+    }
   }
   return bundles;
 }
