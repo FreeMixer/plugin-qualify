@@ -9,7 +9,7 @@ import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from
 import { dirname } from "node:path";
 
 /** The bytes one write call takes; a large file goes out in pieces of this size. */
-const PIECE_BYTES = 64 * 1024;
+const PIECE_BYTES = 1 << 16;
 
 /** The name the new bytes are written under before the rename. */
 export const pendingPath = (path: string): string => `${path}.new`;
