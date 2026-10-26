@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The quick qualification of every plugin added or changed since the last run (plugin-qualify-sync(1)).
+# Started by plugin-qualify-sync.timer a little after boot and by plugin-qualify-sync.path when a plugin
+# directory changes; no boot target waits for it.
+[Unit]
+Description=Qualify the plugins added or changed since the last run
+Documentation=man:plugin-qualify-sync(1)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# a package install writes many files: the run starts once the plugin directories have been quiet for a minute
+ExecStart=/usr/bin/plugin-qualify-sync --system --settle-s 60
+StateDirectory=omx
+# the audio comes first: the lowest CPU priority, at most one core, and the disk only when nothing else wants it
+Nice=19
+CPUQuota=100%
+IOSchedulingClass=idle
+# RuntimeMaxSec= has no effect on a oneshot service, whose run is its start: the start is what is bounded. A run
+# cut short keeps every plugin it finished, and the next one goes on from there.
+TimeoutStartSec=6h
