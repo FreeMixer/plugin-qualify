@@ -6,7 +6,7 @@
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
-#                            build/fixtures/{crashes-at-load,hangs}.clap,
+#                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so,
@@ -90,7 +90,7 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
-	$(BUILD)/fixtures/crashes-at-load.clap $(BUILD)/fixtures/hangs.clap \
+	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap \
@@ -100,7 +100,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so
 
-$(BUILD) $(BUILD)/fixtures:
+$(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
@@ -152,10 +152,10 @@ $(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_INFO_FAILS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # a plugin that kills the host loading it, and one that never returns from process(): the sync's crash and hang
-$(BUILD)/fixtures/crashes-at-load.clap: fixtures/gain.c | $(BUILD)/fixtures
+$(BUILD)/fixtures-faulty/crashes-at-load.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_CRASHES_AT_LOAD -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
-$(BUILD)/fixtures/hangs.clap: fixtures/gain.c | $(BUILD)/fixtures
+$(BUILD)/fixtures-faulty/hangs.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_HANGS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # a whole-frame delay read the way omx-pitch lands it at 44.1 kHz, declared and not

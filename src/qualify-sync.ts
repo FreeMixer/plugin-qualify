@@ -84,7 +84,7 @@ export interface SyncSettings {
   readonly settleS: number;
 }
 
-/** A settings file read: one `key value` per line, `#` starts a comment. An unknown key or a bare key is refused by line. */
+/** A settings file read: one `key value` per line, `#` starts a comment; a key alone is the empty value. An unknown key is refused by line. */
 export function parseSyncConf(text: string, source = SYNC_CONF): { ok: true; values: Map<string, string> } | { ok: false; error: string } {
   const known = new Set(SYNC_SETTINGS.map((s) => s.key));
   const values = new Map<string, string>();
