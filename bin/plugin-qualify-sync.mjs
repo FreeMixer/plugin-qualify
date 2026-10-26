@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
- * `plugin-qualify-sync` — the entry point. Every decision is in `src/qualify-sync.ts`; this file reads argv and the
+ * `plugin-qualify-sync`, the entry point. Every decision is in `src/qualify-sync.ts`; this file reads argv and the
  * settings file, runs one sync, prints its summary line and exits. The exit is 0 whenever the run went through,
  * whatever the plugins' verdicts: a refused plugin is a result, not a failure of the service.
  */

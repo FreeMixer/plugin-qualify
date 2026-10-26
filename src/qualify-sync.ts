@@ -136,7 +136,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
 export function syncHelpText(): string {
   const rows = SYNC_SETTINGS.map((s) => `  ${`${flagOf(s.key)} <value>`.padEnd(28)}${s.meaning}${s.default === "" ? "" : ` (default: ${s.default})`}`);
   return [
-    "plugin-qualify-sync — qualify every plugin on the search paths once, and again when its files change",
+    "plugin-qualify-sync: qualify every plugin on the search paths once, and again when its files change",
     "",
     `  --config <file>             the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
     "  --system                    a system service's directories, under /var/lib/omx",
