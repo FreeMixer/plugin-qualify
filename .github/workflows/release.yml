@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   rpm:
-    uses: FreeMixer/.github/.github/workflows/build-rpm.yml@main
+    uses: FreeMixer/.github/.github/workflows/build-rpm.yml@v1
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
@@ -48,7 +48,7 @@ jobs:
   deb:
     needs: rpm
     if: ${{ !cancelled() }}
-    uses: FreeMixer/.github/.github/workflows/build-deb.yml@main
+    uses: FreeMixer/.github/.github/workflows/build-deb.yml@v1
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
@@ -90,18 +90,22 @@ jobs:
           name: ${{ matrix.artifact }}
           path: pkgs
 
-      # the FreeMixer channel serves omx-clap-host, which the package now depends on (the hosting codes'
-      # TypeScript module, read at import, and omx-clap-scan), and the CLAP headers the fixtures build
-      # against on Debian
+      # the FreeMixer channel serves omx-clap-host (omx-clap-scan) and omx-clap-core (the hosting codes'
+      # TypeScript modules), which the package depends on, and the CLAP headers the fixtures build
+      # against on Debian. The package alone pulls no development package; the fixtures' build tools
+      # come after that check.
       - name: Install the package (Fedora)
         if: startsWith(matrix.image, 'fedora')
         run: |
           set -euo pipefail
           echo 'retries=10' >> /etc/dnf/dnf.conf
-          dnf install -y --setopt=install_weak_deps=False dnf5-plugins gcc make pkgconf-pkg-config clap-devel lv2-devel
+          dnf install -y --setopt=install_weak_deps=False dnf5-plugins
           dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
           dnf install -y ./pkgs/plugin-qualify-[0-9]*.x86_64.rpm
           rpm -q omx-clap-host
+          rpm -qf /usr/share/omx-clap-core/ts | grep -q '^omx-clap-core-[0-9]'
+          if rpm -qa --qf '%{NAME}\n' | grep -E -- '-devel$'; then echo "plugin-qualify pulled a -devel package"; exit 1; fi
+          dnf install -y --setopt=install_weak_deps=False gcc make pkgconf-pkg-config clap-devel lv2-devel
 
       - name: Install the package (Debian)
         if: startsWith(matrix.image, 'debian')
@@ -109,14 +113,16 @@ jobs:
           set -euo pipefail
           suite=${IMAGE#debian:}
           apt-get update -qq
-          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make pkgconf
+          apt-get install -y --no-install-recommends ca-certificates curl
           install -d /etc/apt/keyrings
           curl -fsSL --retry 5 --retry-all-errors -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
           echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/$suite ./" > /etc/apt/sources.list.d/freemixer.list
           apt-get update -qq
-          apt-get install -y --no-install-recommends clap-headers lv2-dev
           apt-get install -y ./pkgs/"$suite"/plugin-qualify_*.deb
           dpkg -s omx-clap-host >/dev/null
+          dpkg -S /usr/share/omx-clap-core/ts | grep -q '^libomx-clap-core1'
+          if dpkg-query -W -f '${Package}\n' | grep -E -- '-dev$'; then echo "plugin-qualify pulled a -dev package"; exit 1; fi
+          apt-get install -y --no-install-recommends gcc libc6-dev make pkgconf clap-headers lv2-dev
         env:
           IMAGE: ${{ matrix.image }}
 
