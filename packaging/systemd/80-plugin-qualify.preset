@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Every plugin on the machine is qualified before it is met: after boot, and when one is installed.
+enable plugin-qualify-sync.timer
+enable plugin-qualify-sync.path

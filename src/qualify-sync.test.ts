@@ -35,6 +35,7 @@ import { clapQualifyToolPath, lv2MeasureNativePath, rtInterposePath } from "./to
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = join(PKG, "native", "build", "fixtures");
+const FAULTY = join(PKG, "native", "build", "fixtures-faulty");
 const SYNC = join(PKG, "bin", "plugin-qualify-sync.mjs");
 const GOOD_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
 const LV2_URI = "urn:plugin-qualify:fixture:lv2-rt-safe";
@@ -50,7 +51,7 @@ const RUNNER = process.env["OMX_PROBE_RUNNER"] || which("plugin-hostd-probe");
 const HOSTD = process.env["PLUGIN_HOSTD"] || which("plugin-hostd");
 const CLAP_HOST = which("omx-clap-host");
 const JACKD = which("jackd");
-const BUILT = [clapQualifyToolPath(), rtInterposePath(), lv2MeasureNativePath(), ...["rt-safe", "crashes-at-load", "hangs"].map((f) => join(FIXTURES, `${f}.clap`))].every((p) =>
+const BUILT = [clapQualifyToolPath(), rtInterposePath(), lv2MeasureNativePath(), join(FIXTURES, "rt-safe.clap"), ...["crashes-at-load", "hangs"].map((f) => join(FAULTY, `${f}.clap`))].every((p) =>
   existsSync(p),
 );
 
@@ -114,6 +115,48 @@ describe("the settings", () => {
     for (const [k, v] of [["budget_s", "0"], ["hostd_port", "70000"], ["host_profile", "nobody"]] as const) {
       expect(resolveSyncSettings(new Map([[k, v]]), args.args, {}).ok).toBe(false);
     }
+  });
+});
+
+describe("the units the packages ship", () => {
+  const unit = (name: string): string => readFileSync(join(PKG, "packaging", "systemd", name), "utf8");
+
+  it("the service runs the sync as a system service, with flags the sync takes, and never in the audio's way", () => {
+    const service = unit("plugin-qualify-sync.service");
+    const exec = /^ExecStart=(\S+) (.*)$/m.exec(service)!;
+    expect(exec[1]).toBe("/usr/bin/plugin-qualify-sync");
+    expect(parseSyncArgs(exec[2]!.split(" ")).ok).toBe(true);
+    expect(exec[2]).toContain("--system");
+    for (const line of ["Type=oneshot", "Nice=19", "IOSchedulingClass=idle", "StateDirectory=omx"]) expect(service).toContain(line);
+    expect(service).toMatch(/^CPUQuota=\d+%$/m);
+    expect(service).toMatch(/^TimeoutStartSec=\S+$/m);
+    // started by its timer and its path unit only: no boot target waits for it
+    expect(service).not.toContain("[Install]");
+  });
+
+  it("the timer is wanted by timers.target and the path unit by paths.target, and both start the service", () => {
+    expect(unit("plugin-qualify-sync.timer")).toMatch(/OnBootSec=\S+[\s\S]*Unit=plugin-qualify-sync\.service[\s\S]*WantedBy=timers\.target/);
+    expect(unit("plugin-qualify-sync.path")).toMatch(/Unit=plugin-qualify-sync\.service[\s\S]*WantedBy=paths\.target/);
+    expect(unit("80-plugin-qualify.preset").split("\n").filter((l) => l.startsWith("enable "))).toEqual([
+      "enable plugin-qualify-sync.timer",
+      "enable plugin-qualify-sync.path",
+    ]);
+  });
+
+  it("the path unit watches every directory a system service searches by default", () => {
+    const watched = [...unit("plugin-qualify-sync.path").matchAll(/^PathChanged=(.*)$/gm)].map((m) => m[1]);
+    const args = parseSyncArgs(["--system"]);
+    if (!args.ok) throw new Error(args.error);
+    const r = resolveSyncSettings(new Map(), args.args, {}, "/root");
+    if (!r.ok) throw new Error(r.error);
+    for (const dir of [...r.settings.lv2Dirs, ...r.settings.clapDirs.filter((d) => !d.startsWith("/root"))]) expect(watched).toContain(dir);
+  });
+
+  it("the settings file names only settings", () => {
+    const text = readFileSync(join(PKG, "packaging", "qualify.conf"), "utf8");
+    expect(parseSyncConf(text).ok).toBe(true);
+    const commented = [...text.matchAll(/^#([a-z_]+)(?:\s|$)/gm)].map((m) => m[1]);
+    for (const key of commented) expect(SYNC_SETTINGS.map((s) => s.key)).toContain(key);
   });
 });
 
@@ -223,7 +266,8 @@ function machine(): { root: string; clap: string; lv2: string; out: string; flag
   const lv2 = join(root, "lv2");
   mkdirSync(clap);
   mkdirSync(lv2);
-  for (const f of ["rt-safe", "crashes-at-load", "hangs"]) copyFileSync(join(FIXTURES, `${f}.clap`), join(clap, `${f}.clap`));
+  copyFileSync(join(FIXTURES, "rt-safe.clap"), join(clap, "rt-safe.clap"));
+  for (const f of ["crashes-at-load", "hangs"]) copyFileSync(join(FAULTY, `${f}.clap`), join(clap, `${f}.clap`));
   cpSync(join(FIXTURES, "lv2", "rt-safe.lv2"), join(lv2, "rt-safe.lv2"), { recursive: true });
   const out = join(root, "out");
   return {

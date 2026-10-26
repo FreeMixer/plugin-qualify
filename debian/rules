@@ -16,6 +16,17 @@ override_dh_auto_build:
 override_dh_auto_install:
 	packaging/build.sh $(CURDIR)/debian/plugin-qualify /usr/lib
 	$(MAKE) -C native install DESTDIR=$(CURDIR)/debian/plugin-qualify LIBEXECDIR=/usr/lib/plugin-qualify
+	install -d $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset
+	install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
+	  packaging/systemd/plugin-qualify-sync.path $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system/
+	install -m 0644 packaging/systemd/80-plugin-qualify.preset $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset/
+
+# the timer and the path unit are enabled; the path unit is armed, which runs nothing until a plugin directory
+# changes and then waits for a minute of quiet; the timer is not started, so no sweep runs inside the package
+# transaction: its first run is at the next boot. The service is started by those two only.
+override_dh_installsystemd:
+	dh_installsystemd --no-start --no-stop-on-upgrade plugin-qualify-sync.service plugin-qualify-sync.timer
+	dh_installsystemd plugin-qualify-sync.path
 
 override_dh_auto_clean:
 	$(MAKE) -C native clean
