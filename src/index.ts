@@ -25,3 +25,4 @@ export * from "./probe-judge.js";
 export * from "./qualification-record.js";
 export * from "./probe-runner.js";
 export * from "./judge-cli.js";
+export * from "./whole-file.js";
