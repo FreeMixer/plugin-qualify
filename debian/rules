@@ -16,19 +16,22 @@ override_dh_auto_build:
 override_dh_auto_install:
 	packaging/build.sh $(CURDIR)/debian/plugin-qualify /usr/lib
 	$(MAKE) -C native install DESTDIR=$(CURDIR)/debian/plugin-qualify LIBEXECDIR=/usr/lib/plugin-qualify
-	install -d $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset
-	install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
-	  packaging/systemd/plugin-qualify-sync.path $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system/
-	install -m 0644 packaging/systemd/80-plugin-qualify.preset $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset/
+	install -D -m 0644 packaging/systemd/80-plugin-qualify.preset $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset/80-plugin-qualify.preset
 
-# the timer and the path unit are enabled; the path unit is armed, which runs nothing until a plugin directory
-# changes and then waits for a minute of quiet; the timer is not started, so no sweep runs inside the package
-# transaction: its first run is at the next boot. The service is started by those two only.
+# the units are handed to dh_installsystemd as its own files, so it installs them where this release's systemd
+# reads them (/lib/systemd/system on bookworm, /usr/lib/systemd/system on trixie). The timer and the path unit are
+# enabled and none is started here, so no sweep runs inside the package transaction; postinst arms the path unit,
+# which runs nothing until a plugin directory changes. The timer's first run is at the next boot.
+SYNC_UNITS = service timer path
+
+execute_before_dh_installsystemd:
+	for u in $(SYNC_UNITS); do cp packaging/systemd/plugin-qualify-sync.$$u debian/plugin-qualify.plugin-qualify-sync.$$u; done
+
 override_dh_installsystemd:
-	dh_installsystemd --no-start --no-stop-on-upgrade plugin-qualify-sync.service plugin-qualify-sync.timer
-	dh_installsystemd plugin-qualify-sync.path
+	dh_installsystemd --name=plugin-qualify-sync --no-start --no-stop-on-upgrade
 
 override_dh_auto_clean:
 	$(MAKE) -C native clean
+	rm -f $(foreach u,$(SYNC_UNITS),debian/plugin-qualify.plugin-qualify-sync.$(u))
 
 override_dh_auto_test:
