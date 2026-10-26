@@ -43,6 +43,7 @@ import { measuredPluginsFromSweep } from "./sweep-jsonl.js";
 import { isRecord, nonEmptyString } from "./guards.js";
 import { HOSTING_PASS_DIMENSIONS, type MeasurementDimension, PROBED_DIMENSIONS } from "./vocabulary.js";
 import { LV2_HOSTING_BLOCK_FRAMES, LV2_HOSTING_LIFECYCLES, LV2_HOSTING_REPEATS } from "../qualify-declarations.js";
+import { extractJsonRecord } from "../measure-host.js";
 
 /** Name and version this tool stamps into every document it writes. */
 export const TOOL_NAME = "lv2-measure";
@@ -269,26 +270,19 @@ export interface HostingRunResult {
 }
 
 /**
- * One plugin's run of the native measurer as the hosting sweep's JSONL line: the LAST line of its
- * stdout that is a JSON object (a plugin may print its own banner first), with the exit status
- * beside it, a death written as 128 + its signal and a timeout as 124. A run that printed no line
- * is `crashed`, its exit kept: what that exit means is the reader's (`sweep-jsonl.ts`) to say.
+ * One plugin's run of the native measurer as the hosting sweep's JSONL line: its stdout's JSON
+ * record ({@link extractJsonRecord}, which repairs a plugin's banner printed into the middle of
+ * the line), with the exit status beside it, a death written as 128 + its signal and a timeout
+ * as 124. A run whose stdout had a `{`-leading line that never repaired is `parseError`; one
+ * with no such line at all is `crashed`. Either way the exit is kept: what it means is the
+ * reader's (`sweep-jsonl.ts`) to say.
  */
 export function hostingLine(uri: string, run: HostingRunResult): Record<string, unknown> {
   const exit = run.timedOut === true ? 124 : run.signalNumber !== undefined ? 128 + run.signalNumber : (run.status ?? 1);
-  const last = run.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("{"))
-    .pop();
-  if (last !== undefined) {
-    try {
-      const row: unknown = JSON.parse(last);
-      if (isRecord(row)) return { ...row, exit };
-    } catch {
-      return { uri, exit, parseError: true };
-    }
-  }
-  return { uri, exit, crashed: true };
+  const row = extractJsonRecord(run.stdout);
+  if (row !== undefined) return { ...row, exit };
+  const hadCandidate = run.stdout.split("\n").some((line) => line.startsWith("{"));
+  return hadCandidate ? { uri, exit, parseError: true } : { uri, exit, crashed: true };
 }
 
 // ---------------------------------------------------------------------------
