@@ -51,7 +51,7 @@ export async function hostingCodesFileFrom(dir) {
 function absent() {
   return (
     `omx-clap-core's TypeScript modules were not found in any of: ${clapCoreTsDirCandidates().join(', ')}. ` +
-    'Install omx-clap-core-devel (pkg-config omx-clap-core), set OMX_CLAP_CORE_TSDIR to its tsdir, or run make -C native deps.'
+    'Install omx-clap-core (its modules in /usr/share/omx-clap-core/ts), set OMX_CLAP_CORE_TSDIR to its tsdir, or run make -C native deps.'
   );
 }
 
