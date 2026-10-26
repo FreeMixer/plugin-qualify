@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   rpm:
-    uses: FreeMixer/.github/.github/workflows/build-rpm.yml@main
+    uses: FreeMixer/.github/.github/workflows/build-rpm.yml@v1
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
@@ -48,7 +48,7 @@ jobs:
   deb:
     needs: rpm
     if: ${{ !cancelled() }}
-    uses: FreeMixer/.github/.github/workflows/build-deb.yml@main
+    uses: FreeMixer/.github/.github/workflows/build-deb.yml@v1
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
