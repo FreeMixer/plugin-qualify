@@ -1,0 +1,825 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+/**
+ * `plugin-qualify-sync`: every plugin on the machine qualified once, and again only when its files change, so
+ * plugin-hostd can run with `require_pins 1` and chain what it was given.
+ *
+ * A run finds every plugin binary on the search paths (each `.clap` under the CLAP directories, each plugin of each
+ * `.lv2` bundle under the LV2 ones), and takes each one's file set as plugin-hostd collects it for a pin: the `.clap`
+ * alone, or the bundle's `manifest.ttl` and every file the manifest names for the plugin. A plugin whose files hash
+ * as recorded is skipped. Every other one gets the quick qualification: the probe runner's pin, RT-safety sweep, cost
+ * and latency, then its descriptor; no soak, which its record says. Each plugin runs in processes of its own under a
+ * wall clock, so a crash, a hang or a refusal is recorded and the run goes on to the next one.
+ *
+ * What a run leaves: the state file (what was qualified, from which bytes, and how it ended), the qualification
+ * records and the descriptors in their directories, and the pin file plugin-hostd loads as `pin_file`, written whole.
+ * When a daemon answers on the command port, the pins that changed are also sent to it with `pin_set`.
+ */
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeSync } from "node:fs";
+import { createConnection } from "node:net";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+
+import { clapQualifyTools } from "./clap-qualify.js";
+import { clapSearchPath, parseClapScan } from "./clap-loader.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
+import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
+import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
+import type { Judgment } from "./probe-judge.js";
+import { qualifyTargets } from "./probe-runner.js";
+import { writeQualification, type NotMeasured } from "./qualification-record.js";
+import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM } from "./qualify-declarations.js";
+import { toolsDir } from "./tool-paths.js";
+import { writeFileWhole } from "./whole-file.js";
+
+// --- the settings -----------------------------------------------------------------------------------------------------
+
+/** The settings file a system service reads, `key value` per line. */
+export const SYNC_CONF = "/etc/omx/qualify.conf";
+
+/** The LV2 directories plugin-hostd searches when `LV2_PATH` is unset (its `lv2_path` default). */
+export const HOSTD_LV2_PATH = ["/usr/lib64/lv2", "/usr/lib/lv2", "/usr/local/lib/lv2"];
+
+/** Zynthian's own LV2 directories: the image's plugins and the ones its user installs. */
+export const ZYNTHIAN_LV2_DIRS = ["/zynthian/zynthian-plugins/lv2", "/zynthian/zynthian-my-data/plugins/lv2"];
+
+export interface SyncSetting {
+  readonly key: string;
+  readonly meaning: string;
+  /** The default as `--help` and the README print it. */
+  readonly default: string;
+}
+
+/** Every setting, declared once: the settings file, the flags (`--pin-file` for `pin_file`) and `--help` read this. */
+export const SYNC_SETTINGS: readonly SyncSetting[] = [
+  { key: "lv2_path", meaning: "the LV2 directories, colon-separated, in the order plugin-hostd searches them", default: "$LV2_PATH, else " + HOSTD_LV2_PATH.join(":") },
+  { key: "lv2_extra", meaning: "more LV2 directories, searched after lv2_path", default: ZYNTHIAN_LV2_DIRS.join(":") },
+  { key: "clap_path", meaning: "the CLAP directories, colon-separated", default: "$CLAP_PATH, then ~/.clap, then /usr/lib/clap" },
+  { key: "clap_extra", meaning: "more CLAP directories, searched after clap_path", default: "" },
+  { key: "pin_file", meaning: "the pin file plugin-hostd loads as pin_file", default: "/var/lib/omx/qualified.pins (system), else $XDG_STATE_HOME/omx/qualified.pins" },
+  { key: "qualification_dir", meaning: "where the qualification records go", default: "/var/lib/omx/qualification (system), else $XDG_STATE_HOME/omx/qualification" },
+  { key: "descriptor_dir", meaning: "where the scanned descriptors go", default: `${DESCRIPTOR_DIR_SYSTEM} (system), else $XDG_STATE_HOME/${DESCRIPTOR_DIR_STATE_SUBDIR}` },
+  { key: "state_file", meaning: "what was qualified, from which bytes, and how it ended", default: "/var/lib/omx/qualify-sync.json (system), else $XDG_STATE_HOME/omx/qualify-sync.json" },
+  { key: "budget_s", meaning: "the wall clock one plugin gets, in seconds; past it the plugin is recorded as hung", default: "60" },
+  { key: "host_profile", meaning: "the host the verdict is for (a shipped profile id)", default: "omx-clap-host" },
+  { key: "hostd_port", meaning: "plugin-hostd's command port the new pins are sent to; 0 sends none", default: "5555" },
+  { key: "hostd_feedback_port", meaning: "plugin-hostd's feedback port, connected before the command port; 0 is the command port's next", default: "0" },
+  { key: "settle_s", meaning: "wait until the plugin directories have been quiet this long before a run", default: "0" },
+];
+
+export interface SyncSettings {
+  readonly lv2Dirs: readonly string[];
+  readonly clapDirs: readonly string[];
+  readonly pinFile: string;
+  readonly qualificationDir: string;
+  readonly descriptorDir: string;
+  readonly stateFile: string;
+  readonly budgetS: number;
+  readonly hostProfile: HostProfile;
+  readonly hostdPort: number;
+  readonly hostdFeedbackPort: number;
+  readonly settleS: number;
+}
+
+/** A settings file read: one `key value` per line, `#` starts a comment. An unknown key or a bare key is refused by line. */
+export function parseSyncConf(text: string, source = SYNC_CONF): { ok: true; values: Map<string, string> } | { ok: false; error: string } {
+  const known = new Set(SYNC_SETTINGS.map((s) => s.key));
+  const values = new Map<string, string>();
+  const lines = text.split("\n");
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n]!.replace(/#.*$/, "").trim();
+    if (line === "") continue;
+    const m = /^(\S+)(?:\s+(.*))?$/.exec(line)!;
+    const key = m[1]!;
+    if (!known.has(key)) return { ok: false, error: `${source}:${String(n + 1)}: ${key} is not a setting` };
+    values.set(key, (m[2] ?? "").trim());
+  }
+  return { ok: true, values };
+}
+
+export interface SyncArgs {
+  readonly config?: string;
+  readonly system: boolean;
+  readonly force: boolean;
+  readonly help: boolean;
+  /** The settings given as flags, by key. */
+  readonly values: ReadonlyMap<string, string>;
+}
+
+export const flagOf = (key: string): string => `--${key.replace(/_/g, "-")}`;
+
+export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncArgs } | { ok: false; error: string } {
+  const byFlag = new Map(SYNC_SETTINGS.map((s) => [flagOf(s.key), s.key]));
+  const values = new Map<string, string>();
+  let config: string | undefined;
+  let system = false;
+  let force = false;
+  let help = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "--system") system = true;
+    else if (a === "--force") force = true;
+    else if (a === "--help") help = true;
+    else if (a === "--config" || byFlag.has(a)) {
+      const v = argv[++i];
+      if (v === undefined) return { ok: false, error: `${a} needs a value` };
+      if (a === "--config") config = v;
+      else values.set(byFlag.get(a)!, v);
+    } else return { ok: false, error: `unknown argument ${a}` };
+  }
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, help, values } };
+}
+
+export function syncHelpText(): string {
+  const rows = SYNC_SETTINGS.map((s) => `  ${`${flagOf(s.key)} <value>`.padEnd(28)}${s.meaning}${s.default === "" ? "" : ` (default: ${s.default})`}`);
+  return [
+    "plugin-qualify-sync — qualify every plugin on the search paths once, and again when its files change",
+    "",
+    `  --config <file>             the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
+    "  --system                    a system service's directories, under /var/lib/omx",
+    "  --force                     qualify every plugin again, recorded or not",
+    "  --help                      this text",
+    ...rows,
+    "",
+    "every setting is also a line of the settings file, its key as the first word",
+    "exit 0 the run went through (whatever the verdicts), 2 it could not run",
+    "",
+  ].join("\n");
+}
+
+const dirList = (text: string): string[] => text.split(":").filter((d) => d !== "");
+
+/** The settings of a run: a flag over the settings file over the default. */
+export function resolveSyncSettings(
+  file: ReadonlyMap<string, string>,
+  args: SyncArgs,
+  env: Readonly<Record<string, string | undefined>>,
+  home: string = homedir(),
+): { ok: true; settings: SyncSettings } | { ok: false; error: string } {
+  const get = (key: string): string | undefined => args.values.get(key) ?? file.get(key);
+  const state = env["XDG_STATE_HOME"] !== undefined && env["XDG_STATE_HOME"] !== "" ? env["XDG_STATE_HOME"] : join(home, ".local", "state");
+  const place = (key: string, system: string, user: string): string => {
+    const v = get(key);
+    return v !== undefined && v !== "" ? v : args.system ? system : join(state, user);
+  };
+  const lv2Named = get("lv2_path");
+  const lv2Base = lv2Named !== undefined && lv2Named !== "" ? dirList(lv2Named) : dirList(env["LV2_PATH"] ?? "").length > 0 ? dirList(env["LV2_PATH"]!) : HOSTD_LV2_PATH;
+  const clapNamed = get("clap_path");
+  const clapBase = clapNamed !== undefined && clapNamed !== "" ? dirList(clapNamed) : clapSearchPath(env, home);
+  const number = (key: string, min: number): number | undefined => {
+    const v = Number(get(key) ?? SYNC_SETTINGS.find((s) => s.key === key)!.default);
+    return Number.isFinite(v) && v >= min ? v : undefined;
+  };
+  const budgetS = number("budget_s", 1);
+  const hostdPort = number("hostd_port", 0);
+  const feedbackPort = number("hostd_feedback_port", 0);
+  const settleS = number("settle_s", 0);
+  if (budgetS === undefined) return { ok: false, error: "budget_s must be a number of seconds, 1 or more" };
+  if (hostdPort === undefined || !Number.isInteger(hostdPort) || hostdPort > 65535) return { ok: false, error: "hostd_port must be a port number, or 0" };
+  if (feedbackPort === undefined || !Number.isInteger(feedbackPort) || feedbackPort > 65535) return { ok: false, error: "hostd_feedback_port must be a port number, or 0" };
+  if (settleS === undefined) return { ok: false, error: "settle_s must be a number of seconds" };
+  const profileId = get("host_profile") || "omx-clap-host";
+  const hostProfile = shippedHostProfile(profileId);
+  if (hostProfile === undefined) return { ok: false, error: `host_profile ${profileId} is not a shipped host profile` };
+  const once = (dirs: readonly string[]): string[] => [...new Set(dirs.map((d) => resolve(d)))];
+  return {
+    ok: true,
+    settings: {
+      lv2Dirs: once([...lv2Base, ...dirList(get("lv2_extra") ?? ZYNTHIAN_LV2_DIRS.join(":"))]),
+      clapDirs: once([...clapBase, ...dirList(get("clap_extra") ?? "")]),
+      pinFile: place("pin_file", "/var/lib/omx/qualified.pins", join("omx", "qualified.pins")),
+      qualificationDir: place("qualification_dir", "/var/lib/omx/qualification", join("omx", "qualification")),
+      descriptorDir: place("descriptor_dir", DESCRIPTOR_DIR_SYSTEM, DESCRIPTOR_DIR_STATE_SUBDIR),
+      stateFile: place("state_file", "/var/lib/omx/qualify-sync.json", join("omx", "qualify-sync.json")),
+      budgetS,
+      hostProfile,
+      hostdPort,
+      hostdFeedbackPort: feedbackPort === 0 && hostdPort !== 0 ? hostdPort + 1 : feedbackPort,
+      settleS,
+    },
+  };
+}
+
+// --- what is on the machine -------------------------------------------------------------------------------------------
+
+/** One thing that is qualified as a unit: a `.clap` file (every plugin in it), or one plugin of an LV2 bundle. */
+export interface SyncItem {
+  /** `clap:<path of the .clap>`, or `lv2:<uri>`. */
+  readonly key: string;
+  readonly format: "clap" | "lv2";
+  /** The directory the files are relative to: the `.clap`'s, or the bundle. */
+  readonly root: string;
+  /** The files plugin-hostd's pin holds, relative to `root`. */
+  readonly files: readonly string[];
+  /** The LV2 plugin's uri. */
+  readonly uri?: string;
+}
+
+const CLAP_SUFFIX = ".clap";
+
+/** Every `.clap` under a directory, its subdirectories included, in name order; a directory reached twice is walked once. */
+function clapFiles(dir: string, seen: Set<string>, problems: string[]): string[] {
+  let real: string;
+  try {
+    real = resolve(dir);
+    const st = statSync(real);
+    if (!st.isDirectory() || seen.has(`${st.dev}:${st.ino}`)) return [];
+    seen.add(`${st.dev}:${st.ino}`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") problems.push(`cannot read ${dir}: ${(e as NodeJS.ErrnoException).code ?? String(e)}`);
+    return [];
+  }
+  let names: string[];
+  try {
+    names = readdirSync(real).sort();
+  } catch (e) {
+    problems.push(`cannot read ${dir}: ${(e as NodeJS.ErrnoException).code ?? String(e)}`);
+    return [];
+  }
+  const out: string[] = [];
+  for (const name of names) {
+    const path = join(dir, name);
+    let st;
+    try {
+      st = statSync(path);
+    } catch {
+      continue; // a dangling link
+    }
+    if (st.isDirectory()) out.push(...clapFiles(path, seen, problems));
+    else if (st.isFile() && name.endsWith(CLAP_SUFFIX)) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * Every item on the search paths. A `.clap` is one item; an LV2 plugin is one item, found in the first bundle on the
+ * LV2 directories that declares it, as plugin-hostd finds it. A directory that cannot be read is a problem named, and
+ * the others are still walked.
+ */
+export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">): { items: SyncItem[]; problems: string[] } {
+  const items: SyncItem[] = [];
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  const clap = new Set<string>();
+  for (const dir of settings.clapDirs) {
+    for (const file of clapFiles(dir, seen, problems)) {
+      const path = resolve(file);
+      if (clap.has(path)) continue;
+      clap.add(path);
+      items.push({ key: `clap:${path}`, format: "clap", root: dirname(path), files: [basename(path)] });
+    }
+  }
+  const lv2 = new Set<string>();
+  for (const dir of settings.lv2Dirs) {
+    let bundles: string[];
+    try {
+      bundles = lv2BundlesOnPath({ LV2_PATH: dir });
+    } catch (e) {
+      problems.push(`cannot read ${dir}: ${(e as NodeJS.ErrnoException).code ?? String(e)}`);
+      continue;
+    }
+    for (const bundle of bundles) {
+      let ttl: string;
+      try {
+        ttl = readFileSync(join(bundle, "manifest.ttl"), "utf8");
+      } catch (e) {
+        problems.push(`cannot read ${join(bundle, "manifest.ttl")}: ${(e as NodeJS.ErrnoException).code ?? String(e)}`);
+        continue;
+      }
+      for (const p of manifestPlugins(ttl)) {
+        if (lv2.has(p.uri)) continue;
+        lv2.add(p.uri);
+        items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files: ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")], uri: p.uri });
+      }
+    }
+  }
+  return { items, problems };
+}
+
+// --- the file set -----------------------------------------------------------------------------------------------------
+
+/** One file of a set: its SHA-256, as plugin-hostd's `pin.h` digests it, and the stat it was taken at. */
+export interface FileDigest {
+  readonly path: string;
+  readonly sha256: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly ino: number;
+}
+
+/** The SHA-256 of a file's bytes, read in pieces over one descriptor. */
+export function fileSha256(path: string): string {
+  const hash = createHash("sha256");
+  const fd = openSync(path, "r");
+  try {
+    const piece = Buffer.alloc(1 << 20);
+    for (let got = readSync(fd, piece); got > 0; got = readSync(fd, piece)) hash.update(piece.subarray(0, got));
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * The digests of the files under `root`. A file whose size, modification time and inode are the ones `known` holds
+ * keeps that digest without being read again, so a run over an unchanged machine reads no binary; any other is hashed.
+ * `undefined` when a file is gone or cannot be read.
+ */
+export function digestFiles(root: string, files: readonly string[], known: readonly FileDigest[] = []): FileDigest[] | undefined {
+  const out: FileDigest[] = [];
+  for (const path of [...new Set(files)].sort()) {
+    const full = join(root, path);
+    try {
+      const st = statSync(full);
+      if (!st.isFile()) return undefined;
+      const prior = known.find((k) => k.path === path);
+      const same = prior !== undefined && prior.size === st.size && prior.mtimeMs === st.mtimeMs && prior.ino === st.ino;
+      out.push({ path, sha256: same ? prior.sha256 : fileSha256(full), size: st.size, mtimeMs: st.mtimeMs, ino: st.ino });
+    } catch {
+      return undefined;
+    }
+  }
+  return out;
+}
+
+// --- the state --------------------------------------------------------------------------------------------------------
+
+export const SYNC_STATE_SCHEMA = "plugin-qualify.sync-state/1";
+
+/** How the quick qualification of one plugin ended. */
+export const SYNC_OUTCOMES = ["qualified", "refused", "crashed", "hung", "unmeasured"] as const;
+export type SyncOutcome = (typeof SYNC_OUTCOMES)[number];
+
+/** The codes of a plugin the sync could not measure, beside the probe runner's own. */
+export const SYNC_CODE = {
+  /** The scanner died loading the `.clap`: no plugin of it could be listed. */
+  scanCrashed: "qualify.sync.scan-crashed",
+  /** The scanner did not finish listing the `.clap` in its time. */
+  scanHung: "qualify.sync.scan-hung",
+  /** The scanner listed the plugin but could not create or init it. */
+  scanRefused: "qualify.sync.scan-refused",
+  /** The probe runner wrote no document to judge. */
+  notMeasured: "qualify.sync.not-measured",
+} as const;
+
+/** What the quick qualification never measures, stated in every record it writes. */
+export const QUICK_NOT_MEASURED: readonly NotMeasured[] = [{ dimension: "stability", code: HOSTING_CODE.stabilityUnsoaked }];
+
+export interface SyncPlugin {
+  /** plugin-hostd's uri of the plugin (`clap:<path>#<id>` or the LV2 uri), or `clap:<path>` when no plugin could be listed. */
+  readonly uri: string;
+  readonly outcome: SyncOutcome;
+  /** The code that decided a plugin that is not qualified. */
+  readonly code?: string;
+  readonly detail?: string;
+  /** Its pin, when the run took a whole one. */
+  readonly pin?: PinEntry;
+  /** The record written for it. */
+  readonly record?: string;
+}
+
+export interface SyncEntry {
+  readonly format: "clap" | "lv2";
+  readonly root: string;
+  /** Every file the item's pin and its manifest hold, as they were when it was qualified. */
+  readonly files: readonly FileDigest[];
+  readonly plugins: readonly SyncPlugin[];
+  readonly qualifiedAt: string;
+  readonly seconds: number;
+}
+
+export interface SyncState {
+  readonly schema: typeof SYNC_STATE_SCHEMA;
+  readonly entries: Readonly<Record<string, SyncEntry>>;
+}
+
+const EMPTY_STATE: SyncState = { schema: SYNC_STATE_SCHEMA, entries: {} };
+
+/** The state file, or an empty state when there is none. One that does not read is moved aside and the run starts over. */
+export function readSyncState(path: string, log: (line: string) => void = () => {}): SyncState {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return EMPTY_STATE;
+    throw e;
+  }
+  try {
+    const state = JSON.parse(text) as SyncState;
+    if (state.schema === SYNC_STATE_SCHEMA && typeof state.entries === "object" && state.entries !== null) return state;
+  } catch {
+    // read as corrupt below
+  }
+  renameSync(path, `${path}.unreadable`);
+  log(`${path} does not read as a sync state: moved to ${path}.unreadable, and every plugin is qualified again`);
+  return EMPTY_STATE;
+}
+
+/** Whether an item is recorded from the bytes it has now: every file of its set, and every file of its recorded pin, unchanged. */
+export function recordedAsIs(item: SyncItem, entry: SyncEntry | undefined): { same: boolean; files?: FileDigest[] } {
+  if (entry === undefined || entry.root !== item.root) return { same: false };
+  const names = [...new Set([...item.files, ...entry.files.map((f) => f.path)])];
+  const now = digestFiles(item.root, names, entry.files);
+  if (now === undefined) return { same: false };
+  const same = now.length === entry.files.length && now.every((f) => entry.files.some((e) => e.path === f.path && e.sha256 === f.sha256));
+  return { same, files: now };
+}
+
+// --- one item ---------------------------------------------------------------------------------------------------------
+
+export interface SyncContext {
+  readonly settings: SyncSettings;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly log: (line: string) => void;
+}
+
+/** A judged run's outcome for the host: qualified, refused, or why it was not measured. */
+function outcomeOf(judgment: Judgment, host: string): { outcome: SyncOutcome; code?: string } {
+  const v = judgment.hosts.find((h) => h.verdict.host === host)?.verdict;
+  if (v === undefined) return { outcome: "unmeasured", code: SYNC_CODE.notMeasured };
+  const code = v.deciding;
+  if (!v.measured) return { outcome: code === "probe.crashed" ? "crashed" : code === "probe.timeout" ? "hung" : "unmeasured", ...(code === undefined ? {} : { code }) };
+  if (v.rating === "suitable" || v.rating === "conditional") return { outcome: "qualified", ...(code === undefined ? {} : { code }) };
+  return { outcome: v.rating === "unsuitable" ? "refused" : "unmeasured", ...(code === undefined ? {} : { code }) };
+}
+
+const safe = (text: string): string => text.replace(/[^A-Za-z0-9._-]/g, "_");
+
+/** The record of a plugin no probe output exists for: what it is, the bytes it was, and why nothing was measured. */
+function writeUnmeasuredRecord(ctx: SyncContext, item: SyncItem, files: readonly FileDigest[], plugin: Omit<SyncPlugin, "record">): string {
+  const main = files.find((f) => f.path === item.files[item.format === "clap" ? 0 : 1]) ?? files[0];
+  const path = join(ctx.settings.qualificationDir, `${safe(basename(plugin.uri))}-${(main?.sha256 ?? "").slice(0, 12)}.unmeasured.json`);
+  const record = {
+    schema: "plugin-qualify.unmeasured-record/1",
+    plugin: { format: item.format, uri: plugin.uri },
+    binary: { root: item.root, files: files.map((f) => ({ path: f.path, sha256: f.sha256 })) },
+    outcome: plugin.outcome,
+    code: plugin.code,
+    ...(plugin.detail === undefined ? {} : { detail: plugin.detail }),
+    notMeasured: [{ dimension: "all", code: plugin.code ?? SYNC_CODE.notMeasured }, ...QUICK_NOT_MEASURED],
+    measuredAt: new Date().toISOString(),
+  };
+  writeFileWhole(path, `${JSON.stringify(record, null, 2)}\n`);
+  return path;
+}
+
+/** Each judged run of a pass as the plugins it qualified: the record written, the pin taken, the outcome. */
+function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgment: Judgment }[]): SyncPlugin[] {
+  const host = ctx.settings.hostProfile.id;
+  return runs.map(({ bytes, judgment }) => {
+    const { recordPath } = writeQualification(ctx.settings.qualificationDir, bytes, judgment, QUICK_NOT_MEASURED);
+    const pin = judgmentPinEntries(judgment, host)[0];
+    const { outcome, code } = outcomeOf(judgment, host);
+    return { uri: pin?.uri ?? judgment.output.plugin.id, outcome, ...(code === undefined ? {} : { code }), ...(pin === undefined ? {} : { pin }), record: recordPath };
+  });
+}
+
+function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][number], env: Readonly<Record<string, string | undefined>>) {
+  return qualifyTargets([target], { rates: [ctx.settings.hostProfile.cost.rate], profiles: [ctx.settings.hostProfile], wallS: ctx.settings.budgetS, env });
+}
+
+/** The descriptors of a scanned `.clap`, through the one descriptor writer; a failure is named and the run goes on. */
+function writeClapDescriptors(ctx: SyncContext, scan: string): void {
+  const r = spawnSync("python3", [join(toolsDir(), "descriptors.py"), "clap", "--descriptor-dir", ctx.settings.descriptorDir], {
+    input: scan,
+    encoding: "utf8",
+    timeout: ctx.settings.budgetS * 1000,
+    env: { ...ctx.env },
+  });
+  if (r.status !== 0) ctx.log(`descriptors of a .clap not all written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
+}
+
+function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
+  const file = join(item.root, item.files[0]!);
+  const fileUri = `clap:${file}`;
+  let tool: string;
+  try {
+    tool = clapQualifyTools(ctx.env, existsSync).tool;
+  } catch (e) {
+    return [{ uri: fileUri, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: (e as Error).message }];
+  }
+  // the scanner lists the plugins of the file in a child of its own, and says how that child ended
+  const r = spawnSync(tool, ["--json", file], { encoding: "utf8", timeout: Math.max(ctx.settings.budgetS, 35) * 1000, killSignal: "SIGKILL", maxBuffer: 64 << 20 });
+  let scanned;
+  try {
+    if (r.error !== undefined) throw r.error;
+    scanned = parseClapScan(r.stdout).files.find((f) => resolve(f.path) === file);
+    if (scanned === undefined) throw new Error("the scan holds no entry for the file");
+  } catch (e) {
+    const hung = (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+    return [{ uri: fileUri, outcome: hung ? "hung" : "unmeasured", code: hung ? SYNC_CODE.scanHung : SYNC_CODE.notMeasured, detail: (e as Error).message }];
+  }
+  if ("error" in scanned) {
+    const hung = /timed out/.test(scanned.error);
+    return [{ uri: fileUri, outcome: hung ? "hung" : "crashed", code: hung ? SYNC_CODE.scanHung : SYNC_CODE.scanCrashed, detail: scanned.error }];
+  }
+  writeClapDescriptors(ctx, r.stdout);
+  const out: SyncPlugin[] = [];
+  for (const p of scanned.plugins) {
+    const uri = `${fileUri}#${p.id}`;
+    if ("error" in p) {
+      out.push({ uri, outcome: "unmeasured", code: SYNC_CODE.scanRefused, detail: p.error });
+      continue;
+    }
+    const pass = runPass(ctx, { format: "clap", uri: `urn:clap:${p.id}`, bundle: item.root, binary: item.files[0]!, binaryPath: file }, ctx.env);
+    for (const f of pass.failures) out.push({ uri, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: f.problem });
+    out.push(...judgedPlugins(ctx, pass.runs));
+  }
+  return out;
+}
+
+/** An LV2 plugin, measured in a world of its own bundle only, as plugin-hostd runs a pinned LV2 plugin. */
+function qualifyLv2(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
+  const world = mkdtempSync(join(tmpdir(), "plugin-qualify-sync-world-"));
+  try {
+    symlinkSync(item.root, join(world, basename(item.root)));
+    const pass = runPass(ctx, { format: "lv2", uri: item.uri!, bundle: item.root }, { ...ctx.env, LV2_PATH: world });
+    return [...pass.failures.map((f): SyncPlugin => ({ uri: item.uri!, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: f.problem })), ...judgedPlugins(ctx, pass.runs)];
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+}
+
+/** One item qualified, whatever happens to it: an error of the sync's own while measuring it is its outcome, not the run's end. */
+export function qualifyItem(ctx: SyncContext, item: SyncItem, files: readonly FileDigest[]): SyncEntry {
+  const started = Date.now();
+  let plugins: SyncPlugin[];
+  try {
+    plugins = item.format === "clap" ? qualifyClap(ctx, item) : qualifyLv2(ctx, item);
+  } catch (e) {
+    plugins = [{ uri: item.uri ?? item.key, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: (e as Error).message }];
+  }
+  if (plugins.length === 0) plugins = [{ uri: item.uri ?? item.key, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: "no plugin was listed" }];
+  plugins = plugins.map((p) => (p.record !== undefined ? p : { ...p, record: writeUnmeasuredRecord(ctx, item, files, p) }));
+  // the pin's own files join the set, so a file the manifest reader missed still makes a change seen
+  const pinned = plugins.flatMap((p) => p.pin?.integrity.files?.map((f) => f.path) ?? []);
+  const all = digestFiles(item.root, [...item.files, ...pinned], files) ?? [...files];
+  return { format: item.format, root: item.root, files: all, plugins, qualifiedAt: new Date(started).toISOString(), seconds: (Date.now() - started) / 1000 };
+}
+
+// --- the outputs ------------------------------------------------------------------------------------------------------
+
+/** The pin file's text: every whole pin of the state, the worse verdict kept for a uri pinned twice. */
+export function syncPinsText(state: SyncState): string {
+  const entries = Object.values(state.entries).flatMap((e) => e.plugins.flatMap((p) => (p.pin === undefined ? [] : [p.pin])));
+  return pinsFile(entries, "plugin-qualify-sync").text;
+}
+
+/** The pin lines, by uri. */
+function pinLinesOf(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of text.split("\n")) if (line !== "" && !line.startsWith("#")) out.set(line.split(" ")[1]!, line);
+  return out;
+}
+
+/** The pin lines of `after` that `before` does not hold as they are. */
+export function changedPinLines(before: string, after: string): string[] {
+  const was = pinLinesOf(before);
+  return [...pinLinesOf(after).entries()].filter(([uri, line]) => was.get(uri) !== line).map(([, line]) => line);
+}
+
+/** What became of the pins sent to a daemon: its replies, or why none came. */
+export type SentPins =
+  | { readonly replies: readonly string[] }
+  /** `off`: hostd_port is 0. `absent`: nothing listens on the port. `held`: the port took the connection and no reply
+   * came: plugin-hostd serves one controller at a time, and one is connected. */
+  | { readonly unsent: "off" | "absent" | "held" };
+
+/**
+ * The lines sent to plugin-hostd, one reply awaited for each, connected as a controller connects: the feedback port
+ * first, then the command port, since the daemon answers commands only while its feedback port has a controller. Pins
+ * that could not be sent apply at the daemon's next start, from the pin file.
+ */
+export async function sendPins(port: number, feedbackPort: number, lines: readonly string[], timeoutMs = 5000): Promise<SentPins> {
+  if (lines.length === 0) return { replies: [] };
+  if (port === 0) return { unsent: "off" };
+  return new Promise((done) => {
+    const feedback = createConnection({ host: "127.0.0.1", port: feedbackPort });
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const replies: string[] = [];
+    let buffer = "";
+    const timer = setTimeout(() => finish({ unsent: "held" }), timeoutMs);
+    const finish = (result: SentPins): void => {
+      clearTimeout(timer);
+      socket.destroy();
+      feedback.destroy();
+      done(result);
+    };
+    // the daemon's events on the feedback port are not this run's to read: they are drained and dropped
+    feedback.on("data", () => {});
+    feedback.once("error", () => finish({ unsent: "absent" }));
+    socket.setEncoding("utf8");
+    socket.once("error", () => finish({ unsent: "absent" }));
+    socket.once("connect", () => socket.write(`${lines[0]}\0`));
+    socket.on("data", (d: string) => {
+      buffer += d;
+      for (let nul = buffer.indexOf("\0"); nul >= 0; nul = buffer.indexOf("\0")) {
+        replies.push(buffer.slice(0, nul));
+        buffer = buffer.slice(nul + 1);
+        if (replies.length === lines.length) return finish({ replies });
+        socket.write(`${lines[replies.length]}\0`);
+      }
+    });
+  });
+}
+
+// --- waiting for quiet ------------------------------------------------------------------------------------------------
+
+/** What the plugin directories look like from outside: each entry's name, size and modification time, two levels down. */
+export function directoriesSignature(dirs: readonly string[]): string {
+  const parts: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    let names: string[];
+    try {
+      names = readdirSync(dir).sort();
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const path = join(dir, name);
+      try {
+        const st = lstatSync(path);
+        parts.push(`${path}\t${String(st.size)}\t${String(st.mtimeMs)}`);
+        if (depth > 0 && st.isDirectory()) walk(path, depth - 1);
+      } catch {
+        // gone between the listing and the stat: the next look sees it
+      }
+    }
+  };
+  for (const dir of dirs) walk(dir, 1);
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Returns once the directories have not changed for `quietS` seconds: a package install writes many files, and one run is enough. */
+export async function waitQuiet(dirs: readonly string[], quietS: number, log: (line: string) => void): Promise<void> {
+  if (quietS <= 0) return;
+  const pollMs = Math.min(5000, quietS * 1000);
+  let seen = directoriesSignature(dirs);
+  let since = Date.now();
+  while (Date.now() - since < quietS * 1000) {
+    await sleep(pollMs);
+    const now = directoriesSignature(dirs);
+    if (now !== seen) {
+      log(`the plugin directories changed; waiting for ${String(quietS)} s of quiet`);
+      seen = now;
+      since = Date.now();
+    }
+  }
+}
+
+// --- the run ----------------------------------------------------------------------------------------------------------
+
+export interface SyncSummary {
+  readonly qualified: number;
+  readonly skipped: number;
+  readonly refused: number;
+  readonly crashed: number;
+  readonly hung: number;
+  readonly unmeasured: number;
+  readonly seconds: number;
+  /** The pins a running daemon took, when one answered. */
+  readonly sent?: number;
+}
+
+export function summaryLine(s: SyncSummary): string {
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, ${s.seconds.toFixed(1)} s`;
+}
+
+/** The lock of one state file: a second sync on it while one runs returns at once. A lock whose process is gone is taken over. */
+function takeLock(stateFile: string): (() => void) | undefined {
+  const lock = `${stateFile}.lock`;
+  mkdirSync(dirname(lock), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(lock, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => rmSync(lock, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const pid = Number(readFileSync(lock, "utf8"));
+      try {
+        if (Number.isInteger(pid) && pid > 0) {
+          process.kill(pid, 0);
+          return undefined;
+        }
+      } catch {
+        // its process is gone
+      }
+      unlinkSync(lock);
+    }
+  }
+  return undefined;
+}
+
+export interface SyncRunOptions {
+  readonly force?: boolean;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly log?: (line: string) => void;
+}
+
+/**
+ * One run: wait for quiet, qualify what is new or changed, drop what is gone, write the state, the records, the
+ * descriptors and the pin file, and send the changed pins to a running daemon. The state and the pin file are written
+ * whole after every item, so a run cut short keeps all it finished. `undefined` when another run holds the lock.
+ */
+export async function runSync(settings: SyncSettings, options: SyncRunOptions = {}): Promise<SyncSummary | undefined> {
+  const log = options.log ?? (() => {});
+  const env = options.env ?? process.env;
+  const unlock = takeLock(settings.stateFile);
+  if (unlock === undefined) {
+    log(`another sync holds ${settings.stateFile}.lock; this one does nothing`);
+    return undefined;
+  }
+  try {
+    const started = Date.now();
+    const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
+    await waitQuiet(dirs, settings.settleS, log);
+    const ctx: SyncContext = { settings, env, log };
+    const count = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0 };
+    let before: string;
+    try {
+      before = readFileSync(settings.pinFile, "utf8");
+    } catch {
+      before = "";
+    }
+    let state = readSyncState(settings.stateFile, log);
+    const lv2Pinned: string[] = [];
+    // a change made while a pass ran is caught by one more pass, a few at most
+    for (let pass = 0; pass < 3; pass++) {
+      const signature = directoriesSignature(dirs);
+      const { items, problems } = discoverSyncItems(settings);
+      for (const p of problems) log(p);
+      const found = new Set(items.map((i) => i.key));
+      const entries: Record<string, SyncEntry> = {};
+      for (const [key, entry] of Object.entries(state.entries)) if (found.has(key)) entries[key] = entry;
+      for (const key of Object.keys(state.entries)) if (!found.has(key)) log(`${key}: gone, its pin is dropped`);
+      for (const item of items) {
+        const recorded = recordedAsIs(item, entries[item.key]);
+        if (recorded.same && options.force !== true) {
+          if (pass === 0) count.skipped += entries[item.key]!.plugins.length;
+          continue;
+        }
+        const files = recorded.files ?? digestFiles(item.root, item.files);
+        if (files === undefined) {
+          log(`${item.key}: a file of it cannot be read; skipped this run`);
+          continue;
+        }
+        const entry = qualifyItem(ctx, item, files);
+        entries[item.key] = entry;
+        if (item.format === "lv2") lv2Pinned.push(...entry.plugins.filter((p) => p.pin !== undefined).map((p) => p.uri));
+        for (const p of entry.plugins) {
+          count[p.outcome]++;
+          log(`${p.uri}: ${p.outcome}${p.code === undefined ? "" : ` (${p.code})`}${p.detail === undefined ? "" : `: ${p.detail}`}`);
+        }
+        state = { schema: SYNC_STATE_SCHEMA, entries };
+        writeFileWhole(settings.stateFile, `${JSON.stringify(state, null, 1)}\n`);
+        writeFileWhole(settings.pinFile, syncPinsText(state));
+      }
+      state = { schema: SYNC_STATE_SCHEMA, entries };
+      if (directoriesSignature(dirs) === signature) break;
+      log("the plugin directories changed during the run; looking again");
+    }
+    writeFileWhole(settings.stateFile, `${JSON.stringify(state, null, 1)}\n`);
+    const after = syncPinsText(state);
+    if (after !== before) writeFileWhole(settings.pinFile, after);
+    writeLv2Descriptors(ctx, lv2Pinned);
+    const changed = changedPinLines(before, after);
+    const sent = await sendPins(settings.hostdPort, settings.hostdFeedbackPort, changed);
+    if ("unsent" in sent) {
+      const why = {
+        off: "hostd_port is 0",
+        absent: `no plugin-hostd listens on port ${String(settings.hostdPort)}`,
+        held: `plugin-hostd on port ${String(settings.hostdPort)} did not answer: a controller holds its command socket`,
+      }[sent.unsent];
+      log(`${why}; the ${String(changed.length)} changed pins apply at its next start, from the pin file`);
+    }
+    const replies = "replies" in sent ? sent.replies : [];
+    for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
+    const taken = replies.filter((r) => r === "resp 0").length;
+    return { ...count, seconds: (Date.now() - started) / 1000, ...(taken === 0 ? {} : { sent: taken }) };
+  } finally {
+    unlock();
+  }
+}
+
+/** The descriptors of the LV2 plugins qualified this run, in one pass of the LV2 scanner; a failure is named. */
+function writeLv2Descriptors(ctx: SyncContext, uris: readonly string[]): void {
+  if (uris.length === 0) return;
+  const out = mkdtempSync(join(tmpdir(), "plugin-qualify-sync-scan-"));
+  try {
+    const r = spawnSync(
+      "python3",
+      [join(toolsDir(), "scan.py"), "--descriptor-dir", ctx.settings.descriptorDir, "--out", join(out, "catalog.json"), ...uris],
+      { encoding: "utf8", timeout: ctx.settings.budgetS * 1000 * Math.max(1, Math.ceil(uris.length / 10)), env: { ...ctx.env, LV2_PATH: ctx.settings.lv2Dirs.join(":") } },
+    );
+    if (r.status !== 0) ctx.log(`LV2 descriptors not all written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim().split("\n").slice(-3).join("; ")}`);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}

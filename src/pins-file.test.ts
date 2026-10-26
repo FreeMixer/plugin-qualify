@@ -7,10 +7,9 @@
  * require_pins on, adds the plugin with no `pin_set`, and corrupts one hash to get -509; it needs `PLUGIN_HOSTD` and
  * `PLUGIN_HOSTD_FAKE_HOST` (plugin-hostd's `tests/fake-host`) and skips visibly without them off CI; under CI their absence fails the test (the workflow installs plugin-hostd and plugin-hostd-tests).
  */
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import type { RtSafetyDocument } from "./clap-qualify.js";
 import { qualifyClapTargets } from "./direct-prober.support.js";
+import { startDaemon } from "./hostd-daemon.support.js";
 import { OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import {
   clapPinEntries,
@@ -259,68 +259,7 @@ describe("a fixture plugin qualified into a pins file", () => {
 
 // --- plugin-hostd, loading the file ----------------------------------------------------------------
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const s = createServer();
-    s.once("error", reject);
-    s.listen(0, "127.0.0.1", () => {
-      const port = (s.address() as { port: number }).port;
-      s.close(() => resolve(port));
-    });
-  });
-}
-
-/** One command on a NUL-framed socket, and the reply. */
-class Controller {
-  private buffer = "";
-  private waiting: ((reply: string) => void) | undefined;
-  constructor(private readonly socket: Socket) {
-    socket.setEncoding("utf8");
-    socket.on("data", (d: string) => {
-      this.buffer += d;
-      const nul = this.buffer.indexOf("\0");
-      if (nul >= 0 && this.waiting !== undefined) {
-        const reply = this.buffer.slice(0, nul);
-        this.buffer = this.buffer.slice(nul + 1);
-        const w = this.waiting;
-        this.waiting = undefined;
-        w(reply);
-      }
-    });
-  }
-  send(command: string): Promise<string> {
-    return new Promise((resolve) => {
-      this.waiting = resolve;
-      this.socket.write(`${command}\0`);
-    });
-  }
-}
-
-async function daemon(conf: Record<string, string | number>): Promise<{ proc: ChildProcess; control: Controller; close: () => void }> {
-  const [cmd, fb] = [await freePort(), await freePort()];
-  const dir = mkdtempSync(join(scratch, "hostd-"));
-  const file = join(dir, "plugin-hostd.conf");
-  writeFileSync(file, Object.entries(conf).map(([k, v]) => `${k} ${v}`).join("\n") + "\n");
-  const proc = spawn(HOSTD!, ["-n", "-p", String(cmd), "-f", String(fb), "-c", file], { stdio: ["ignore", "pipe", "inherit"] });
-  await new Promise<void>((resolve, reject) => {
-    proc.once("error", reject);
-    proc.once("exit", (code) => reject(new Error(`plugin-hostd exited ${String(code)} before it was ready`)));
-    proc.stdout!.on("data", (d: Buffer) => {
-      if (d.toString().includes("plugin-hostd ready!")) resolve();
-    });
-  });
-  const sockets = [createConnection(fb, "127.0.0.1"), createConnection(cmd, "127.0.0.1")];
-  await Promise.all(sockets.map((s) => new Promise<void>((resolve) => s.once("connect", () => resolve()))));
-  return {
-    proc,
-    control: new Controller(sockets[1]!),
-    close: () => {
-      for (const s of sockets) s.destroy();
-      proc.removeAllListeners("exit");
-      proc.kill("SIGTERM");
-    },
-  };
-}
+const daemon = (conf: Record<string, string | number>) => startDaemon(HOSTD!, scratch, conf);
 
 describe("plugin-hostd on the file, with require_pins on and no pin_set", () => {
   it("adds the qualified plugin, and refuses it with -509 when one hash of the file is corrupt", async (ctx) => {
