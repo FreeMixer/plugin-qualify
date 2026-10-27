@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * HOST ADMISSION — a `mod-host` or `jalv` verdict is MEASURED by running the plugin under that host,
- * one admission per plugin, not judged from a declaration. mod-host: `add`, `activate`, `remove` on
+ * one admission per plugin, not judged from a declaration. mod-host: `add`, `remove` on
  * its socket, a fresh host after any death (`tools/mod-host-admit.mjs` does the run and prints what
  * happened; one line of JSON). jalv: `jalv -n <name> <uri>` headless, hosted when it is still alive
  * at the deadline. The classifiers here are pure: what the host answered goes in, a {@link HostAdmission}
@@ -45,7 +45,7 @@ const notInstalled = (host: AdmittedHost): HostAdmission => ({ host, measured: f
 
 /** One command mod-host was sent and what came of it: its `resp` number, or how the host died. */
 export interface ModHostStep {
-  readonly cmd: "add" | "activate" | "remove";
+  readonly cmd: "add" | "remove";
   readonly resp?: number;
   /** The signal that killed the host, or `exit` / `closed` when it went without one. */
   readonly died?: string;
