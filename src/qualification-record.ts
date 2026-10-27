@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { Adjustment } from "./history-adjust.js";
 import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
@@ -31,9 +32,59 @@ export interface RecordVerdict {
   readonly rating: string;
   readonly qualified: boolean;
   readonly hosting: "in-process" | "isolated";
+  /** `run` when the plugin was run under this host (`jalv`, `mod-host`), `declaration` when the verdict is what the profile's declaration makes of the probe output. */
+  readonly arm: "run" | "declaration";
   /** The code that decided it; absent for `suitable`. */
   readonly deciding?: string;
   readonly reasons: readonly RecordReason[];
+}
+
+/** One tier of the console as a verdict: the host it is judged under and whether the plugin qualified there. */
+export interface TierVerdict {
+  readonly host: string;
+  readonly measured: boolean;
+  readonly qualified: boolean;
+  readonly rating: string;
+  readonly deciding?: string;
+}
+
+/** The console's two tiers (what the console's roster offers): offered where the verdict qualified, dimmed with the reason when neither did. */
+export interface RecordTiers {
+  readonly inProcess?: TierVerdict;
+  readonly isolated?: TierVerdict;
+  readonly offeredOn: readonly ("in-process" | "isolated")[];
+  /** Why the plugin is offered on neither tier: the deciding codes, in-process first. */
+  readonly dimmed?: string;
+}
+
+/** The profile each format's isolated tier is judged under. */
+export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "mod-host", clap: "omx-clap-host" };
+export const IN_PROCESS_TIER_HOST = "openmixer-console";
+
+/**
+ * What the running history made of the measured verdicts, for one host class: the second verdict beside the measured one.
+ * Written by `plugin-qualify adjust --history`; the measured `verdicts` above are never changed by it. A record without the
+ * block was never adjusted.
+ */
+export interface HistoryBlock {
+  /** The machine class of the history's lines, `arch/cores/clock`. */
+  readonly hostClass: string;
+  /** The history file as it was named. */
+  readonly file: string;
+  /** The UTC time the history was read at (ISO 8601). */
+  readonly at: string;
+  /** The line looked for: plugin-hostd's uri and the digest of the first file of the pin; absent when the record holds no whole pin. */
+  readonly key?: { readonly uri: string; readonly digest: string };
+  /** Whether the history holds a line of this plugin binary on this host class. */
+  readonly found: boolean;
+  /** The windows the line counts. */
+  readonly windows?: { readonly solo: number; readonly grouped: number };
+  /** What plugin-hostd's `history_get` would answer of the line. */
+  readonly summary?: { readonly crashed: boolean; readonly raisesXruns: boolean };
+  /** The keys of the line this tool does not know, as written. */
+  readonly unknownKeys?: Readonly<Record<string, string>>;
+  /** One per host profile adjusted: the measured pin verdict, the adjusted one, the move and the reason code. */
+  readonly verdicts: readonly ({ readonly host: string } & Adjustment)[];
 }
 
 export interface QualificationRecord {
@@ -43,6 +94,7 @@ export interface QualificationRecord {
   readonly testedVersion?: string;
   readonly binary: ProbeOutput["binary"];
   readonly verdicts: readonly RecordVerdict[];
+  readonly tiers: RecordTiers;
   /** The cost reasons at each host's rate and quantum, beside the verdicts; an instrument's with the notes it held. */
   readonly cost: readonly {
     readonly host: string;
@@ -61,6 +113,8 @@ export interface QualificationRecord {
   /** Who measured and when. */
   readonly tool: Readonly<Record<string, string>>;
   readonly measuredAt: string;
+  /** The second verdict, per host class of the history that was read; absent until `adjust --history` has run. */
+  readonly history?: readonly HistoryBlock[];
   /** The probe output this record judged. */
   readonly probe: {
     readonly file: string;
@@ -92,6 +146,28 @@ export function qualificationBaseName(output: ProbeOutput): string {
 export const recordFileName = (output: ProbeOutput): string => `${qualificationBaseName(output)}.qualification.json`;
 export const probeCopyFileName = (output: ProbeOutput): string => `${qualificationBaseName(output)}.probe.json`;
 
+function tierOf(judgment: Judgment, host: string | undefined): TierVerdict | undefined {
+  const v = judgment.hosts.find((h) => h.verdict.host === host)?.verdict;
+  if (v === undefined) return undefined;
+  return { host: v.host, measured: v.measured, qualified: v.qualified, rating: v.rating, ...(v.deciding === undefined ? {} : { deciding: v.deciding }) };
+}
+
+/** The console's two tiers from the verdicts the judgment holds. A tier no profile judged is absent, and is not offered. */
+export function tiersOf(judgment: Judgment): RecordTiers {
+  const inProcess = tierOf(judgment, IN_PROCESS_TIER_HOST);
+  const isolated = tierOf(judgment, ISOLATED_TIER_HOST[judgment.output.plugin.format]);
+  const offeredOn: ("in-process" | "isolated")[] = [];
+  if (inProcess?.qualified === true) offeredOn.push("in-process");
+  if (isolated?.qualified === true) offeredOn.push("isolated");
+  const why = [inProcess, isolated].flatMap((t) => (t === undefined ? [] : [`${t.host}: ${t.deciding ?? t.rating}`]));
+  return {
+    ...(inProcess === undefined ? {} : { inProcess }),
+    ...(isolated === undefined ? {} : { isolated }),
+    offeredOn,
+    ...(offeredOn.length === 0 ? { dimmed: why.length === 0 ? "no tier was judged" : why.join("; ") } : {}),
+  };
+}
+
 export function buildQualificationRecord(
   judgment: Judgment,
   copy: { file: string; sha256: string; bytes: number },
@@ -109,9 +185,11 @@ export function buildQualificationRecord(
       rating: h.verdict.rating,
       qualified: h.verdict.qualified,
       hosting: h.hosting,
+      arm: h.arm,
       ...(h.verdict.deciding === undefined ? {} : { deciding: h.verdict.deciding }),
       reasons: h.reasons,
     })),
+    tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
     measurements: { grid: o.grid, ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }) },
     ...(notMeasured.length === 0 ? {} : { notMeasured }),
@@ -134,6 +212,11 @@ export function buildQualificationRecord(
 /** The record of a judgment, with the copy fields taken from the bytes that were judged. */
 export function qualificationRecordOf(probeBytes: Uint8Array, judgment: Judgment): QualificationRecord {
   return buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(probeBytes), bytes: probeBytes.length });
+}
+
+/** The record rewritten whole or not at all, with its `history` block; nothing else in it is changed by the caller. */
+export function rewriteRecord(path: string, record: QualificationRecord): void {
+  writeFileWhole(path, `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export interface WrittenQualification {
@@ -161,4 +244,26 @@ export function writeQualification(
   const recordPath = join(dir, recordFileName(judgment.output));
   writeFileWhole(recordPath, `${JSON.stringify(record, null, 2)}\n`);
   return { recordPath, probePath, record };
+}
+
+/**
+ * Runs that name the same binary and offer share one record file (a CLAP judged with and without the extra extensions
+ * offered): their verdicts become one record over the first run's probe output, so the second is never written over the first.
+ */
+export function mergeRunsByRecord<T extends { readonly bytes: Uint8Array; readonly judgment: Judgment }>(runs: readonly T[]): { bytes: Uint8Array; judgment: Judgment }[] {
+  const byName = new Map<string, { bytes: Uint8Array; judgment: Judgment }>();
+  for (const r of runs) {
+    const name = qualificationBaseName(r.judgment.output);
+    const first = byName.get(name);
+    byName.set(
+      name,
+      first === undefined
+        ? r
+        : {
+            bytes: first.bytes,
+            judgment: { ...first.judgment, hosts: [...first.judgment.hosts, ...r.judgment.hosts], documents: [...first.judgment.documents, ...r.judgment.documents] },
+          },
+    );
+  }
+  return [...byName.values()];
 }

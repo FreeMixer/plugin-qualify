@@ -27,3 +27,7 @@ export * from "./probe-runner.js";
 export * from "./judge-cli.js";
 export * from "./whole-file.js";
 export * from "./qualify-sync.js";
+export * from "./host-admission.js";
+export * from "./history-file.js";
+export * from "./history-adjust.js";
+export * from "./adjust-cli.js";
