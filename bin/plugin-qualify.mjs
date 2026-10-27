@@ -22,6 +22,7 @@ import {
   defaultQualificationDir,
   judgeExitCode,
   judgeFiles,
+  mergeRunsByRecord,
   judgeHelpText,
   parseJudgeArgs,
   discoverAllTargets,
@@ -132,7 +133,7 @@ if (parsed.args.all) {
 const pass = qualifyTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
 for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
 if (parsed.args.out !== undefined) {
-  for (const run of pass.runs) {
+  for (const run of mergeRunsByRecord(pass.runs)) {
     const w = writeQualification(parsed.args.out, run.bytes, run.judgment);
     process.stderr.write(`plugin-qualify: record ${w.recordPath}\n`);
   }

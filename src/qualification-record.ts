@@ -196,3 +196,25 @@ export function writeQualification(dir: string, probeBytes: Uint8Array, judgment
   writeWhole(recordPath, `${JSON.stringify(record, null, 2)}\n`);
   return { recordPath, probePath, record };
 }
+
+/**
+ * Runs that name the same binary and offer share one record file (a CLAP judged with and without the extra extensions
+ * offered): their verdicts become one record over the first run's probe output, so the second is never written over the first.
+ */
+export function mergeRunsByRecord<T extends { readonly bytes: Uint8Array; readonly judgment: Judgment }>(runs: readonly T[]): { bytes: Uint8Array; judgment: Judgment }[] {
+  const byName = new Map<string, { bytes: Uint8Array; judgment: Judgment }>();
+  for (const r of runs) {
+    const name = qualificationBaseName(r.judgment.output);
+    const first = byName.get(name);
+    byName.set(
+      name,
+      first === undefined
+        ? r
+        : {
+            bytes: first.bytes,
+            judgment: { ...first.judgment, hosts: [...first.judgment.hosts, ...r.judgment.hosts], documents: [...first.judgment.documents, ...r.judgment.documents] },
+          },
+    );
+  }
+  return [...byName.values()];
+}
