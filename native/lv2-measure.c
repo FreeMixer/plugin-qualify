@@ -8,6 +8,8 @@
  * this program's whole job to replace it with numbers. It reports, per plugin:
  *
  *   features   required/optional LV2 features and CV ports, read from the bundle
+ *   latency    at the run's rate, what the plugin reports and what an impulse (or, for an instrument, a note) measures
+ *   cost       at the run's rate, nanoseconds per sample with every control swept and noise in
  *   rtSafety   allocations, locks and syscalls counted INSIDE run(), under a sweep; for a plugin
  *              with a MIDI input, the same counted apart while it is played (the note sweep)
  *   stability  instantiate/destroy lifecycles, and threads the plugin leaves behind
@@ -75,6 +77,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <lilv/lilv.h>
@@ -157,6 +160,7 @@ struct host {
   int n_params;
   int patch_port; /* the atom input that takes patch:Set, or -1 */
   int midi_port;  /* the atom input that takes midi:MidiEvent, or -1 */
+  int latency_port; /* the control output that reports the plugin's latency (lv2:designation lv2:latency, or the older lv2:reportsLatency), or -1 */
   LV2_URID_Map map; /* the provider's one URI table, for the forge */
   LV2_URID u_float, u_int, u_bool, u_long, u_double;
   LV2_URID u_chunk, u_sequence, u_patch_set, u_patch_prop, u_patch_val, u_midi;
@@ -194,6 +198,9 @@ struct rig {
   int patch_live, pcursor;
   /* the note sweep's block this block plays, or -1 for none */
   int note_block;
+  /* the latency and cost passes' own note: 0 none, 1 one key struck, 2 that key let go, 3 `held` keys struck */
+  int probe_note;
+  uint32_t held;
 };
 
 static LV2_Worker_Status schedule_work(LV2_Worker_Schedule_Handle handle, uint32_t size, const void *data) {
@@ -253,6 +260,7 @@ static int host_open(struct host *h, LilvWorld *world, const LilvPlugin *plugin)
   h->sweep_ratio = env_or("OMX_SWEEP_RATIO", SWEEP_RATIO_DEFAULT);
   h->patch_port = -1;
   h->midi_port = -1;
+  h->latency_port = lilv_plugin_has_latency(plugin) ? (int)lilv_plugin_get_latency_port_index(plugin) : -1;
   lv2_atom_forge_init(&h->forge, &h->map);
 
   LilvNode *audio_class = lilv_new_uri(world, LV2_CORE__AudioPort);
@@ -574,19 +582,43 @@ static void forge_note_block(struct rig *r, uint32_t b, uint32_t frames) {
   }
 }
 
+/* the latency pass's note (A4, as the CLAP prober plays it), and the cost pass's held keys spread across a piano */
+#define PROBE_NOTE_KEY 69
+#define PIANO_LOW_KEY 21
+#define PIANO_HIGH_KEY 108
+#define PIANO_KEYS 88u
+#define MIDI_KEYS 128u
+
+static uint8_t held_key(uint32_t i, uint32_t n) {
+  if (n <= 1) return PROBE_NOTE_KEY;
+  const uint32_t low = n <= PIANO_KEYS ? PIANO_LOW_KEY : 0, high = n <= PIANO_KEYS ? PIANO_HIGH_KEY : MIDI_KEYS - 1;
+  return (uint8_t)(low + i * (high - low) / (n - 1));
+}
+
+static void forge_probe_or_note_block(struct rig *r) {
+  switch (r->probe_note) {
+  case 1: forge_midi(r, 0, 0x90, PROBE_NOTE_KEY, 127); break;
+  case 2: forge_midi(r, 0, 0x80, PROBE_NOTE_KEY, 0); break;
+  case 3:
+    for (uint32_t k = 0; k < r->held; k++) forge_midi(r, 0, 0x90, held_key(k, r->held), 127);
+    break;
+  default: forge_note_block(r, (uint32_t)r->note_block, r->block); break;
+  }
+}
+
 /* One atom input's sequence for this block: patch:Set when it takes them and the sweep moved one, then the note
  * sweep's events when it takes MIDI and the block plays one (the patch events at frame 0 come first). */
 static void forge_port(struct rig *r, int port) {
   struct host *h = r->h;
   const int patch = port == h->patch_port && r->patch_live && h->n_params > 0;
-  const int notes = port == h->midi_port && r->note_block >= 0;
+  const int notes = port == h->midi_port && (r->note_block >= 0 || r->probe_note != 0);
   if (!patch && !notes) return;
   LV2_Atom_Forge *f = &h->forge;
   lv2_atom_forge_set_buffer(f, r->atoms[port], atom_cap(h, (uint32_t)port));
   LV2_Atom_Forge_Frame seq;
   lv2_atom_forge_sequence_head(f, &seq, 0);
   if (patch) forge_patch(r);
-  if (notes) forge_note_block(r, (uint32_t)r->note_block, r->block);
+  if (notes) forge_probe_or_note_block(r);
   lv2_atom_forge_pop(f, &seq);
 }
 
@@ -815,6 +847,241 @@ static void release(struct host *h, LilvNodes *required, LilvNodes *optional, Li
   lilv_world_free(world);
 }
 
+/* ---- latency and cost, per rate -----------------------------------------------------------------
+ *
+ * The CLAP prober's definitions (native/clap-qualify.c measure_rate and cost_rate), in LV2's host, so a
+ * record holds the same two figures whichever format the plugin is:
+ *
+ *   latency  declaredFrames: what the plugin reports itself, read from its latency port (lv2:designation
+ *            lv2:latency, or the older lv2:reportsLatency) after a block has run; 0 when it has no such port, said by
+ *            declaredFrom. measuredFrames: an impulse of 1.0 at frame 0 of every audio input at the control
+ *            defaults, the response kept as the loudest output at each frame up to the declared figure plus
+ *            LATENCY_TAIL, and the arrival read as the first frame at or above LATENCY_ONSET_OF_PEAK of the
+ *            response's own peak. An instrument (no audio input, a MIDI input) is played A4 at velocity 127
+ *            at frame 0 instead and let go at the end (`from: note`). A response that never leaves silence
+ *            has no measured figure: it says why, never a guessed 0.
+ *   cost     every control swept across its range, noise on every audio input, each run() timed alone: the
+ *            warm-up head dropped, nanoseconds per sample, the median and the 95th percentile. An instrument
+ *            holds OMX_PROBE_NOTES keys down; given none it is not timed and says why (the CLAP prober's
+ *            --probe-notes).
+ *
+ * Both are taken at the run's rate (the positional argument) and its block, the rate and block of the grid point the
+ * rt-safety counts are, so a point of the record holds the three together.
+ */
+#define LATENCY_TAIL 8192u
+#define LATENCY_SILENCE 1e-6f
+#define LATENCY_ONSET_OF_PEAK 1e-3f
+#define LATENCY_DECLARED_MAX (1u << 20)
+#define COST_WARMUP_BLOCKS 64u
+#define COST_BLOCKS 512u
+#define COST_PERCENTILE 95.0
+
+struct latency_at {
+  const char *unmeasured; /* NULL when measured: a word of the contract's unmeasured reasons */
+  const char *detail;
+  uint32_t declared, measured;
+  int declared_from_port, by_note;
+};
+
+struct cost_at {
+  const char *unmeasured; /* NULL when measured */
+  const char *detail;
+  double median, p95, min, max, warmup_median;
+  uint32_t blocks, held;
+};
+
+static int64_t now_ns(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &t);
+  return (int64_t)t.tv_sec * 1000000000 + t.tv_nsec;
+}
+
+static int by_value(const void *a, const void *b) {
+  const double x = *(const double *)a, y = *(const double *)b;
+  return x < y ? -1 : x > y;
+}
+
+/* the linear-interpolated percentile of n sorted values (numpy's default, the CLAP prober's) */
+static double percentile_sorted(const double *v, uint32_t n, double pct) {
+  if (n == 1) return v[0];
+  const double pos = (double)(n - 1) * pct / 100.0;
+  const uint32_t low = (uint32_t)pos, high = low + 1 < n ? low + 1 : n - 1;
+  return v[low] + (v[high] - v[low]) * (pos - (double)low);
+}
+
+static void zero_inputs(struct rig *r) {
+  for (uint32_t k = 0; k < r->h->n_audio_in; k++) memset(rig_in(r, k), 0, r->block * sizeof(float));
+}
+
+static void measure_latency(struct host *H, double rate, uint32_t block, struct latency_at *L) {
+  memset(L, 0, sizeof *L);
+  L->declared_from_port = H->latency_port >= 0;
+  L->by_note = H->n_audio_in == 0 && H->midi_port >= 0;
+  if (H->n_audio_out == 0) {
+    L->unmeasured = "no-audio-out", L->detail = "the plugin has no audio output to read a response from";
+    return;
+  }
+  if (H->n_audio_in == 0 && !L->by_note) {
+    L->unmeasured = "no-audio-in", L->detail = "no audio input to put an impulse in and no MIDI input to play";
+    return;
+  }
+  struct rig *r = rig_open(H, rate, block, 1);
+  const size_t cap = (size_t)LATENCY_DECLARED_MAX + LATENCY_TAIL + block;
+  float *mag = r ? calloc(cap, sizeof *mag) : NULL;
+  if (r == NULL || mag == NULL) {
+    L->unmeasured = r == NULL ? "refused-instantiation" : "probe-error";
+    L->detail = r == NULL ? "the plugin would not instantiate for the latency run" : "out of memory for the response";
+    free(mag);
+    if (r != NULL) lilv_instance_free(r->inst);
+    rig_close(r);
+    return;
+  }
+  lilv_instance_activate(r->inst);
+  uint32_t horizon = LATENCY_TAIL;
+  int nonfinite = 0;
+  for (uint32_t base = 0; base < horizon && !L->unmeasured; base += block) {
+    zero_inputs(r);
+    if (base == 0)
+      for (uint32_t k = 0; k < H->n_audio_in; k++) rig_in(r, k)[0] = 1.0f;
+    r->probe_note = L->by_note ? (base == 0 ? 1 : (base + block >= horizon ? 2 : 0)) : 0;
+    rig_prepare(r);
+    lilv_instance_run(r->inst, block);
+    rig_after(r);
+    if (H->latency_port >= 0) {
+      /* the port is written by run(): its value is read after the block, and moves the horizon with it */
+      const float v = r->controls[H->latency_port];
+      if (!isfinite(v) || v < 0.0f || v > (float)LATENCY_DECLARED_MAX) {
+        L->unmeasured = "probe-error", L->detail = "the latency port reports a value that is no frame count";
+        break;
+      }
+      L->declared = (uint32_t)(v + 0.5f);
+      horizon = L->declared + LATENCY_TAIL;
+    }
+    const float *o = rig_out(r);
+    for (uint32_t i = 0; i < block && base + i < cap; i++)
+      for (uint32_t c = 0; c < H->n_audio_out; c++) {
+        const float x = o[(size_t)c * block + i];
+        if (!isfinite(x)) {
+          nonfinite = 1;
+          continue;
+        }
+        if (fabsf(x) > mag[base + i]) mag[base + i] = fabsf(x);
+      }
+    if (nonfinite) L->unmeasured = "non-finite-output", L->detail = "the response held a NaN or an infinity";
+  }
+  if (!L->unmeasured) {
+    float peak = 0.0f;
+    for (uint32_t i = 0; i < horizon; i++)
+      if (mag[i] > peak) peak = mag[i];
+    const float floor = peak * LATENCY_ONSET_OF_PEAK > LATENCY_SILENCE ? peak * LATENCY_ONSET_OF_PEAK : LATENCY_SILENCE;
+    uint32_t seen_at = UINT32_MAX;
+    for (uint32_t i = 0; i < horizon && peak > LATENCY_SILENCE; i++)
+      if (mag[i] >= floor) {
+        seen_at = i;
+        break;
+      }
+    if (seen_at == UINT32_MAX) {
+      L->unmeasured = "silent-output";
+      L->detail = L->by_note ? "the note never sounded within the declared latency and the tail" : "the impulse never came out within the declared latency and the tail";
+    } else {
+      L->measured = seen_at;
+    }
+  }
+  lilv_instance_deactivate(r->inst);
+  lilv_instance_free(r->inst);
+  rig_close(r);
+  free(mag);
+}
+
+static void measure_cost(struct host *H, double rate, uint32_t block, struct cost_at *C) {
+  memset(C, 0, sizeof *C);
+  const int instrument = H->n_audio_in == 0 && H->midi_port >= 0;
+  if (instrument) {
+    const char *n = getenv("OMX_PROBE_NOTES");
+    const long held = n ? atol(n) : 0;
+    if (held <= 0) {
+      C->unmeasured = "voices-unknown", C->detail = "an instrument with no probe count (OMX_PROBE_NOTES) to hold: no note was held down";
+      return;
+    }
+    C->held = held > (long)MIDI_KEYS ? MIDI_KEYS : (uint32_t)held;
+  }
+  struct rig *r = rig_open(H, rate, block, 1);
+  const uint32_t total = COST_WARMUP_BLOCKS + COST_BLOCKS;
+  double *ns = r ? calloc(total, sizeof *ns) : NULL;
+  if (r == NULL || ns == NULL) {
+    C->unmeasured = r == NULL ? "refused-instantiation" : "probe-error";
+    C->detail = r == NULL ? "the plugin would not instantiate for the cost run" : "out of memory for the block times";
+    free(ns);
+    if (r != NULL) lilv_instance_free(r->inst);
+    rig_close(r);
+    return;
+  }
+  lilv_instance_activate(r->inst);
+  unsigned seed = 0x636f73u;
+  for (uint32_t b = 0; b < total; b++) {
+    rig_sweep(r, (float)((b * 7u) % 101u) / 100.0f, 0);
+    for (uint32_t k = 0; k < H->n_audio_in; k++) {
+      float *in = rig_in(r, k);
+      for (uint32_t i = 0; i < block; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        in[i] = ((float)(seed >> 8) / 16777216.0f - 0.5f) * 0.5f;
+      }
+    }
+    r->probe_note = instrument && b == 0 ? 3 : 0;
+    r->held = C->held;
+    rig_prepare(r);
+    const int64_t t0 = now_ns();
+    lilv_instance_run(r->inst, block);
+    ns[b] = (double)(now_ns() - t0) / (double)block;
+    rig_after(r);
+  }
+  lilv_instance_deactivate(r->inst);
+  lilv_instance_free(r->inst);
+  rig_close(r);
+  double *warm = ns, *timed = ns + COST_WARMUP_BLOCKS;
+  qsort(warm, COST_WARMUP_BLOCKS, sizeof *warm, by_value);
+  qsort(timed, COST_BLOCKS, sizeof *timed, by_value);
+  C->warmup_median = percentile_sorted(warm, COST_WARMUP_BLOCKS, 50.0);
+  C->median = percentile_sorted(timed, COST_BLOCKS, 50.0);
+  C->p95 = percentile_sorted(timed, COST_BLOCKS, COST_PERCENTILE);
+  C->min = timed[0];
+  C->max = timed[COST_BLOCKS - 1];
+  C->blocks = COST_BLOCKS;
+  free(ns);
+}
+
+/* the latency map, in the shape the CLAP prober's line has: per rate, what the plugin reports and what was measured */
+static void emit_latency(double rate, const struct latency_at *L) {
+  fprintf(jout, ",\"latency\":{\"%.0f\":{\"declaredFrames\":%u,\"declaredFrom\":\"%s\"", rate, L->declared, L->declared_from_port ? "port" : "none");
+  if (!L->unmeasured) fprintf(jout, ",\"measuredFrames\":%u", L->measured);
+  if (L->by_note) fprintf(jout, ",\"from\":\"note\"");
+  if (L->unmeasured) {
+    fprintf(jout, ",\"unmeasuredReason\":");
+    json_str(jout, L->unmeasured);
+    fprintf(jout, ",\"unmeasuredDetail\":");
+    json_str(jout, L->detail);
+  }
+  fprintf(jout, "}}");
+}
+
+/* the cost object, in the shape the CLAP prober's line has */
+static void emit_cost(double rate, const struct cost_at *C, uint32_t block, int instrument) {
+  fprintf(jout, ",\"cost\":{\"stimulus\":\"%s\",\"blockFrames\":%u,\"warmupBlocks\":%u,\"percentile\":%.0f,\"perRate\":{\"%.0f\":{",
+          instrument ? "notes-held" : "noise", block, COST_WARMUP_BLOCKS, COST_PERCENTILE, rate);
+  if (C->unmeasured) {
+    fprintf(jout, "\"unmeasuredReason\":");
+    json_str(jout, C->unmeasured);
+    fprintf(jout, ",\"unmeasuredDetail\":");
+    json_str(jout, C->detail);
+  } else {
+    fprintf(jout, "\"nsPerSampleMedian\":%.6g,\"nsPerSampleP95\":%.6g,\"nsPerSampleMin\":%.6g,\"nsPerSampleMax\":%.6g,"
+                  "\"warmupNsPerSampleMedian\":%.6g,\"blocks\":%u",
+            C->median, C->p95, C->min, C->max, C->warmup_median, C->blocks);
+  }
+  if (instrument && C->held) fprintf(jout, ",\"voices\":{\"held\":%u,\"basis\":\"probe\"}", C->held);
+  fprintf(jout, "}}}");
+}
+
 static void usage(FILE *out, const char *self) {
   fprintf(out,
           "usage: %s [flags] <plugin-uri> [rate] [block] [cycles] [repeats]\n"
@@ -937,7 +1204,7 @@ int main(int argc, char **argv) {
     H->required = calloc(n + 1, sizeof *H->required);
     LILV_FOREACH (nodes, i, required) if (H->required) H->required[k++] = lilv_node_as_uri(lilv_nodes_get(required, i));
   }
-  const uint32_t n_ports = H->n_ports, n_audio_in = H->n_audio_in, n_audio_out = H->n_audio_out;
+  const uint32_t n_audio_in = H->n_audio_in, n_audio_out = H->n_audio_out;
   const uint32_t n_cv = H->n_cv, n_control_in = H->n_control_in;
 
   /* ---- SOAK MODE ----------------------------------------------------------
@@ -1239,7 +1506,7 @@ int main(int argc, char **argv) {
   for (size_t ri = 0; ri < OMX_DECLARED_RATE_COUNT; ri++) {
     const double r = OMX_DECLARED_RATES[ri];
     int ok = 0, nonfinite = 0;
-    double lat_frames = -1.0, rms_out = -1.0;
+    double rms_out = -1.0;
     struct rig *pr = rig_open(H, r, block, 1);
     if (pr != NULL) {
       lilv_instance_activate(pr->inst);
@@ -1261,14 +1528,6 @@ int main(int argc, char **argv) {
           }
         }
       }
-      /* The plugin's own reported latency, if it publishes one. */
-      for (uint32_t i = 0; i < n_ports; i++) {
-        if (H->pk[i] != PK_CONTROL_OUT) continue;
-        const LilvPort *port = lilv_plugin_get_port_by_index(plugin, i);
-        LilvNode *dn = lilv_port_get_name(plugin, port);
-        if (dn && strcasestr(lilv_node_as_string(dn), "latency")) lat_frames = pr->controls[i];
-        if (dn) lilv_node_free(dn);
-      }
       rms_out = n_audio_out ? sqrt(sum / ((double)(probe_blocks - probe_settle) * block)) : -1.0;
       /* An ABSOLUTE silence threshold cannot see AmpVTS: it reads 1.07e-5 at 96 kHz,
        * quiet enough to be useless and loud enough to pass any fixed floor. The
@@ -1279,13 +1538,23 @@ int main(int argc, char **argv) {
       lilv_instance_free(pr->inst);
       rig_close(pr);
     }
-    fprintf(jout, "%s\"%.0f\":{\"instantiated\":%s,\"nonFinite\":%s,\"latencyFrames\":%.0f,"
+    fprintf(jout, "%s\"%.0f\":{\"instantiated\":%s,\"nonFinite\":%s,"
            "\"rms\":%.9g,\"rmsDbfs\":%.2f}",
            ri ? "," : "", r, ok ? "true" : "false",
-           nonfinite ? "true" : "false", lat_frames, rms_out,
+           nonfinite ? "true" : "false", rms_out,
            rms_out > 0 ? omx_lin_to_db_d(rms_out, 0.0) : -999.0);
   }
   fprintf(jout, "}");
+
+  /* ---- latency and cost at the run's rate and block (see the passes above) ---- */
+  {
+    struct latency_at lat;
+    struct cost_at cost;
+    measure_latency(H, rate, block, &lat);
+    measure_cost(H, rate, block, &cost);
+    emit_latency(rate, &lat);
+    emit_cost(rate, &cost, block, n_audio_in == 0 && H->midi_port >= 0);
+  }
   emit_host_facts(H);
   emit_feature_options();
   fprintf(jout, "}\n");
