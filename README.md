@@ -404,6 +404,55 @@ a last word: the SHA-256 of every file the host loads, the parameter-layout fing
 file in plugin-hostd's settings as `pin_file` and an `add` of that plugin needs no `pin_set`; a changed file is refused
 with -509. The verdict is the first `--host-profile`'s. A run that took no pin leaves an existing file alone.
 
+### Qualifying every plugin on a machine
+
+`plugin-qualify-sync` qualifies every plugin installed on the machine, and again each one whose files
+change. With its pin file in plugin-hostd's settings, the daemon runs in its default mode (`require_pins 1`)
+and chains any plugin that qualified, the image's own and any installed later:
+
+```
+pin_file /var/lib/omx/qualified.pins          # in plugin-hostd.conf
+```
+
+The package ships it as a service that runs two minutes after boot and whenever a plugin directory
+changes, once the directory has been quiet for a minute. A run finds every `.clap` under the CLAP
+directories and every plugin of every bundle under the LV2 ones, and hashes each one's files as
+plugin-hostd does for a pin. A plugin whose files hash as recorded is skipped. A new or changed one gets the
+quick qualification through the probe runner: its pin, the RT-safety sweep, cost and latency, its
+qualification record and its descriptor. The soak is not part of it, and every record it writes says so in
+`notMeasured` (`hosting.stability.unsoaked`).
+
+Each plugin has `budget_s` seconds. One that crashes or hangs is recorded as `crashed` or `hung`, one that
+fails the sweep is pinned `verdict=refused`, and the run goes on to the next. The pin file and the state are
+written whole after every plugin, so a run cut short keeps what it finished. The last line counts the run:
+
+```
+qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, 4.6 s
+```
+
+When plugin-hostd answers on `hostd_port`, the changed pins are also sent to it with `pin_set` and apply at
+once. plugin-hostd serves one controller at a time, so while one is connected the run says so and the pins
+apply at the daemon's next start.
+
+The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is also a flag
+(`--budget-s 30`):
+
+| key | default |
+| --- | --- |
+| `lv2_path` | `$LV2_PATH`, else plugin-hostd's: `/usr/lib64/lv2:/usr/lib/lv2:/usr/local/lib/lv2` |
+| `lv2_extra` | `/zynthian/zynthian-plugins/lv2:/zynthian/zynthian-my-data/plugins/lv2` |
+| `clap_path`, `clap_extra` | `$CLAP_PATH`, then `~/.clap`, then `/usr/lib/clap`; none |
+| `pin_file` | `/var/lib/omx/qualified.pins` |
+| `qualification_dir`, `descriptor_dir` | `/var/lib/omx/qualification`, `/var/lib/omx/descriptors` |
+| `state_file` | `/var/lib/omx/qualify-sync.json` |
+| `budget_s` | `60` |
+| `host_profile` | `omx-clap-host` |
+| `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
+
+Those are the service's (`--system`); run by a user, the files go under `$XDG_STATE_HOME/omx`. An LV2
+directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
+pinned. `--force` qualifies everything again.
+
 ### The container image
 
 ```

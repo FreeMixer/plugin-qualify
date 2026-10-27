@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 
 import type { RtSafetyDocument } from "./clap-qualify.js";
 import type { IntegrityMeasurement, MeasuredPlugin } from "./measurement/format.js";
+import { integrityOfProbeOutput, type Judgment } from "./probe-judge.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import type { SuitabilityRating } from "./rating.js";
 
@@ -86,11 +87,11 @@ export interface PinsFile {
 }
 
 /**
- * The file: a comment that says where it came from, then one line per plugin, sorted by uri. A uri given twice keeps
+ * The file: a comment that says which command wrote it, then one line per plugin, sorted by uri. A uri given twice keeps
  * the entry whose verdict is the worse one (`refused` over `isolated` over `in-process`, no word over all), so a
  * plugin found twice is never pinned more kindly than its worst measurement.
  */
-export function pinsFile(entries: readonly PinEntry[]): PinsFile {
+export function pinsFile(entries: readonly PinEntry[], writer = "plugin-qualify --pins"): PinsFile {
   const byUri = new Map<string, string>();
   const verdictOf = new Map<string, PinVerdict | undefined>();
   const skipped: string[] = [];
@@ -114,7 +115,7 @@ export function pinsFile(entries: readonly PinEntry[]): PinsFile {
   }
   const uris = [...byUri.keys()].sort();
   const text = [
-    "# written by plugin-qualify --pins; plugin-hostd reads it with pin_file",
+    `# written by ${writer}; plugin-hostd reads it with pin_file`,
     ...uris.map((u) => byUri.get(u)!),
     "",
   ].join("\n");
@@ -136,6 +137,19 @@ export function clapPinEntries(documents: readonly RtSafetyDocument[], host: str
         ...(verdict === undefined ? {} : { verdict }),
       };
     });
+}
+
+/**
+ * The entry of one judged probe output for one host, CLAP or LV2: the pin the run took and the verdict that host's
+ * judgment gives it. A run that did not finish has no verdict word; a host the judgment does not hold, no entry.
+ */
+export function judgmentPinEntries(judgment: Judgment, host: string): PinEntry[] {
+  const judged = judgment.hosts.find((h) => h.verdict.host === host);
+  if (judged === undefined) return [];
+  const o = judgment.output;
+  const uri = o.plugin.format === "clap" ? clapPinUri(o.binary.path, `urn:clap:${o.plugin.id}`) : o.plugin.id;
+  const verdict = judged.verdict.measured ? pinVerdictOf(judged.verdict.rating) : undefined;
+  return [{ uri, integrity: integrityOfProbeOutput(o), ...(verdict === undefined ? {} : { verdict }) }];
 }
 
 /**
