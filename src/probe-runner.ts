@@ -19,8 +19,10 @@ import { join } from "node:path";
 import { ClapQualifyError, clapQualifyTools, proberOffer, type RtSafetyDocument } from "./clap-qualify.js";
 import { locateNativeTool } from "./tool-paths.js";
 import type { HostProfile } from "./host-profiles.js";
-import { OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
+import { IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST } from "./qualification-record.js";
 import type { PluginTarget } from "./loader.js";
+import { SPAWNED_ADMISSIONS, admitPlugin, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
@@ -208,16 +210,30 @@ export interface ProbePass {
  */
 export function qualifyTargets(
   targets: readonly PluginTarget[],
-  options: ProbeTargetOptions & { readonly profiles?: readonly HostProfile[] },
+  options: ProbeTargetOptions & { readonly profiles?: readonly HostProfile[]; readonly admissions?: AdmissionRuns },
 ): ProbePass {
   const profiles = options.profiles ?? [OPENMIXER_CONSOLE_PROFILE];
+  const admissionRuns = options.admissions ?? SPAWNED_ADMISSIONS;
   const runs: { bytes: Buffer; judgment: Judgment }[] = [];
   const verdicts: QualifyVerdict[] = [];
   const documents: RtSafetyDocument[] = [];
   const failures: { uri: string; problem: string }[] = [];
   for (const target of targets) {
     const byOffer = new Map<string, { offer: readonly string[]; profiles: HostProfile[] }>();
-    for (const profile of profiles) {
+    // the record carries the console's two tiers whatever hosts were asked about, so they are judged too
+    const tierProfiles = [IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST[target.format]]
+      .flatMap((id) => (id === undefined ? [] : [shippedHostProfile(id)]))
+      .filter((p): p is HostProfile => p !== undefined);
+    const judgedProfiles = [...profiles, ...tierProfiles.filter((t) => !profiles.some((p) => p.id === t.id))];
+    // an LV2 plugin is run under each measured host once, whichever probe output it is judged with
+    const admissions: Record<string, HostAdmission> = {};
+    if (target.format === "lv2") {
+      for (const profile of judgedProfiles) {
+        const host = admittedHostOf(profile);
+        if (host !== undefined) admissions[profile.id] = admitPlugin(host, target.uri, admissionRuns);
+      }
+    }
+    for (const profile of judgedProfiles) {
       const offer = target.format === "clap" ? (proberOffer(profile) ?? []) : [];
       const key = offer.join(",");
       const entry = byOffer.get(key) ?? { offer, profiles: [] };
@@ -231,7 +247,7 @@ export function qualifyTargets(
     try {
       for (const { offer, profiles: forOffer } of byOffer.values()) {
         const probed = probeTarget(target, { ...options, offer });
-        const judgment = judgeProbeOutput(probed.output, forOffer);
+        const judgment = judgeProbeOutput(probed.output, forOffer, { admissions });
         targetRuns.push({ bytes: probed.bytes, judgment });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);
       }
@@ -239,7 +255,13 @@ export function qualifyTargets(
       if (!(e instanceof ProbeRunnerError) && !(e instanceof ClapQualifyError)) throw e;
       failures.push({ uri: target.uri, problem: e.message });
       for (const profile of profiles) {
-        verdicts.push({ uri: target.uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: "not-measured" });
+        // no probe output means no record, but a host that refused the plugin when it was run is still a measured refusal
+        const a = admissions[profile.id];
+        verdicts.push(
+          a !== undefined && a.measured && !a.admitted
+            ? { uri: target.uri, host: profile.id, measured: true, rating: "unsuitable", qualified: false, deciding: a.code ?? `${a.host}.not-admitted` }
+            : { uri: target.uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: "not-measured" },
+        );
       }
       continue;
     }

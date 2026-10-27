@@ -33,6 +33,7 @@ import {
   type HostingReason,
 } from "./hosting-suitability.js";
 import type { HostProfile } from "./host-profiles.js";
+import { admittedHostOf, type HostAdmission } from "./host-admission.js";
 import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
@@ -42,6 +43,11 @@ import type { IntegrityMeasurement, VoicesHeld } from "./measurement/format.js";
 export interface JudgeFacts {
   /** Note input ports the plugin declares. */
   readonly noteInputs?: number;
+  /**
+   * The plugin run under each measured host, by profile id (`host-admission.ts`). A profile that has one is
+   * judged by it as well as by its declaration; one that has none is judged from its declaration alone.
+   */
+  readonly admissions?: Readonly<Record<string, HostAdmission>>;
 }
 
 /** A sum of one count over the points, or `undefined` when a point lacks it: a missing count is not zero. */
@@ -169,6 +175,8 @@ export interface HostJudgment {
   readonly verdict: QualifyVerdict;
   /** In-process only for a suitable plugin on a host that runs its plugins in its own process, else isolated. */
   readonly hosting: "in-process" | "isolated";
+  /** `run` when the plugin was run under this host, `declaration` when the verdict is only what the profile's declaration makes of the probe output. */
+  readonly arm: "run" | "declaration";
   readonly reasons: readonly RecordReason[];
   /**
    * The cost reasons at this host's rate and quantum, kept beside the verdict, not folded into it; for an instrument,
@@ -229,6 +237,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       hosts: profiles.map((profile) => ({
         verdict: { uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: failure },
         hosting: "isolated",
+        arm: "declaration",
         reasons: [reason],
         cost: costOf(output, profile),
       })),
@@ -248,6 +257,21 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       const notes = noteSweepOfProbeOutput(output, rt);
       reasons = [...rtSafetyReasons(rt), ...noteSweepReasons(notes, facts.noteInputs ?? (notes.applicable ? 1 : 0))].map(asRecordReason);
     }
+    const admission = facts.admissions?.[profile.id];
+    if (admission !== undefined && admittedHostOf(profile) !== undefined) {
+      if (!admission.measured || !admission.admitted) {
+        // the host could not be run, or the plugin did not survive it: the run decides, whatever the declaration says
+        const code = admission.code ?? `${admission.host}.not-admitted`;
+        const reason: RecordReason = { dimension: "hostAdmission", rating: admission.measured ? "unsuitable" : "unknown", code, params: admission.params };
+        return {
+          verdict: { uri, host: profile.id, measured: admission.measured, rating: reason.rating, qualified: false, deciding: code },
+          hosting: "isolated",
+          arm: "run",
+          reasons: [reason, ...reasons],
+          cost: costOf(output, profile),
+        };
+      }
+    }
     const rating = worstRating(reasons.map((r) => r.rating));
     const deciding = decidingOf(reasons, rating);
     return {
@@ -260,6 +284,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
         ...(deciding === undefined ? {} : { deciding: deciding.code }),
       },
       hosting: rating === "suitable" && profile.isolation === "in-process" ? "in-process" : "isolated",
+      arm: admission !== undefined && admittedHostOf(profile) !== undefined ? "run" : "declaration",
       reasons,
       cost: costOf(output, profile),
     };

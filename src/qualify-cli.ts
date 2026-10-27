@@ -31,7 +31,6 @@ export interface QualifyArgs {
   readonly pins?: string;
   readonly format: OutputFormat;
   readonly isolate: boolean;
-  readonly hostSweep: boolean;
   /** `--host-profile` specs (a shipped id or a profile file), in order, once each. */
   readonly hostProfiles: readonly string[];
   readonly help: boolean;
@@ -99,7 +98,6 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
       ...(pins === undefined ? {} : { pins }),
       format: format as OutputFormat,
       isolate: seen.has("--isolate"),
-      hostSweep: !seen.has("--no-host-sweep"),
       hostProfiles,
       help,
     },
@@ -116,9 +114,8 @@ export function helpText(): string {
     "plugin-qualify — qualify audio plugins for real-time hosting",
     "",
     "  plugin-qualify <uri|bundle-path>...   exactly the named plugins; a .lv2 bundle = every plugin in it",
-    "  plugin-qualify --all                  every CLAP plugin on CLAP_PATH, then ~/.clap, then /usr/lib/clap;",
-    "                                        refuses (exit 2) when LV2 bundles are on the LV2 path (LV2_PATH),",
-    "                                        whose plugins --all does not enumerate: name them instead",
+    "  plugin-qualify --all                  every LV2 plugin of the bundles on the LV2 path (LV2_PATH), then every CLAP plugin on",
+    "                                        CLAP_PATH, then ~/.clap, then /usr/lib/clap; with --out, one record each",
     "",
     ...rows,
     "",

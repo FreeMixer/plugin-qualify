@@ -7,22 +7,20 @@ Licence: GPL-3.0-or-later (`LICENSE`).
 
 ## Install
 
-plugin-qualify is published, signed, in the FreeMixer package channel, for Fedora 44 (x86_64, aarch64)
+plugin-qualify is published, signed, in the OpenMixer package channel, for Fedora 44 (x86_64, aarch64)
 and for Debian bookworm and trixie, including Raspberry Pi OS (amd64, arm64).
 
 Fedora:
 
 ```
-sudo dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
+sudo dnf install https://www.openmixer.org/rpm/openmixer-release.noarch.rpm
 sudo dnf install plugin-qualify
 ```
 
 Debian and Raspberry Pi OS:
 
 ```
-sudo install -d /etc/apt/keyrings
-sudo curl -fsSL -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
-echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/$(. /etc/os-release && echo $VERSION_CODENAME) ./" | sudo tee /etc/apt/sources.list.d/freemixer.list
+curl -fsSLO https://www.openmixer.org/deb/openmixer-release.deb && sudo apt install ./openmixer-release.deb
 sudo apt update
 sudo apt install plugin-qualify
 ```
@@ -59,13 +57,12 @@ them. The commands below are written as `plugin-qualify`; from a checkout run th
 ```
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
-plugin-qualify --all                          # every CLAP on the search path; refuses if LV2 bundles are on LV2_PATH
+plugin-qualify --all --out ./qualification   # every LV2 bundle on LV2_PATH and every CLAP on the search path, one record each
 plugin-qualify --help                         # every option and its default
 ```
 
 `--format json` prints the verdicts as JSON; `--out <dir>` writes the full measurement document.
-`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin;
-`--no-host-sweep` measures offline only, without mod-host. The `Containerfile` builds an image
+`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin. The `Containerfile` builds an image
 with lilv, mod-host and the ASan mod-host, if you do not want to install them yourself.
 
 A named LV2 plugin is measured the same way as a CLAP one: through the probe runner, then judged from the probe
@@ -156,6 +153,37 @@ The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the sc
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
 the plugin's `value_to_text` renders them), each parameter's module, and the plugin's
 remote-control pages.
+
+## Adjusting a verdict by what the plugin did on this machine
+
+```
+plugin-qualify adjust --history ~/.local/state/plugin-hostd/history --qualification-dir ./qualification --host-profile omx-clap-host
+plugin-qualify adjust --history history --qualification-dir ./qualification --host-class aarch64/4/2400 --pins pins.txt
+```
+
+plugin-hostd keeps a running history of every plugin binary on every host class it ran on (windows run alone and in a
+group, CPU, xrun windows, crashes, restarts, quarantines). `adjust` reads that file directly, so it runs without a daemon,
+and writes a second verdict beside the measured one in each qualification record: a `history` block per host class of the
+file, holding the line it looked for (the plugin's plugin-hostd uri and the digest of the first file of its pin), whether
+the history has it, the windows it counts, and for each `--host-profile` the measured pin verdict, the adjusted one, the
+move (`demote`, `promote` or `none`) and a reason code. The measured `verdicts` and the measurement are never changed: the
+same plugin on another host class has another history and another adjusted verdict.
+
+| move | when | reason |
+|---|---|---|
+| `in-process` to `isolated` | a crash was counted within 30 days, on this host class | `history.crashed` |
+| `in-process` to `isolated` | from 30 grouped windows, the share of xrun windows grouped exceeds the share alone by 5 points | `history.xruns-grouped` |
+| `isolated` to `refused` | three or more solo crashes, the latest within 30 days | `history.crashed-alone` |
+| `isolated` to `in-process` | every reason against the plugin is a `hosting.cost.*` one, 360 windows run alone (six hours), no crash or restart ever counted, no xruns raised when grouped, `cpu_p95_solo` under the host profile's ceiling | `history.steady` |
+| none | no line for this binary on this class | `history.no-record` |
+| none | a line, and no rule moves the verdict | `history.no-change` |
+| none | the line would promote, but the verdict is a fact about the plugin: a real-time-safety, feature, stability, latency or topology reason, an `unknown`, or a `refused` | `history.not-liftable`, with `blockedBy` |
+
+History never lifts a real-time-safety, feature or unknown verdict, and never promotes a refused one; a demotion is one
+step. The thresholds are one table, `HISTORY_POLICY` in `src/history-adjust.ts`. `--pins <file>` writes the pins with the
+adjusted verdict of the first `--host-profile` instead of the measured one; it needs exactly one host class, so name one
+with `--host-class` when the history holds several. `--now <seconds>` fixes the time the history is read at. A line of the
+history outside its grammar is not read and is named on stderr; a history of a version this tool does not know is refused.
 
 ## LV2 plugins: the hosting measurement
 
@@ -270,12 +298,27 @@ plugin-qualify --host-profile jalv,mod-host,openmixer-console <uri>  # one verdi
 plugin-qualify --host-profile ./my-host.json <uri>                 # your own host
 ```
 
-| profile | isolation | instruments | LV2 features read from | cost budget (P95 of a core, rate / quantum) |
-|---|---|---|---|---|
-| `openmixer-console` (default) | in-process (the console's RT thread) | no | the console's in-process table | 0.05 at 96000 / 1024 |
-| `jalv` | per-process | yes | jalv 1.6.8 `src/jalv.c` (zynthian's fork passes the same list) | 0.25 at 48000 / 256 |
-| `mod-host` | shared-process | yes | mod-host f14a230 `src/effects.c` | 0.05 at 48000 / 128 |
-| `omx-clap-host` | shared-process | yes | the console's in-process table (the same LV2 feature provider) | 0.05 at 48000 / 128 |
+| profile | isolation | verdict | instruments | LV2 features read from | cost budget (P95 of a core, rate / quantum) |
+|---|---|---|---|---|---|
+| `openmixer-console` (default) | in-process (the console's RT thread) | judged from a declaration | no | the console's in-process table | 0.05 at 96000 / 1024 |
+| `jalv` | per-process | **measured by a run** (`jalv -n <name> <uri>`, headless) | yes | jalv 1.6.8 `src/jalv.c` (zynthian's fork passes the same list) | 0.25 at 48000 / 256 |
+| `mod-host` | shared-process | **measured by a run** (`add`, `activate`, `remove` on mod-host's socket) | yes | mod-host f14a230 `src/effects.c` | 0.05 at 48000 / 128 |
+| `omx-clap-host` | shared-process | judged from a declaration | yes | the console's in-process table (the same LV2 feature provider) | 0.05 at 48000 / 128 |
+
+**Measured or declared.** A *declared* verdict is what the profile's feature list and cost budget make of
+the one probe output. A *measured* verdict (`jalv`, `mod-host`, LV2 plugins) also runs the plugin under that
+host, one admission per plugin, and its record entry carries `arm: "run"` and `measured: true`. A refusal
+(`resp -102`), a crash (the signal), a host that dies on `add`, or a port type the host does not know makes the
+plugin `unsuitable` for that host, with the code as the deciding reason (`mod-host.resp-102`,
+`mod-host.signal-SIGABRT`, `mod-host.died-on-add`, `jalv.unknown-port-type`, `jalv.signal-SIGABRT`). A host
+that is not installed leaves the verdict unmeasured (`unknown`, deciding `<host>.not-installed`). After any
+death on mod-host the next admission starts a fresh host. `plugin-qualify judge` reads a probe output
+that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"`.
+
+**The console's two tiers.** Every record carries `tiers`: the *in-process* verdict (`openmixer-console`) and the
+*isolated* verdict (`mod-host` for LV2, `omx-clap-host` for CLAP), `offeredOn` (the tiers whose verdict qualified)
+and, when neither did, `dimmed` with the reason. A plugin that kills the isolated host and qualifies in-process is
+offered in-process only. The tiers are judged for every plugin whether or not `--host-profile` names them.
 
 `omx-clap-host` offers a CLAP plugin the console's six host extensions and three more,
 `clap.preset-load/2`, `clap.track-info/1` and `clap.remote-controls/2`. A CLAP plugin judged
