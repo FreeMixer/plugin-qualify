@@ -17,7 +17,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Judgment, RecordReason } from "./probe-judge.js";
-import { sha256Hex, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
+import { sha256Hex, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
 
 export const QUALIFICATION_RECORD_SCHEMA = "plugin-qualify.qualification-record/1";
@@ -59,6 +59,34 @@ export interface RecordTiers {
 export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "mod-host", clap: "omx-clap-host" };
 export const IN_PROCESS_TIER_HOST = "openmixer-console";
 
+/** A latency or cost figure the run could not take: which one, at what rate and quantum, and the code that says why. */
+export interface UnmeasuredFigure {
+  readonly dimension: "latency" | "cost";
+  readonly rate?: number;
+  readonly quantum?: number;
+  /** The hosting code the run gave (`hosting.latency.unmeasured`), else the step's outcome code. */
+  readonly code: string;
+  /** The prober's own words, for a person; never what a reader classifies by. */
+  readonly detail?: string;
+}
+
+/**
+ * The figures the run could not take, from the steps that say so. A latency or cost step that did not end `probe.ok`
+ * leaves its figure out of the grid: this names the figure, so a grid point without a `latency` is never read as a plugin
+ * with none.
+ */
+export function unmeasuredFigures(output: ProbeOutput): readonly UnmeasuredFigure[] {
+  return output.steps
+    .filter((s) => (s.step === "latency" || s.step === "cost") && s.outcome !== PROBE_OK)
+    .map((s) => ({
+      dimension: s.step as "latency" | "cost",
+      ...(s.rate === undefined ? {} : { rate: s.rate }),
+      ...(s.quantum === undefined ? {} : { quantum: s.quantum }),
+      code: s.hostingCode ?? s.outcome,
+      ...(s.detail === undefined ? {} : { detail: s.detail }),
+    }));
+}
+
 export interface QualificationRecord {
   readonly schema: typeof QUALIFICATION_RECORD_SCHEMA;
   readonly plugin: { readonly format: string; readonly id: string; readonly name?: string };
@@ -75,8 +103,15 @@ export interface QualificationRecord {
     readonly voices?: VoicesHeld;
     readonly reasons: readonly RecordReason[];
   }[];
-  /** The figures as measured, per rate and quantum. */
-  readonly measurements: { readonly grid: readonly ProbeGridPoint[]; readonly behaviour?: Readonly<Record<string, unknown>> };
+  /**
+   * The figures as measured, per rate and quantum: the same fields whichever format the plugin is (`latency`
+   * {declaredFrames, measuredFrames}, `cost`, `rtSafety`, `noteSweep`), and the figures the run could not take, named.
+   */
+  readonly measurements: {
+    readonly grid: readonly ProbeGridPoint[];
+    readonly behaviour?: Readonly<Record<string, unknown>>;
+    readonly unmeasured?: readonly UnmeasuredFigure[];
+  };
   /** Who measured and when. */
   readonly tool: Readonly<Record<string, string>>;
   readonly measuredAt: string;
@@ -146,7 +181,11 @@ export function buildQualificationRecord(judgment: Judgment, copy: { file: strin
     })),
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
-    measurements: { grid: o.grid, ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }) },
+    measurements: {
+      grid: o.grid,
+      ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }),
+      ...(unmeasuredFigures(o).length === 0 ? {} : { unmeasured: unmeasuredFigures(o) }),
+    },
     tool: o.run.tools,
     measuredAt: o.run.startedAt,
     probe: {

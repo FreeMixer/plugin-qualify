@@ -144,3 +144,89 @@ export function clapLineFixture(patch: {
   };
 }
 
+
+/** One LV2 measurer line, as `lv2_measure` prints it: the keys the translation reads. */
+export type Lv2MeasureLine = Record<string, any>;
+
+/**
+ * The probe output the runner writes for an LV2 measurer line: the grid point of the run's rate and block with what
+ * run() did under the interposer, and, under the same field names as a CLAP point, the `latency` and `cost` the line holds
+ * at that rate. A latency or cost the line could not take is no field of the point: it is a step that says so, with the
+ * hosting code, and the run still ends `probe.ok`. The runner's translation in the small (plugin-hostd's `put_lv2_measure`), as
+ * `probeOutputOfLine` is its CLAP one, so a record is read from a real measurement through the real reader.
+ */
+export function probeOutputOfLv2Line(line: Lv2MeasureLine): Record<string, any> {
+  const doc = fixtureJson("success-msi");
+  const rate = Number(line["rate"]);
+  const quantum = Number(line["block"]);
+  const rt = line["rtSafety"];
+  const key = String(rate);
+  const latency = line["latency"]?.[key];
+  const cost = line["cost"]?.perRate?.[key];
+  const pin = line["integrity"];
+  doc["plugin"] = { format: "lv2", id: line["uri"], ...(pin?.version === undefined ? {} : { version: pin.version }) };
+  doc["binary"] = {
+    path: pin?.files?.find((f: { path: string }) => !f.path.endsWith(".ttl"))?.path ?? "plugin.so",
+    sha256: pin?.files?.find((f: { path: string }) => !f.path.endsWith(".ttl"))?.sha256 ?? "0".repeat(64),
+    files: pin?.files ?? [],
+    ...(pin?.layout === undefined ? {} : { layout: pin.layout }),
+  };
+  delete doc["descriptor"];
+  doc["offer"] = { id: "default", realtime: "none" };
+  const steps: Record<string, unknown>[] = [
+    { step: "hash", outcome: "probe.ok", elapsedMs: 1 },
+    { step: "instantiate", outcome: "probe.ok", elapsedMs: 1 },
+    { step: "rt-safety", rate, quantum, outcome: "probe.ok", elapsedMs: 1 },
+  ];
+  const absent = (step: "latency" | "cost", at: any): void => {
+    steps.push({
+      step,
+      rate,
+      quantum,
+      outcome: "probe.not-attempted",
+      elapsedMs: 1,
+      hostingCode: step === "latency" ? "hosting.latency.unmeasured" : "hosting.cost.unmeasured-at-rate-and-quantum",
+      detail: `${at?.unmeasuredReason ?? "not-attempted"}: ${at?.unmeasuredDetail ?? "the measurer's line holds no figure"}`,
+    });
+  };
+  const point: Record<string, unknown> = { rate, quantum, outcome: "probe.ok" };
+  if (latency?.measuredFrames !== undefined) {
+    steps.push({ step: "latency", rate, quantum, outcome: "probe.ok", elapsedMs: 1 });
+    point["latency"] = {
+      declaredFrames: latency.declaredFrames,
+      measuredFrames: latency.measuredFrames,
+      method: latency.from === "note" ? "note-onset" : "impulse-onset",
+      ...(latency.from === "note" ? { heard: true } : {}),
+    };
+  } else absent("latency", latency);
+  if (cost?.nsPerSampleMedian !== undefined) {
+    steps.push({ step: "cost", rate, quantum, outcome: "probe.ok", elapsedMs: 1 });
+    point["cost"] = {
+      unit: "ns-per-sample",
+      median: cost.nsPerSampleMedian,
+      percentile: { p: line["cost"].percentile, value: cost.nsPerSampleP95 },
+      min: cost.nsPerSampleMin,
+      max: cost.nsPerSampleMax,
+      blocks: cost.blocks,
+      warmupBlocks: line["cost"].warmupBlocks,
+      ...(cost.voices === undefined ? {} : { voices: cost.voices }),
+    };
+  } else absent("cost", cost);
+  if (rt !== undefined) {
+    point["rtSafety"] = {
+      interposer: rt.interposer,
+      swept: rt.swept,
+      sweepApplicable: rt.sweepApplicable,
+      blocks: rt.blocks,
+      allocations: rt.allocationsInRun,
+      locks: rt.locksInRun,
+      syscalls: rt.syscallsInRun,
+      events: [],
+    };
+  }
+  point["noteSweep"] = { applicable: rt?.noteSweep?.applicable === true };
+  doc["steps"] = steps;
+  doc["grid"] = [point];
+  doc["behaviour"] = { lifecycle: line["lifecycle"], threads: line["threads"], features: { required: line["requiredFeatures"] ?? [] } };
+  return doc;
+}
