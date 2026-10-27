@@ -10,7 +10,7 @@
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so,
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc}.lv2
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency}.lv2
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
@@ -98,7 +98,8 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
-	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so
+	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
+	$(BUILD)/fixtures/lv2/latency.lv2/latency.so
 
 $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
@@ -221,6 +222,12 @@ $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so: fixtures/lv2-synth.c fixtures/sy
 	mkdir -p $(@D)
 	cp fixtures/synth-alloc.lv2/manifest.ttl fixtures/synth-alloc.lv2/synth.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES_ON_NOTE -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+
+# four effects with a delay each is known to have: declared on its port, undeclared, declared wrongly, and silent
+$(BUILD)/fixtures/lv2/latency.lv2/latency.so: fixtures/lv2-latency.c fixtures/latency.lv2/manifest.ttl fixtures/latency.lv2/latency.ttl
+	mkdir -p $(@D)
+	cp fixtures/latency.lv2/manifest.ttl fixtures/latency.lv2/latency.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 
 # five plugins, each demanding one thing of the measuring host: options, a worker, patch:Set, a
 # bounded sweep, a stdout of its own
