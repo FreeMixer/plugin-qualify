@@ -1,3 +1,12 @@
+plugin-qualify (0.15.1) unstable; urgency=medium
+
+  * The scan golden is omx-clap-host 0.23.0's: its rows carry remote_controls (the plugin's remote-control
+    pages, [] for a plugin with none), and a test asserts the pages fake.clap's passthrough plugin declares.
+    The live-scan test failed against 0.23.0 on the stale golden, which stopped the npm publish of 0.15.0.
+  * Floors: omx-clap-host >= 0.23.0, omx-clap-core >= 0.23.0.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Tue, 27 Oct 2026 12:40:00 +0100
+
 plugin-qualify (0.15.0) unstable; urgency=medium
 
   * plugin-qualify-sync (new): qualifies every installed CLAP and LV2 plugin once, and again when
