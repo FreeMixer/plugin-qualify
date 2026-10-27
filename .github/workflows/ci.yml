@@ -11,7 +11,44 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # A new push to a pull request cancels the run it supersedes. Every other run (main, a tag) has a group of its own
+  # and is never cancelled; the run id keeps two pushes to main from replacing each other while one is queued.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # The packages are built from the whole tree but the pages (docs/, the top-level *.md) and the licence: a pull
+  # request that changes only those skips the dry run. main and tags run it always.
+  changes:
+    name: what the pull request changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      packages: ${{ steps.diff.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # The checkout of a pull request is its merge commit and the first parent is the base, so this diff is what the
+      # pull request adds. Any other event, or a diff that cannot be read, says true: main and tags always run it.
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ] || ! changed=$(git diff --name-only HEAD^1 HEAD) || [ -z "$changed" ]; then
+            echo "packages=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$changed"
+          if grep -qvE '^(docs/|[^/]*\.md$|LICENSE$)' <<<"$changed"; then
+            echo "packages=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "packages=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: build and test
     runs-on: ubuntu-latest
@@ -72,6 +109,8 @@ jobs:
   # the RPM and the DEB are built, linted and assembled into unsigned trees; nothing is published
   packages:
     name: packages, dry run
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
     permissions:
       contents: write
       issues: write
