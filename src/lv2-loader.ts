@@ -78,7 +78,12 @@ export interface ManifestPlugin {
  * not one of them.
  */
 export function manifestPlugins(ttl: string): ManifestPlugin[] {
-  const prefixes = new Map<string, string>();
+  // the three vocabularies every manifest uses, so a manifest that leaves a prefix undeclared still reads
+  const prefixes = new Map<string, string>([
+    ["lv2", "http://lv2plug.in/ns/lv2core#"],
+    ["rdfs", "http://www.w3.org/2000/01/rdf-schema#"],
+    ["rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"],
+  ]);
   const subjects = new Map<string, { typed: boolean; files: string[]; binary?: string }>();
   const expand = (t: Token): string | undefined => {
     if (t.kind === "iri") return t.text;
