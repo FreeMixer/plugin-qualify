@@ -46,7 +46,7 @@ export interface TierVerdict {
   readonly deciding?: string;
 }
 
-/** The console's two tiers (roster, openmixer#2079): offered where the verdict qualified, dimmed with the reason when neither did. */
+/** The console's two tiers (what the console's roster offers): offered where the verdict qualified, dimmed with the reason when neither did. */
 export interface RecordTiers {
   readonly inProcess?: TierVerdict;
   readonly isolated?: TierVerdict;
