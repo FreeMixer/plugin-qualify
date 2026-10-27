@@ -47,7 +47,7 @@ const recorded = (uri: string): AdmissionRuns => ({
 });
 /** The runs skipped: every host takes every plugin, as if nothing were run. */
 const SKIPPED: AdmissionRuns = {
-  modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "activate", resp: 0 }, { cmd: "remove", resp: 0 }] }),
+  modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }] }),
   jalv: () => ({ installed: true, stillRunning: true, status: null, signal: null, stderr: "" }),
 };
 
@@ -78,18 +78,18 @@ describe("the 2026-10-26 admission rows are the expectations", () => {
 });
 
 describe("what mod-host did decides", () => {
-  const step = (cmd: "add" | "activate" | "remove", rest: object = {}) => ({ cmd, ...rest });
-  it("add, activate and remove all answering 0 admits", () => {
-    const a = classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("activate", { resp: 0 }), step("remove", { resp: 0 })] });
+  const step = (cmd: "add" | "remove", rest: object = {}) => ({ cmd, ...rest });
+  it("add and remove both answering 0 admits", () => {
+    const a = classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("remove", { resp: 0 })] });
     expect(a).toMatchObject({ measured: true, admitted: true });
   });
   it("a refusal is its magnitude, with the whole answer kept", () => {
     expect(classifyModHostRun({ installed: true, steps: [step("add", { resp: -102 })] })).toMatchObject({ admitted: false, code: "mod-host.resp-102", params: { step: "add", resp: -102 } });
   });
   it("a signal is the code wherever it came; a host that went without one on add is a death on add", () => {
-    expect(classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("activate", { died: "SIGSEGV" })] }).code).toBe("mod-host.signal-SIGSEGV");
+    expect(classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("remove", { died: "SIGSEGV" })] }).code).toBe("mod-host.signal-SIGSEGV");
     expect(classifyModHostRun({ installed: true, steps: [step("add", { died: "exit" })] }).code).toBe("mod-host.died-on-add");
-    expect(classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("activate", { died: "closed" })] }).code).toBe("mod-host.died");
+    expect(classifyModHostRun({ installed: true, steps: [step("add", { resp: 0 }), step("remove", { died: "closed" })] }).code).toBe("mod-host.died");
   });
   it("a host that is not installed leaves the verdict unmeasured, with that reason", () => {
     expect(classifyModHostRun({ installed: false, steps: [] })).toMatchObject({ measured: false, admitted: false, code: "mod-host.not-installed" });
@@ -197,6 +197,7 @@ const port = Number(process.argv[process.argv.indexOf("-p") + 1]);
 const mode = process.env.STAND_IN;
 net.createServer((c) => c.on("data", (d) => {
   const cmd = d.toString().split(" ")[0];
+  if (cmd !== "add" && cmd !== "remove") return c.write("few arguments\0"); // mod-host answers a verb it lacks with no resp line
   if (mode === "abort" && cmd === "add") process.kill(process.pid, "SIGABRT");
   c.write("resp " + (mode === "refuse" && cmd === "add" ? -102 : 0) + "\0");
 })).listen(port, "127.0.0.1");
@@ -207,8 +208,8 @@ net.createServer((c) => c.on("data", (d) => {
   const admit = (mode: string, path = `${dir}:${process.env["PATH"]}`): ModHostRun =>
     JSON.parse(spawnSync(process.execPath, [helper, "urn:x"], { encoding: "utf8", env: { ...process.env, PATH: path, STAND_IN: mode } }).stdout) as ModHostRun;
 
-  it("a host that takes the plugin answers add, activate and remove", () => {
-    expect(admit("ok")).toEqual({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "activate", resp: 0 }, { cmd: "remove", resp: 0 }] });
+  it("a host that takes the plugin answers add and remove", () => {
+    expect(admit("ok")).toEqual({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }] });
   });
   it("a refusal stops the run at the refused step", () => expect(classifyModHostRun(admit("refuse")).code).toBe("mod-host.resp-102"));
   it("a host that aborts on add is the signal", () => expect(classifyModHostRun(admit("abort")).code).toBe("mod-host.signal-SIGABRT"));
