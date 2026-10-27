@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.15.0
+Version: 0.15.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -34,12 +34,13 @@ Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
 Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
-# omx-clap-scan, which lists the plugins in a .clap before each is qualified
-Requires: omx-clap-host >= 0.13.0
+# omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
+# remote-control pages (remote_controls), which the descriptors keep
+Requires: omx-clap-host >= 0.23.0
 # the hosting codes' TypeScript modules, which the shipped tools/gen-hosting-codes.mjs reads through
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
-# /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on
-Requires: omx-clap-core >= 0.17.0
+# /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on; the host above brings the same version
+Requires: omx-clap-core >= 0.23.0
 %{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
@@ -104,6 +105,11 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.1-1
+- The scan golden is omx-clap-host 0.23.0's: its rows carry remote_controls (the plugin's remote-control
+  pages, [] for a plugin with none), and a test asserts the pages fake.clap's passthrough plugin declares.
+  The live-scan test failed against 0.23.0 on the stale golden, which stopped the npm publish of 0.15.0.
+- Floors: omx-clap-host >= 0.23.0, omx-clap-core >= 0.23.0.
 * Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.0-1
 - plugin-qualify-sync (new): qualifies every installed CLAP and LV2 plugin once, and again when
   its files change, as a systemd service started after boot and when a plugin is installed;

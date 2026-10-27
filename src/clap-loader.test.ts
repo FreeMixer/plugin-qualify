@@ -74,7 +74,7 @@ function answering(stdout: string, status = 0): { run: ClapScanRun; calls: strin
 }
 
 describe("parseClapScan — the tool's document, refused when it is not one", () => {
-  it("the real fake.clap golden: one file, the plugins omx-clap-core 0.14.0 builds into it", () => {
+  it("the real fake.clap golden: one file, the plugins omx-clap-host 0.23.0's fake.clap builds into it", () => {
     const doc = parseClapScan(FAKE_JSON);
     expect(doc.files).toHaveLength(1);
     const file = doc.files[0]!;
@@ -99,6 +99,14 @@ describe("clapScanDescriptors — the interchange rows", () => {
   it("a plugin is `urn:clap:<id>`, format clap, its binary path resolved", () => {
     expect(rows.map((r) => r.uri)).toEqual(FAKE_NAMES.map((n) => `urn:clap:${FAKE_ID}.${n}`));
     expect(rows.every((r) => r.format === "clap" && r.binaryPath.endsWith("/fake.clap") && r.binaryPath.startsWith("/"))).toBe(true);
+  });
+
+  it("omx-clap-host 0.23.0's row names the remote-control pages: passthrough has two, every other plugin has none", () => {
+    expect(byId("passthrough").remoteControls).toEqual([
+      { id: 7, section: "Main", name: 'Page "A"\t1', params: ["0", "1", null, "99", null, null, null, null] },
+      { id: 8, section: "", name: "Two", params: [null, null, null, null, null, null, null, "0"] },
+    ]);
+    expect(rows.filter((r) => r.uri !== byId("passthrough").uri).every((r) => r.remoteControls?.length === 0)).toBe(true);
   });
 
   it("the parameter is a control keyed by its CLAP id, the range and default as declared", () => {
@@ -323,7 +331,9 @@ describe("enum labels, modules and remote-control pages — the controls fixture
     const doc = JSON.parse(CONTROLS_JSON);
     doc.files[0].plugins[0].remote_controls.push({ id: 8, section: "", name: "preset", params: [5, null, null, null, null, null, null, null], forPreset: true });
     expect(clapScanDescriptors(parseClapScan(JSON.stringify(doc)))[0]!.remoteControls?.map((p) => p.id)).toEqual([7]);
-    expect(clapScanDescriptors(parseClapScan(FAKE_JSON)).every((r) => !("remoteControls" in r))).toBe(true);
+    const older = JSON.parse(FAKE_JSON);
+    for (const plugin of older.files[0].plugins) delete plugin.remote_controls;
+    expect(clapScanDescriptors(parseClapScan(JSON.stringify(older))).every((r) => !("remoteControls" in r))).toBe(true);
   });
 
   it("refuses a label or a page slot that is not one", () => {
