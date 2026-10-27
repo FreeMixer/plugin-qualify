@@ -10,7 +10,7 @@ import { OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profile
 import { judgeProbeOutput } from "./probe-judge.js";
 import { readProbeOutput } from "./probe-output.js";
 import { fixtureText } from "./probe-output-fixtures.js";
-import { QUALIFICATION_RECORD_SCHEMA, probeCopyFileName, qualificationBaseName, recordFileName, writeQualification } from "./qualification-record.js";
+import { QUALIFICATION_RECORD_SCHEMA, mergeRunsByRecord, probeCopyFileName, qualificationBaseName, recordFileName, tiersOf, writeQualification } from "./qualification-record.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "qualification-record-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -116,5 +116,21 @@ describe("the qualification record and the probe output it judged", () => {
     const evil = readProbeOutput(JSON.stringify(lv2));
     if (!evil.ok) throw new Error(evil.problem);
     expect(qualificationBaseName(evil.output)).not.toContain("/");
+  });
+});
+
+describe("runs that share a record file", () => {
+  it("become one record holding every verdict, over the first run's probe output", () => {
+    const text = fixtureText("success-msi");
+    const r = readProbeOutput(text);
+    if (!r.ok) throw new Error(r.problem);
+    const a = { bytes: Buffer.from(text), judgment: judgeProbeOutput(r.output, [OPENMIXER_CONSOLE_PROFILE]) };
+    const b = { bytes: Buffer.from(`${text} `), judgment: judgeProbeOutput(r.output, [OMX_CLAP_HOST_PROFILE]) };
+    const merged = mergeRunsByRecord([a, b]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.bytes).toBe(a.bytes);
+    expect(merged[0]!.judgment.hosts.map((h) => h.verdict.host)).toEqual(["openmixer-console", "omx-clap-host"]);
+    const tiers = tiersOf(merged[0]!.judgment);
+    expect([tiers.inProcess?.host, tiers.isolated?.host]).toEqual(["openmixer-console", "omx-clap-host"]);
   });
 });

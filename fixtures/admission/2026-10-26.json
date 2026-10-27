@@ -1,0 +1,19 @@
+{
+  "about": "The admission probe of 2026-10-26 on the desk's LV2 plugins (mod-host 0.10.6, jalv 1.8.0; the same method for each host). Each row is what the host did, in the shape tools/mod-host-admit.mjs and the jalv run give src/host-admission.ts; the 'expect' codes are the rows of issue #152 and the expectations of src/host-admission.test.ts. A change that makes one of these plugins qualify on mod-host or jalv is red.",
+  "plugins": {
+    "http://drumkv1.sourceforge.net/lv2": {
+      "mod-host": { "run": { "installed": true, "steps": [{ "cmd": "add", "died": "SIGABRT" }] }, "expect": ["mod-host.signal-SIGABRT", "mod-host.died-on-add"] }
+    },
+    "http://samplv1.sourceforge.net/lv2": {
+      "mod-host": { "run": { "installed": true, "steps": [{ "cmd": "add", "died": "closed" }] }, "expect": ["mod-host.signal-SIGABRT", "mod-host.died-on-add"] }
+    },
+    "http://synthv1.sourceforge.net/lv2": {
+      "mod-host": { "run": { "installed": true, "steps": [{ "cmd": "add", "died": "SIGABRT" }] }, "expect": ["mod-host.signal-SIGABRT", "mod-host.died-on-add"] },
+      "jalv": { "run": { "installed": true, "stillRunning": false, "status": null, "signal": "SIGABRT", "stderr": "" }, "expect": ["jalv.signal-SIGABRT"] }
+    },
+    "http://zynaddsubfx.sourceforge.net": {
+      "mod-host": { "run": { "installed": true, "steps": [{ "cmd": "add", "resp": -102 }] }, "expect": ["mod-host.resp-102"] },
+      "jalv": { "run": { "installed": true, "stillRunning": false, "status": 1, "signal": null, "stderr": "Mandatory port \"midi_in\" has unknown type\n" }, "expect": ["jalv.unknown-port-type"] }
+    }
+  }
+}

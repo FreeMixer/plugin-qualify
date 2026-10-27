@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+/**
+ * HOST ADMISSION — a `mod-host` or `jalv` verdict is MEASURED by running the plugin under that host,
+ * one admission per plugin, not judged from a declaration. mod-host: `add`, `activate`, `remove` on
+ * its socket, a fresh host after any death (`tools/mod-host-admit.mjs` does the run and prints what
+ * happened; one line of JSON). jalv: `jalv -n <name> <uri>` headless, hosted when it is still alive
+ * at the deadline. The classifiers here are pure: what the host answered goes in, a {@link HostAdmission}
+ * with the deciding code comes out; the runs are injected, so a test replays recorded answers.
+ */
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import type { HostProfile } from "./host-profiles.js";
+
+/** The profile ids whose verdict is measured by a run. */
+export const ADMITTED_HOSTS = ["mod-host", "jalv"] as const;
+export type AdmittedHost = (typeof ADMITTED_HOSTS)[number];
+
+/** The admitting host of a profile, or `undefined` when its verdict is judged from a declaration. */
+export function admittedHostOf(profile: HostProfile): AdmittedHost | undefined {
+  return ADMITTED_HOSTS.find((h) => h === profile.id);
+}
+
+/** What running the plugin under one host came to. */
+export interface HostAdmission {
+  readonly host: AdmittedHost;
+  /** False when the host could not be run (not installed): there is no evidence either way. */
+  readonly measured: boolean;
+  readonly admitted: boolean;
+  /** Why not: `<host>.resp-<n>`, `<host>.signal-<SIG>`, `mod-host.died-on-add`, `jalv.unknown-port-type`, `<host>.not-installed`, … */
+  readonly code?: string;
+  readonly params: Readonly<Record<string, string | number>>;
+}
+
+const admitted = (host: AdmittedHost): HostAdmission => ({ host, measured: true, admitted: true, params: {} });
+const refused = (host: AdmittedHost, code: string, params: HostAdmission["params"] = {}): HostAdmission => ({
+  host,
+  measured: true,
+  admitted: false,
+  code: `${host}.${code}`,
+  params,
+});
+const notInstalled = (host: AdmittedHost): HostAdmission => ({ host, measured: false, admitted: false, code: `${host}.not-installed`, params: {} });
+
+/** One command mod-host was sent and what came of it: its `resp` number, or how the host died. */
+export interface ModHostStep {
+  readonly cmd: "add" | "activate" | "remove";
+  readonly resp?: number;
+  /** The signal that killed the host, or `exit` / `closed` when it went without one. */
+  readonly died?: string;
+}
+
+/** What `tools/mod-host-admit.mjs` printed. */
+export interface ModHostRun {
+  readonly installed: boolean;
+  readonly steps: readonly ModHostStep[];
+}
+
+/** The verdict of a mod-host run: the first step that did not answer `resp 0` decides. */
+export function classifyModHostRun(run: ModHostRun): HostAdmission {
+  if (!run.installed) return notInstalled("mod-host");
+  for (const s of run.steps) {
+    if (s.died !== undefined) {
+      if (s.died.startsWith("SIG")) return refused("mod-host", `signal-${s.died}`, { step: s.cmd });
+      return s.cmd === "add" ? refused("mod-host", "died-on-add", { how: s.died }) : refused("mod-host", "died", { step: s.cmd, how: s.died });
+    }
+    if (s.resp === undefined) return refused("mod-host", "no-answer", { step: s.cmd });
+    // mod-host answers an error as a negative number (`resp -102`); the code carries its magnitude
+    if (s.resp < 0) return refused("mod-host", `resp-${-s.resp}`, { step: s.cmd, resp: s.resp });
+  }
+  if (run.steps.length === 0) return refused("mod-host", "no-answer");
+  return admitted("mod-host");
+}
+
+/** What `jalv -n <name> <uri>` did in its window. */
+export interface JalvRun {
+  readonly installed: boolean;
+  /** True when jalv was still running at the deadline and was stopped by the caller. */
+  readonly stillRunning: boolean;
+  readonly status: number | null;
+  readonly signal: string | null;
+  readonly stderr: string;
+}
+
+const UNKNOWN_PORT_TYPE = /Mandatory port "([^"]*)" has unknown type/;
+
+/** The verdict of a jalv run: alive at the deadline is hosted; a signal, an unknown port type, or an exit is not. */
+export function classifyJalvRun(run: JalvRun): HostAdmission {
+  if (!run.installed) return notInstalled("jalv");
+  if (run.stillRunning) return admitted("jalv");
+  if (run.signal !== null) return refused("jalv", `signal-${run.signal}`);
+  const port = UNKNOWN_PORT_TYPE.exec(run.stderr)?.[1];
+  if (port !== undefined) return refused("jalv", "unknown-port-type", { port });
+  if (run.status !== 0 && run.status !== null) return refused("jalv", `exit-${run.status}`);
+  return admitted("jalv");
+}
+
+/** How long jalv must stay alive to count as hosting the plugin, in milliseconds. */
+export const JALV_HOSTED_MS = 3000;
+/** The wall clock of one whole mod-host admission, in milliseconds. */
+export const MOD_HOST_ADMISSION_MS = 30000;
+
+export interface AdmissionRuns {
+  readonly modHost: (uri: string) => ModHostRun;
+  readonly jalv: (uri: string) => JalvRun;
+}
+
+const MOD_HOST_ADMIT = fileURLToPath(new URL("../tools/mod-host-admit.mjs", import.meta.url));
+
+/** The runs against the installed hosts. */
+export const SPAWNED_ADMISSIONS: AdmissionRuns = {
+  modHost(uri) {
+    const r = spawnSync(process.execPath, [MOD_HOST_ADMIT, uri], { encoding: "utf8", timeout: MOD_HOST_ADMISSION_MS });
+    if (r.error !== undefined || r.status !== 0) {
+      throw new Error(`mod-host admission of ${uri} gave no answer (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
+    }
+    return JSON.parse(r.stdout) as ModHostRun;
+  },
+  jalv(uri) {
+    const r = spawnSync("jalv", ["-n", "plugin-qualify", uri], { encoding: "utf8", timeout: JALV_HOSTED_MS, input: "" });
+    const code = (r.error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return { installed: false, stillRunning: false, status: null, signal: null, stderr: "" };
+    return { installed: true, stillRunning: code === "ETIMEDOUT", status: r.status, signal: code === "ETIMEDOUT" ? null : r.signal, stderr: r.stderr ?? "" };
+  },
+};
+
+/** One admission of `uri` under `host`. */
+export function admitPlugin(host: AdmittedHost, uri: string, runs: AdmissionRuns = SPAWNED_ADMISSIONS): HostAdmission {
+  try {
+    return host === "mod-host" ? classifyModHostRun(runs.modHost(uri)) : classifyJalvRun(runs.jalv(uri));
+  } catch (e) {
+    // the run itself broke: nothing was learned about the plugin, so nothing is rated
+    return { host, measured: false, admitted: false, code: `${host}.admission-failed`, params: { problem: e instanceof Error ? e.message : String(e) } };
+  }
+}
