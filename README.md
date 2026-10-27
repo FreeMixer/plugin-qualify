@@ -7,22 +7,20 @@ Licence: GPL-3.0-or-later (`LICENSE`).
 
 ## Install
 
-plugin-qualify is published, signed, in the FreeMixer package channel, for Fedora 44 (x86_64, aarch64)
+plugin-qualify is published, signed, in the OpenMixer package channel, for Fedora 44 (x86_64, aarch64)
 and for Debian bookworm and trixie, including Raspberry Pi OS (amd64, arm64).
 
 Fedora:
 
 ```
-sudo dnf config-manager addrepo --from-repofile=https://freemixer.github.io/rpm/freemixer.repo
+sudo dnf install https://www.openmixer.org/rpm/openmixer-release.noarch.rpm
 sudo dnf install plugin-qualify
 ```
 
 Debian and Raspberry Pi OS:
 
 ```
-sudo install -d /etc/apt/keyrings
-sudo curl -fsSL -o /etc/apt/keyrings/freemixer.asc https://freemixer.github.io/deb/freemixer.asc
-echo "deb [signed-by=/etc/apt/keyrings/freemixer.asc] https://freemixer.github.io/deb/debian/$(. /etc/os-release && echo $VERSION_CODENAME) ./" | sudo tee /etc/apt/sources.list.d/freemixer.list
+curl -fsSLO https://www.openmixer.org/deb/openmixer-release.deb && sudo apt install ./openmixer-release.deb
 sudo apt update
 sudo apt install plugin-qualify
 ```
@@ -64,8 +62,7 @@ plugin-qualify --help                         # every option and its default
 ```
 
 `--format json` prints the verdicts as JSON; `--out <dir>` writes the full measurement document.
-`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin;
-`--no-host-sweep` measures offline only, without mod-host. The `Containerfile` builds an image
+`--isolate` measures each plugin in a fresh worker so a crash or hang takes only that plugin. The `Containerfile` builds an image
 with lilv, mod-host and the ASan mod-host, if you do not want to install them yourself.
 
 A named LV2 plugin is measured the same way as a CLAP one: through the probe runner, then judged from the probe
