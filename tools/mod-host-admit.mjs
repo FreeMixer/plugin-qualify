@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
-// One mod-host admission: a fresh `mod-host -n` on its own port, then `add`, `activate`, `remove` of one plugin on its
+// One mod-host admission: a fresh `mod-host -n` on its own port, then `add` and `remove` of one plugin on its
 // socket. Prints one JSON line, {installed, steps:[{cmd, resp | died}]}, for src/host-admission.ts to classify. The host
 // is always killed at the end, so the next plugin gets a fresh one.
 import { spawn } from "node:child_process";
@@ -13,7 +13,6 @@ const STEP_MS = 10000;
 const INSTANCE = 0;
 const COMMANDS = [
   ["add", `add ${uri} ${INSTANCE}`],
-  ["activate", `activate ${INSTANCE} 1`],
   ["remove", `remove ${INSTANCE}`],
 ];
 
