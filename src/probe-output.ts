@@ -102,6 +102,8 @@ export interface ProbeStep {
   readonly outcome: string;
   readonly rate?: number;
   readonly quantum?: number;
+  /** The hosting code the step carries when it says why a figure is absent (`hosting.latency.unmeasured`). */
+  readonly hostingCode?: string;
   readonly detail?: string;
 }
 
@@ -310,6 +312,7 @@ function readStep(v: unknown, i: number): ProbeStep {
     outcome: outcome(o, where),
     ...optional("rate", o["rate"] === undefined ? undefined : posInt(o, "rate", where)),
     ...optional("quantum", o["quantum"] === undefined ? undefined : posInt(o, "quantum", where)),
+    ...optional("hostingCode", nonEmptyString(o["hostingCode"])),
     ...optional("detail", nonEmptyString(o["detail"])),
   };
 }
