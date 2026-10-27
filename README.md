@@ -59,7 +59,7 @@ them. The commands below are written as `plugin-qualify`; from a checkout run th
 ```
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
-plugin-qualify --all                          # every CLAP on the search path; refuses if LV2 bundles are on LV2_PATH
+plugin-qualify --all --out ./qualification   # every LV2 bundle on LV2_PATH and every CLAP on the search path, one record each
 plugin-qualify --help                         # every option and its default
 ```
 
@@ -270,12 +270,27 @@ plugin-qualify --host-profile jalv,mod-host,openmixer-console <uri>  # one verdi
 plugin-qualify --host-profile ./my-host.json <uri>                 # your own host
 ```
 
-| profile | isolation | instruments | LV2 features read from | cost budget (P95 of a core, rate / quantum) |
-|---|---|---|---|---|
-| `openmixer-console` (default) | in-process (the console's RT thread) | no | the console's in-process table | 0.05 at 96000 / 1024 |
-| `jalv` | per-process | yes | jalv 1.6.8 `src/jalv.c` (zynthian's fork passes the same list) | 0.25 at 48000 / 256 |
-| `mod-host` | shared-process | yes | mod-host f14a230 `src/effects.c` | 0.05 at 48000 / 128 |
-| `omx-clap-host` | shared-process | yes | the console's in-process table (the same LV2 feature provider) | 0.05 at 48000 / 128 |
+| profile | isolation | verdict | instruments | LV2 features read from | cost budget (P95 of a core, rate / quantum) |
+|---|---|---|---|---|---|
+| `openmixer-console` (default) | in-process (the console's RT thread) | judged from a declaration | no | the console's in-process table | 0.05 at 96000 / 1024 |
+| `jalv` | per-process | **measured by a run** (`jalv -n <name> <uri>`, headless) | yes | jalv 1.6.8 `src/jalv.c` (zynthian's fork passes the same list) | 0.25 at 48000 / 256 |
+| `mod-host` | shared-process | **measured by a run** (`add`, `activate`, `remove` on mod-host's socket) | yes | mod-host f14a230 `src/effects.c` | 0.05 at 48000 / 128 |
+| `omx-clap-host` | shared-process | judged from a declaration | yes | the console's in-process table (the same LV2 feature provider) | 0.05 at 48000 / 128 |
+
+**Measured or declared.** A *declared* verdict is what the profile's feature list and cost budget make of
+the one probe output. A *measured* verdict (`jalv`, `mod-host`, LV2 plugins) also runs the plugin under that
+host, one admission per plugin, and its record entry carries `arm: "run"` and `measured: true`. A refusal
+(`resp -102`), a crash (the signal), a host that dies on `add`, or a port type the host does not know makes the
+plugin `unsuitable` for that host, with the code as the deciding reason (`mod-host.resp-102`,
+`mod-host.signal-SIGABRT`, `mod-host.died-on-add`, `jalv.unknown-port-type`, `jalv.signal-SIGABRT`). A host
+that is not installed leaves the verdict unmeasured (`unknown`, deciding `<host>.not-installed`). After any
+death on mod-host the next admission starts a fresh host. `plugin-qualify judge` reads a probe output
+that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"`.
+
+**The console's two tiers.** Every record carries `tiers`: the *in-process* verdict (`openmixer-console`) and the
+*isolated* verdict (`mod-host` for LV2, `omx-clap-host` for CLAP), `offeredOn` (the tiers whose verdict qualified)
+and, when neither did, `dimmed` with the reason. A plugin that kills the isolated host and qualifies in-process is
+offered in-process only. The tiers are judged for every plugin whether or not `--host-profile` names them.
 
 `omx-clap-host` offers a CLAP plugin the console's six host extensions and three more,
 `clap.preset-load/2`, `clap.track-info/1` and `clap.remote-controls/2`. A CLAP plugin judged
