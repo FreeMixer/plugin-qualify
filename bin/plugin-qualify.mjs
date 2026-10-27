@@ -8,7 +8,7 @@
  * Every named plugin, CLAP or LV2, is measured by plugin-hostd's probe runner (`plugin-hostd-probe`,
  * named by `OMX_PROBE_RUNNER` when it is not on `PATH`), which keeps the deadline and the limits, and is
  * judged from the probe output it writes: the verdict and the qualification record, per host profile.
- * `--all` finds the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
+ * `--all` finds the LV2 plugins of the bundles on the LV2 path, then the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
  * `/usr/lib/clap`). `plugin-qualify judge` judges probe outputs already written.
  */
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
@@ -126,7 +126,8 @@ if (plugins.length === 0) {
   process.exit(EXIT_CODE.couldNotMeasure);
 }
 if (parsed.args.all) {
-  process.stderr.write("plugin-qualify: --all qualified the CLAP plugins on the search path (no LV2 bundle is on the LV2 path)\n");
+  const lv2 = plugins.filter((p) => p.format === "lv2").length;
+  process.stderr.write(`plugin-qualify: --all qualifies ${String(lv2)} LV2 and ${String(plugins.length - lv2)} CLAP plugins on the search paths\n`);
 }
 const pass = qualifyTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
 for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
