@@ -148,6 +148,17 @@ declares (CLAP `voice-info`, basis `declared`), or, when it declares none, the c
 (basis `probe`; LV2 declares none). Each rate's figure says how many notes it held and why (`voices: { held,
 basis, capacity }`). An instrument with no count to hold is not timed (`voices-unknown`).
 
+An LV2 plugin's record holds the same two figures, under the same field names, in `measurements.grid[]`:
+`latency { declaredFrames, measuredFrames }` and `cost`. `lv2_measure` takes them at the run's rate and block, the
+way the CLAP prober does: the declared figure is what the plugin reports on its latency port
+(`lv2:designation lv2:latency`, or the older `lv2:reportsLatency`; 0 when it has none), the measured one is where an
+impulse at frame 0 lands (the first frame at or above 1e-3 of the response's own peak), or, for an instrument, where a
+struck A4 sounds. A plugin that has no latency port is measured, never read as 0. An instrument's cost holds
+`OMX_PROBE_NOTES` keys down (the LV2 counterpart of `--probe-notes`). A figure the run could not take (a response that
+stays silent, an instrument with no count to hold) is left out of the grid point and named in
+`measurements.unmeasured` with its hosting code (`hosting.latency.unmeasured`,
+`hosting.cost.unmeasured-at-rate-and-quantum`).
+
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
