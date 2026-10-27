@@ -1,7 +1,7 @@
 name: Install the scanners the tests read real plugins with
 description: python3-lilv and jsonschema, omx-clap-scan with omx-clap-host's fake plugin, and two LV2 plugin packages, so the scanner goldens run on CI and never skip there.
 
-# Shared by ci.yml and publish.yml, after install-plugin-hostd (which adds the FreeMixer channel to apt).
+# Shared by ci.yml and publish.yml, after install-plugin-hostd (which adds the OpenMixer channel to apt).
 # src/workflows-agree.test.ts fails if a workflow stops using this action. The lilv binding is pure ctypes, so the
 # distribution's python3-lilv serves the setup-python interpreter too: its module file is copied to a directory
 # PYTHONPATH names (not the whole system dist-packages, which carries modules built for another interpreter).
