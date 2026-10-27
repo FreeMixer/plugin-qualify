@@ -24,6 +24,7 @@ BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
 BuildRequires: pkgconfig(omx-contract) >= 3.0.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
+BuildRequires: systemd-rpm-macros
 
 Requires: nodejs >= 18
 Requires: python3
@@ -39,6 +40,7 @@ Requires: omx-clap-host >= 0.13.0
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
 # /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on
 Requires: omx-clap-core >= 0.17.0
+%{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
@@ -64,12 +66,40 @@ different hosts.
 %install
 packaging/build.sh %{buildroot} %{_prefix}/lib
 %make_install -C native LIBEXECDIR=%{_libexecdir}/%{name}
+install -d %{buildroot}%{_unitdir} %{buildroot}%{_presetdir}
+install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
+  packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
+install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
+
+# the preset enables the timer and the path unit; nothing here runs a sweep: the timer fires at the next boot,
+# and the path unit, armed once the transaction is over, waits for a minute of quiet before its first run
+%post
+%systemd_post plugin-qualify-sync.timer plugin-qualify-sync.path
+
+%posttrans
+if [ -d /run/systemd/system ] && systemctl -q is-enabled plugin-qualify-sync.path 2>/dev/null; then
+  systemctl start plugin-qualify-sync.path >/dev/null 2>&1 || :
+fi
+
+%preun
+%systemd_preun plugin-qualify-sync.timer plugin-qualify-sync.path plugin-qualify-sync.service
+
+%postun
+%systemd_postun plugin-qualify-sync.timer plugin-qualify-sync.path plugin-qualify-sync.service
 
 %files
 %license LICENSE
 %doc README.md
 %{_bindir}/plugin-qualify
+%{_bindir}/plugin-qualify-sync
 %{_mandir}/man1/plugin-qualify.1*
+%{_mandir}/man1/plugin-qualify-sync.1*
+%dir %{_sysconfdir}/omx
+%config(noreplace) %{_sysconfdir}/omx/qualify.conf
+%{_unitdir}/plugin-qualify-sync.service
+%{_unitdir}/plugin-qualify-sync.timer
+%{_unitdir}/plugin-qualify-sync.path
+%{_presetdir}/80-plugin-qualify.preset
 %{_prefix}/lib/node_modules/@openmixer/
 %{_libexecdir}/%{name}/
 

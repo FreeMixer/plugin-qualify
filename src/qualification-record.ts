@@ -13,13 +13,14 @@
  * Not yet in the record: the fingerprint of the descriptor's controls, since the descriptor is
  * written by the scan (stage 5) and plugin-qualify does not read one yet.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Adjustment } from "./history-adjust.js";
 import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
+import { writeFileWhole } from "./whole-file.js";
 
 export const QUALIFICATION_RECORD_SCHEMA = "plugin-qualify.qualification-record/1";
 
@@ -139,6 +140,11 @@ export interface QualificationRecord {
     readonly behaviour?: Readonly<Record<string, unknown>>;
     readonly unmeasured?: readonly UnmeasuredFigure[];
   };
+  /**
+   * What the run that wrote this record did not measure, each with the code a verdict reads for it: the quick
+   * qualification of `plugin-qualify-sync` takes no soak, and says so here rather than leave it unstated.
+   */
+  readonly notMeasured?: readonly NotMeasured[];
   /** Who measured and when. */
   readonly tool: Readonly<Record<string, string>>;
   readonly measuredAt: string;
@@ -157,6 +163,12 @@ export interface QualificationRecord {
     /** Whether the machine met the protocol's optimised profile: a figure that did not is not a reference figure. */
     readonly meetsProtocol: boolean;
   };
+}
+
+/** One dimension a run did not measure, and the code that says so. */
+export interface NotMeasured {
+  readonly dimension: string;
+  readonly code: string;
 }
 
 const safe = (text: string): string => text.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -191,7 +203,11 @@ export function tiersOf(judgment: Judgment): RecordTiers {
   };
 }
 
-export function buildQualificationRecord(judgment: Judgment, copy: { file: string; sha256: string; bytes: number }): QualificationRecord {
+export function buildQualificationRecord(
+  judgment: Judgment,
+  copy: { file: string; sha256: string; bytes: number },
+  notMeasured: readonly NotMeasured[] = [],
+): QualificationRecord {
   const o = judgment.output;
   return {
     schema: QUALIFICATION_RECORD_SCHEMA,
@@ -215,6 +231,7 @@ export function buildQualificationRecord(judgment: Judgment, copy: { file: strin
       ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }),
       ...(unmeasuredFigures(o).length === 0 ? {} : { unmeasured: unmeasuredFigures(o) }),
     },
+    ...(notMeasured.length === 0 ? {} : { notMeasured }),
     tool: o.run.tools,
     measuredAt: o.run.startedAt,
     probe: {
@@ -236,16 +253,9 @@ export function qualificationRecordOf(probeBytes: Uint8Array, judgment: Judgment
   return buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(probeBytes), bytes: probeBytes.length });
 }
 
-/** A file whole or not at all: written beside its name and renamed over it. */
-function writeWhole(path: string, bytes: string | Uint8Array): void {
-  const pending = `${path}.new`;
-  writeFileSync(pending, bytes);
-  renameSync(pending, path);
-}
-
 /** The record rewritten whole or not at all, with its `history` block; nothing else in it is changed by the caller. */
 export function rewriteRecord(path: string, record: QualificationRecord): void {
-  writeWhole(path, `${JSON.stringify(record, null, 2)}\n`);
+  writeFileWhole(path, `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export interface WrittenQualification {
@@ -259,14 +269,19 @@ export interface WrittenQualification {
  * record names the SHA-256 of the copy as it is on disk, read back, so a record never names bytes that
  * are not there. A rescan of the same binary and offer replaces both.
  */
-export function writeQualification(dir: string, probeBytes: Uint8Array, judgment: Judgment): WrittenQualification {
+export function writeQualification(
+  dir: string,
+  probeBytes: Uint8Array,
+  judgment: Judgment,
+  notMeasured: readonly NotMeasured[] = [],
+): WrittenQualification {
   mkdirSync(dir, { recursive: true });
   const probePath = join(dir, probeCopyFileName(judgment.output));
-  writeWhole(probePath, probeBytes);
+  writeFileWhole(probePath, probeBytes);
   const copy = readFileSync(probePath);
-  const record = buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(copy), bytes: copy.length });
+  const record = buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(copy), bytes: copy.length }, notMeasured);
   const recordPath = join(dir, recordFileName(judgment.output));
-  writeWhole(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+  writeFileWhole(recordPath, `${JSON.stringify(record, null, 2)}\n`);
   return { recordPath, probePath, record };
 }
 

@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ClapQualifyError, clapQualifyTools, proberOffer, type RtSafetyDocument } from "./clap-qualify.js";
+import { locateNativeTool } from "./tool-paths.js";
 import type { HostProfile } from "./host-profiles.js";
 import { OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
 import { IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST } from "./qualification-record.js";
@@ -31,6 +32,7 @@ import {
   CLAP_SWEEP_FRAMES,
   LV2_HOSTING_BLOCK_FRAMES,
   LV2_HOSTING_TIMEOUT_S,
+  LV2_MEASURE_TOOL_NAME,
   PROBE_RUNNER_DEFAULT,
   PROBE_RUNNER_ENV,
 } from "./qualify-declarations.js";
@@ -69,6 +71,8 @@ export interface ProbeTargetOptions {
   readonly rates: readonly number[];
   /** Host extensions to offer beyond the prober's own (a CLAP run). */
   readonly offer?: readonly string[];
+  /** The wall clock the runner gives one run, in seconds; else the format's declared one. */
+  readonly wallS?: number;
   readonly run?: ProbeRun;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly exists?: (path: string) => boolean;
@@ -76,7 +80,7 @@ export interface ProbeTargetOptions {
 
 /** The runner's arguments for a CLAP file; `child` is the prober the runner starts. */
 export function clapRunnerArgs(
-  options: { rates: readonly number[]; offer?: readonly string[]; out: string; log: string; child: string },
+  options: { rates: readonly number[]; offer?: readonly string[]; wallS?: number; out: string; log: string; child: string },
   binaryPath: string,
   id: string | undefined,
 ): string[] {
@@ -92,7 +96,7 @@ export function clapRunnerArgs(
     String(CLAP_SWEEP_BLOCKS),
     ...(options.offer === undefined || options.offer.length === 0 ? [] : ["--offer", options.offer.join(",")]),
     "--wall-s",
-    String(CLAP_QUALIFY_TIMEOUT_S),
+    String(options.wallS ?? CLAP_QUALIFY_TIMEOUT_S),
     "--out",
     options.out,
     "--log",
@@ -103,19 +107,19 @@ export function clapRunnerArgs(
 }
 
 /**
- * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by the runner's own LV2
- * child. The runner of plugin-hostd 0.4.0 starts a CLAP prober only (the LV2 child, plugin-hostd#76, is in no release yet), so
- * against it this run ends with the runner's own refusal, which {@link runOne} reports.
+ * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by `lv2_measure`: the one this run
+ * located when `child` names it, else the one the runner looks for where the packages install it.
  */
-export function lv2RunnerArgs(options: { rates: readonly number[]; out: string; log: string }, uri: string): string[] {
+export function lv2RunnerArgs(options: { rates: readonly number[]; wallS?: number; out: string; log: string; child?: string }, uri: string): string[] {
   return [
     "run",
+    ...(options.child === undefined ? [] : ["--child", options.child]),
     "--rates",
     options.rates.join(","),
     "--quantum",
     String(LV2_HOSTING_BLOCK_FRAMES),
     "--wall-s",
-    String(LV2_HOSTING_TIMEOUT_S),
+    String(options.wallS ?? LV2_HOSTING_TIMEOUT_S),
     "--out",
     options.out,
     "--log",
@@ -140,15 +144,20 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget
     let args: string[];
     let runEnv: Record<string, string | undefined> = { ...env };
     let expectedId: string;
+    const wall = options.wallS === undefined ? {} : { wallS: options.wallS };
     if (target.format === "clap") {
       if (target.binaryPath === undefined) throw new ProbeRunnerError(`${target.uri}: no .clap to load; name the file or a directory holding it`);
       expectedId = target.uri.startsWith("urn:clap:") ? target.uri.slice("urn:clap:".length) : target.uri;
       const { tool: child, interposer } = clapQualifyTools(env, options.exists ?? existsSync);
-      args = clapRunnerArgs({ rates: options.rates, ...(options.offer === undefined ? {} : { offer: options.offer }), out, log, child }, target.binaryPath, expectedId);
+      args = clapRunnerArgs({ rates: options.rates, ...(options.offer === undefined ? {} : { offer: options.offer }), ...wall, out, log, child }, target.binaryPath, expectedId);
       runEnv = { ...env, LD_PRELOAD: interposer };
     } else {
       expectedId = target.uri;
-      args = lv2RunnerArgs({ rates: options.rates, out, log }, target.uri);
+      const child = locateNativeTool(LV2_MEASURE_TOOL_NAME, env, options.exists ?? existsSync).path;
+      args = lv2RunnerArgs(
+        { rates: options.rates, ...wall, out, log, ...(child === undefined ? {} : { child }) },
+        target.uri,
+      );
     }
     const r = (options.run ?? spawnRunner)(tool, args, runEnv);
     if (r.error !== undefined) {

@@ -17,7 +17,8 @@
     "node": ">=18"
   },
   "bin": {
-    "plugin-qualify": "./bin/plugin-qualify.mjs"
+    "plugin-qualify": "./bin/plugin-qualify.mjs",
+    "plugin-qualify-sync": "./bin/plugin-qualify-sync.mjs"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

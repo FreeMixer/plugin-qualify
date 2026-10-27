@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+# the path unit is armed once the package is configured: it runs nothing until a plugin directory changes, and
+# then the service waits for a minute of quiet before it sweeps
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
+	deb-systemd-invoke start plugin-qualify-sync.path >/dev/null || true
+fi
+
+exit 0

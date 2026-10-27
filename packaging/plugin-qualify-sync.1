@@ -1,0 +1,41 @@
+.TH PLUGIN-QUALIFY-SYNC 1 "October 2026" "plugin-qualify" "User Commands"
+.SH NAME
+plugin-qualify-sync \- qualify every plugin on the machine once, and again when its files change
+.SH SYNOPSIS
+.B plugin-qualify-sync
+[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
+.SH DESCRIPTION
+Finds every CLAP and LV2 plugin on the search paths and gives each new or changed one the quick
+qualification: its pin, the real-time safety sweep, cost and latency, and its descriptor. A plugin whose
+files hash as they did when it was qualified is skipped. The soak is not part of it, and each record says so.
+.PP
+Each plugin runs in processes of its own under a wall clock (\fBbudget_s\fR). One that crashes, hangs or is
+refused is recorded as such, and the run goes on to the next. The pin file plugin-hostd loads as
+\fBpin_file\fR is written whole after every plugin. When plugin-hostd answers on its command port, the
+changed pins are also sent to it with \fBpin_set\fR; while a controller holds that port, they apply at its
+next start.
+.PP
+The last line on standard output counts the plugins: qualified, skipped, refused, crashed, hung,
+unmeasured, and the seconds the run took.
+.SH OPTIONS
+.TP
+.B \-\-system
+The directories of a system service, under /var/lib/omx.
+.TP
+.B \-\-force
+Qualify every plugin again, recorded or not.
+.TP
+.BI \-\-config " file"
+The settings file (default /etc/omx/qualify.conf).
+.TP
+.BI \-\- "setting value"
+Any setting of the file, as a flag: \fB\-\-budget\-s 30\fR for \fBbudget_s 30\fR.
+\fBplugin-qualify-sync \-\-help\fR lists them with their defaults.
+.SH FILES
+/etc/omx/qualify.conf, /var/lib/omx/qualified.pins, /var/lib/omx/qualification, /var/lib/omx/descriptors,
+/var/lib/omx/qualify-sync.json
+.SH EXIT STATUS
+0 the run went through, whatever the verdicts; 2 it could not run.
+.SH SEE ALSO
+.BR plugin-qualify (1),
+.BR plugin-hostd (1)

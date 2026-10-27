@@ -76,3 +76,22 @@ set -e
 [ "$rc" -eq 2 ] || fail "lv2_host_probe on a plugin the bundle lacks exited $rc, not 2"
 grep -q 'could not find urn:plugin-qualify:fixture:no-such-plugin' "$out/probe.txt" || fail "lv2_host_probe did not name the plugin it could not find"
 echo "check-installed: $dir carries the LV2 host probe"
+
+# the sync's units: shipped, the timer and the path unit enabled by the install, and no sweep run inside it
+for unit in plugin-qualify-sync.service plugin-qualify-sync.timer plugin-qualify-sync.path; do
+  [ -f "/usr/lib/systemd/system/$unit" ] || [ -f "/lib/systemd/system/$unit" ] || fail "the package installs no $unit"
+done
+[ -L /etc/systemd/system/timers.target.wants/plugin-qualify-sync.timer ] || fail "the install did not enable plugin-qualify-sync.timer"
+[ -L /etc/systemd/system/paths.target.wants/plugin-qualify-sync.path ] || fail "the install did not enable plugin-qualify-sync.path"
+[ ! -e /var/lib/omx/qualify-sync.json ] || fail "a sweep ran inside the package transaction"
+[ -f /etc/omx/qualify.conf ] || fail "the package installs no /etc/omx/qualify.conf"
+# the installed sync over the safe fixtures, with nothing set but where it looks and writes
+mkdir -p "$out/sync/clap" "$out/sync/lv2"
+cp "$safe" "$out/sync/clap/"
+cp -r "$lv2/rt-safe.lv2" "$out/sync/lv2/"
+bare plugin-qualify-sync --clap-path "$out/sync/clap" --lv2-path "$out/sync/lv2" --lv2-extra "" --pin-file "$out/sync/qualified.pins" \
+  --qualification-dir "$out/sync/q" --descriptor-dir "$out/sync/d" --state-file "$out/sync/state.json" --hostd-port 0 > "$out/sync.txt" ||
+  fail "plugin-qualify-sync failed"
+grep -q '^qualified 2, skipped 0, refused 0, crashed 0, hung 0, unmeasured 0, ' "$out/sync.txt" || fail "plugin-qualify-sync: $(cat "$out/sync.txt")"
+[ "$(grep -c ' verdict=in-process$' "$out/sync/qualified.pins")" -eq 2 ] || fail "the sync's pin file does not pin both fixtures in-process"
+echo "check-installed: plugin-qualify-sync qualifies a CLAP and an LV2 plugin, and its units are enabled"

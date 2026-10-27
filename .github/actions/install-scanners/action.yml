@@ -1,5 +1,5 @@
 name: Install the scanners the tests read real plugins with
-description: python3-lilv and jsonschema, omx-clap-scan with omx-clap-host's fake plugin, and two LV2 plugin packages, so the scanner goldens run on CI and never skip there.
+description: python3-lilv and jsonschema, omx-clap-scan with omx-clap-host's fake plugin, two LV2 plugin packages and jackd, so the scanner goldens and the sync's daemon test run on CI and never skip there.
 
 # Shared by ci.yml and publish.yml, after install-plugin-hostd (which adds the OpenMixer channel to apt).
 # src/workflows-agree.test.ts fails if a workflow stops using this action. The lilv binding is pure ctypes, so the
@@ -14,7 +14,8 @@ runs:
       run: |
         set -euo pipefail
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends python3-lilv python3-jsonschema zam-plugins calf-plugins omx-clap-host omx-clap-host-tests
+        # jackd2: a dummy JACK server, so the sync's test chains two plugins in a real omx-clap-host worker
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-lilv python3-jsonschema zam-plugins calf-plugins omx-clap-host omx-clap-host-tests jackd2
         # the descriptor writer holds every scanned descriptor to the schema (tools/descriptors.py): the distribution's
         # jsonschema serves the system interpreter, and a setup-python interpreter gets its own from pip
         python3 -c 'import jsonschema' 2>/dev/null || python3 -m pip install --quiet jsonschema
