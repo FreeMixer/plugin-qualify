@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { Adjustment } from "./history-adjust.js";
 import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
@@ -59,6 +60,32 @@ export interface RecordTiers {
 export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "mod-host", clap: "omx-clap-host" };
 export const IN_PROCESS_TIER_HOST = "openmixer-console";
 
+/**
+ * What the running history made of the measured verdicts, for one host class: the second verdict beside the measured one.
+ * Written by `plugin-qualify adjust --history`; the measured `verdicts` above are never changed by it. A record without the
+ * block was never adjusted.
+ */
+export interface HistoryBlock {
+  /** The machine class of the history's lines, `arch/cores/clock`. */
+  readonly hostClass: string;
+  /** The history file as it was named. */
+  readonly file: string;
+  /** The UTC time the history was read at (ISO 8601). */
+  readonly at: string;
+  /** The line looked for: plugin-hostd's uri and the digest of the first file of the pin; absent when the record holds no whole pin. */
+  readonly key?: { readonly uri: string; readonly digest: string };
+  /** Whether the history holds a line of this plugin binary on this host class. */
+  readonly found: boolean;
+  /** The windows the line counts. */
+  readonly windows?: { readonly solo: number; readonly grouped: number };
+  /** What plugin-hostd's `history_get` would answer of the line. */
+  readonly summary?: { readonly crashed: boolean; readonly raisesXruns: boolean };
+  /** The keys of the line this tool does not know, as written. */
+  readonly unknownKeys?: Readonly<Record<string, string>>;
+  /** One per host profile adjusted: the measured pin verdict, the adjusted one, the move and the reason code. */
+  readonly verdicts: readonly ({ readonly host: string } & Adjustment)[];
+}
+
 export interface QualificationRecord {
   readonly schema: typeof QUALIFICATION_RECORD_SCHEMA;
   readonly plugin: { readonly format: string; readonly id: string; readonly name?: string };
@@ -80,6 +107,8 @@ export interface QualificationRecord {
   /** Who measured and when. */
   readonly tool: Readonly<Record<string, string>>;
   readonly measuredAt: string;
+  /** The second verdict, per host class of the history that was read; absent until `adjust --history` has run. */
+  readonly history?: readonly HistoryBlock[];
   /** The probe output this record judged. */
   readonly probe: {
     readonly file: string;
@@ -173,6 +202,11 @@ function writeWhole(path: string, bytes: string | Uint8Array): void {
   const pending = `${path}.new`;
   writeFileSync(pending, bytes);
   renameSync(pending, path);
+}
+
+/** The record rewritten whole or not at all, with its `history` block; nothing else in it is changed by the caller. */
+export function rewriteRecord(path: string, record: QualificationRecord): void {
+  writeWhole(path, `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export interface WrittenQualification {
