@@ -15,6 +15,13 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, wr
 import { dirname } from "node:path";
 
 import {
+  adjustHelpText,
+  adjustRecords,
+  adjustTable,
+  adjustedPinEntries,
+  parseAdjustArgs,
+  readRecords,
+  rewriteRecord,
   ClapScanError,
   EXIT_CODE,
   clapLoader,
@@ -88,6 +95,57 @@ if (process.argv[2] === "judge") {
       : textTable(result.verdicts),
   );
   process.exit(judgeExitCode(result));
+}
+
+if (process.argv[2] === "adjust") {
+  const a = parseAdjustArgs(process.argv.slice(3));
+  if (!a.ok) {
+    process.stderr.write(`plugin-qualify adjust: ${a.error}\n\n${adjustHelpText()}`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  if (a.args.help) {
+    process.stdout.write(adjustHelpText());
+    process.exit(EXIT_CODE.allQualified);
+  }
+  const hosts = resolveHostProfiles(a.args.hostProfiles);
+  if (!hosts.ok) {
+    for (const r of hosts.refused) process.stderr.write(`plugin-qualify adjust: --host-profile ${r.spec}: ${r.problem}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  let text;
+  try {
+    text = readFileSync(a.args.history, "utf8");
+  } catch (e) {
+    process.stderr.write(`plugin-qualify adjust: --history ${a.args.history}: cannot read: ${e.message}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  const dir = a.args.qualificationDir ?? defaultQualificationDir(process.env);
+  const read = readRecords(dir);
+  for (const f of read.failures) process.stderr.write(`plugin-qualify adjust: ${f.file}: ${f.problem}\n`);
+  if (read.records.length === 0) {
+    process.stderr.write(`plugin-qualify adjust: no qualification record in ${dir}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  const now = a.args.now ?? Math.floor(Date.now() / 1000);
+  const done = adjustRecords(read.records, text, { profiles: hosts.profiles, file: a.args.history, now, ...(a.args.hostClass === undefined ? {} : { hostClass: a.args.hostClass }) });
+  if (!done.ok) {
+    process.stderr.write(`plugin-qualify adjust: ${done.problem}\n`);
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  if (a.args.pins !== undefined && done.hostClasses.length !== 1) {
+    process.stderr.write(
+      `plugin-qualify adjust: --pins writes one adjusted verdict per plugin, and ${a.args.history} holds ${String(done.hostClasses.length)} host classes (${done.hostClasses.join(", ")}); name one with --host-class\n`,
+    );
+    process.exit(EXIT_CODE.couldNotMeasure);
+  }
+  for (const i of done.ignored) process.stderr.write(`plugin-qualify adjust: ${a.args.history}:${String(i.line)}: not read: ${i.problem}\n`);
+  for (const r of done.records) {
+    rewriteRecord(r.path, r.record);
+    process.stderr.write(`plugin-qualify adjust: record ${r.path}\n`);
+  }
+  if (a.args.pins !== undefined) writePins(a.args.pins, pinsFile(adjustedPinEntries(done.records, done.hostClasses[0], hosts.profiles[0].id)));
+  process.stdout.write(a.args.format === "json" ? `${JSON.stringify(done.records.map((r) => r.record), null, 2)}\n` : adjustTable(done.records));
+  process.exit(EXIT_CODE.allQualified);
 }
 
 const parsed = parseQualifyArgs(process.argv.slice(2));
