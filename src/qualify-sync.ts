@@ -469,12 +469,17 @@ function writeUnmeasuredRecord(ctx: SyncContext, item: SyncItem, files: readonly
 /** Each judged run of a pass as the plugins it qualified: the record written, the pin taken, the outcome. */
 function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgment: Judgment }[]): SyncPlugin[] {
   const host = ctx.settings.hostProfile.id;
-  return runs.map(({ bytes, judgment }) => {
+  const entries = runs.map(({ bytes, judgment }) => {
     const { recordPath } = writeQualification(ctx.settings.qualificationDir, bytes, judgment, QUICK_NOT_MEASURED);
     const pin = judgmentPinEntries(judgment, host)[0];
     const { outcome, code } = outcomeOf(judgment, host);
-    return { uri: pin?.uri ?? judgment.output.plugin.id, outcome, ...(code === undefined ? {} : { code }), ...(pin === undefined ? {} : { pin }), record: recordPath };
+    const plugin: SyncPlugin = { uri: pin?.uri ?? judgment.output.plugin.id, outcome, ...(code === undefined ? {} : { code }), ...(pin === undefined ? {} : { pin }), record: recordPath };
+    return { plugin, judgedHere: judgment.hosts.some((h) => h.verdict.host === host) };
   });
+  // The pass also judges the console's other tier, which writes its own record; that run is no second plugin of this
+  // sweep, so only the runs that judged this host count, and a plugin none of them judged is counted once.
+  const here = entries.filter((e) => e.judgedHere).map((e) => e.plugin);
+  return here.length > 0 || entries.length === 0 ? here : [entries[0]!.plugin];
 }
 
 function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][number], env: Readonly<Record<string, string | undefined>>) {
