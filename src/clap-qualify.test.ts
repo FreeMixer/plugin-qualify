@@ -327,7 +327,12 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(record.probe.file).toBe(copyName);
     expect(record.probe.sha256).toBe(sha256(join(safeOut, copyName)));
     expect(record.binary.sha256).toBe(sha256(SAFE));
-    expect(record.verdicts.map((v: { host: string; rating: string }) => [v.host, v.rating])).toEqual([[OPENMIXER_CONSOLE_PROFILE.id, "suitable"]]);
+    expect(record.verdicts.map((v: { host: string; rating: string }) => [v.host, v.rating])).toEqual([
+      [OPENMIXER_CONSOLE_PROFILE.id, "suitable"],
+      // the record also holds the isolated tier's verdict, judged whether or not it was asked for
+      ["omx-clap-host", "suitable"],
+    ]);
+    expect(record.tiers.offeredOn).toEqual(["in-process", "isolated"]);
     const unsafe = run(UNSAFE, join(scratch, "unsafe"));
     expect(unsafe.status).toBe(1);
     expect(unsafe.stdout).toContain(HOSTING_CODE.rtSafetyViolations);
