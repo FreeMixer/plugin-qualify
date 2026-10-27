@@ -25,7 +25,7 @@ DESCRIPTOR_DIR_SYSTEM = "/var/lib/omx/descriptors"
 DESCRIPTOR_HASH_PREFIX = 12
 DESCRIPTOR_SCHEMA_ENV = "OMX_CONTRACT_SCHEMA"
 DESCRIPTOR_SCHEMA_INSTALLED = "/usr/share/omx-contract/omx-contract.schema.json"
-DESCRIPTOR_SCHEMA_FLOOR = ">= 3.0.0"
+DESCRIPTOR_SCHEMA_FLOOR = ">= 3.4.0"
 DESCRIPTOR_CODE_SCHEMA = "contract.file.invalid"
 DESCRIPTOR_CODE_SCHEMA_MISSING = "qualify.descriptor.schema-missing"
 DESCRIPTOR_CODE_BINARY_UNHASHED = "qualify.descriptor.binary-unhashed"
