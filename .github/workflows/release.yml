@@ -102,11 +102,21 @@ jobs:
         if: startsWith(matrix.image, 'fedora')
         run: |
           set -euo pipefail
-          dnf install -y ./pkgs/plugin-qualify-[0-9]*.x86_64.rpm
+          # a mirror that fails in mid-transfer (curl 56, zchunk checksums) is tried again; a real install error fails the
+          # third attempt with its own output on the log
+          dnf_retry() {
+            local n
+            for n in 1 2 3; do
+              dnf install -y --setopt=retries=5 "$@" && return 0
+              [ "$n" -lt 3 ] && { echo "::warning::dnf install failed, attempt $n of 3"; sleep 15; }
+            done
+            return 1
+          }
+          dnf_retry ./pkgs/plugin-qualify-[0-9]*.x86_64.rpm
           rpm -q omx-clap-host
           rpm -qf /usr/share/omx-clap-core/ts | grep -q '^omx-clap-core-[0-9]'
           if rpm -qa --qf '%{NAME}\n' | grep -E -- '-devel$'; then echo "plugin-qualify pulled a -devel package"; exit 1; fi
-          dnf install -y --setopt=install_weak_deps=False gcc make pkgconf-pkg-config clap-devel lv2-devel
+          dnf_retry --setopt=install_weak_deps=False gcc make pkgconf-pkg-config clap-devel lv2-devel
 
       - name: Prepare the container (Debian)
         if: startsWith(matrix.image, 'debian')
