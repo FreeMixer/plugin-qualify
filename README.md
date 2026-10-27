@@ -154,6 +154,37 @@ keeps what a console needs to draw a third-party plugin's controls: an enum para
 the plugin's `value_to_text` renders them), each parameter's module, and the plugin's
 remote-control pages.
 
+## Adjusting a verdict by what the plugin did on this machine
+
+```
+plugin-qualify adjust --history ~/.local/state/plugin-hostd/history --qualification-dir ./qualification --host-profile omx-clap-host
+plugin-qualify adjust --history history --qualification-dir ./qualification --host-class aarch64/4/2400 --pins pins.txt
+```
+
+plugin-hostd keeps a running history of every plugin binary on every host class it ran on (windows run alone and in a
+group, CPU, xrun windows, crashes, restarts, quarantines). `adjust` reads that file directly, so it runs without a daemon,
+and writes a second verdict beside the measured one in each qualification record: a `history` block per host class of the
+file, holding the line it looked for (the plugin's plugin-hostd uri and the digest of the first file of its pin), whether
+the history has it, the windows it counts, and for each `--host-profile` the measured pin verdict, the adjusted one, the
+move (`demote`, `promote` or `none`) and a reason code. The measured `verdicts` and the measurement are never changed: the
+same plugin on another host class has another history and another adjusted verdict.
+
+| move | when | reason |
+|---|---|---|
+| `in-process` to `isolated` | a crash was counted within 30 days, on this host class | `history.crashed` |
+| `in-process` to `isolated` | from 30 grouped windows, the share of xrun windows grouped exceeds the share alone by 5 points | `history.xruns-grouped` |
+| `isolated` to `refused` | three or more solo crashes, the latest within 30 days | `history.crashed-alone` |
+| `isolated` to `in-process` | every reason against the plugin is a `hosting.cost.*` one, 360 windows run alone (six hours), no crash or restart ever counted, no xruns raised when grouped, `cpu_p95_solo` under the host profile's ceiling | `history.steady` |
+| none | no line for this binary on this class | `history.no-record` |
+| none | a line, and no rule moves the verdict | `history.no-change` |
+| none | the line would promote, but the verdict is a fact about the plugin: a real-time-safety, feature, stability, latency or topology reason, an `unknown`, or a `refused` | `history.not-liftable`, with `blockedBy` |
+
+History never lifts a real-time-safety, feature or unknown verdict, and never promotes a refused one; a demotion is one
+step. The thresholds are one table, `HISTORY_POLICY` in `src/history-adjust.ts`. `--pins <file>` writes the pins with the
+adjusted verdict of the first `--host-profile` instead of the measured one; it needs exactly one host class, so name one
+with `--host-class` when the history holds several. `--now <seconds>` fixes the time the history is read at. A line of the
+history outside its grammar is not read and is named on stderr; a history of a version this tool does not know is refused.
+
 ## LV2 plugins: the hosting measurement
 
 `tools/lv2-measure.mjs` measures the hosting dimensions (`stability`, `rtSafety`, `features`) through
