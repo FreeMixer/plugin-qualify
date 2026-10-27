@@ -1,6 +1,6 @@
 {
   "name": "@openmixer/plugin-qualify",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, and a fail-closed rating.",
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -97,6 +97,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@openmixer/omx-contract": "^3.0.0"
+    "@openmixer/omx-contract": "^3.4.0"
   }
 }
