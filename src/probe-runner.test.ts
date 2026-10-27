@@ -57,7 +57,7 @@ const successText = fixtureText("success-msi");
 
 /** Both measured hosts take every plugin: the tests that are not about admission do not depend on an installed host. */
 const HOSTS_ADMIT: AdmissionRuns = {
-  modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "activate", resp: 0 }, { cmd: "remove", resp: 0 }] }),
+  modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }] }),
   jalv: () => ({ installed: true, stillRunning: true, status: null, signal: null, stderr: "" }),
 };
 
