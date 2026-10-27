@@ -35,7 +35,7 @@ CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.7.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
-OMX_CONTRACT_VERSION := 3.0.0
+OMX_CONTRACT_VERSION := 3.4.0
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.14.0

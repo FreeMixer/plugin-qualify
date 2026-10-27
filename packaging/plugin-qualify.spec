@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.14.1
+Version: 0.15.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -21,7 +21,7 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
-BuildRequires: pkgconfig(omx-contract) >= 3.0.0
+BuildRequires: pkgconfig(omx-contract) >= 3.4.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
 BuildRequires: systemd-rpm-macros
@@ -104,6 +104,23 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.0-1
+- plugin-qualify-sync (new): qualifies every installed CLAP and LV2 plugin once, and again when
+  its files change, as a systemd service started after boot and when a plugin is installed;
+  it writes the pin file and the qualification records, and a plugin that crashes or
+  hangs is recorded as such. tools/mod-host-admit.mjs ships with its dist (#154).
+- An LV2 record carries the latency and the cost measured at the run's rate, and names the
+  figures a run could not take, so an LV2 plugin can be live (#163).
+- plugin-qualify adjust --history: the second verdict is decided from plugin-hostd's running
+  history, demoting or promoting on cost alone and never lifting a refusal, and --pins
+  writes it (#158).
+- mod-host admission sends add and remove only, with no activate (#159); mod-host and jalv
+  verdicts are measured by running the plugin, and the record holds the console's two
+  tiers (#152).
+- --all covers the LV2 bundles on the LV2 path as it covers CLAP; a bundle is a directory
+  holding manifest.ttl (#66, #152).
+- The --no-host-sweep flag, which nothing read, is removed.
+- Floors: omx-contract >= 3.4.0.
 * Sat Oct 24 2026 Pau Aliagas <linuxnow@gmail.com> - 0.14.1-1
 - descriptors.py reads its scan argument intermixed with the options: on
   Python 3.11 and 3.12.3 (Debian bookworm, Ubuntu noble) `clap --descriptor-dir
