@@ -133,6 +133,12 @@ const QUANTUM_PINNED_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/buf-size#powerOf2BlockLength",
 ];
 
+/**
+ * Promises the adapter keeps independent of what the profile's in-process list offers: the
+ * adapter's ports are its own memory, so `lv2:inPlaceBroken` always holds (omx-clap-core #94).
+ */
+const ALWAYS_MET_FEATURES: readonly string[] = ["http://lv2plug.in/ns/lv2core#inPlaceBroken"];
+
 /** The verdict's message codes, declared in their union list file. */
 import { HOSTING_CODE } from "./hosting-codes.js";
 export { HOSTING_CODE };
@@ -685,7 +691,11 @@ export function featureReasons(
       );
     }
     const missing = required.filter(
-      (f) => !provided.includes(f) && !refused.includes(f) && !QUANTUM_PINNED_FEATURES.includes(f),
+      (f) =>
+        !provided.includes(f) &&
+        !refused.includes(f) &&
+        !QUANTUM_PINNED_FEATURES.includes(f) &&
+        !ALWAYS_MET_FEATURES.includes(f),
     );
     if (missing.length > 0) {
       out.push(
