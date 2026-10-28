@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { HOSTING_CODE } from "./hosting-codes.js";
+import type { AdmissionRuns } from "./host-admission.js";
 import { JALV_PROFILE, OMX_CLAP_HOST_CONFIGURED_EXTENSIONS, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { ProbeRunnerError, clapRunnerArgs, lv2RunnerArgs, probeRunnerTool, probeTarget, qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { fixtureJson, fixtureText, clapLineFixture, probeOutputOfLine } from "./probe-output-fixtures.js";
@@ -53,6 +54,12 @@ function runner(document: ((args: readonly string[]) => string) | undefined, sta
 }
 
 const successText = fixtureText("success-msi");
+
+/** Both measured hosts take every plugin: the tests that are not about admission do not depend on an installed host. */
+const HOSTS_ADMIT: AdmissionRuns = {
+  modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }] }),
+  jalv: () => ({ installed: true, stillRunning: true, status: null, signal: null, stderr: "" }),
+};
 
 describe("the runner's arguments", () => {
   it("a CLAP file is run by the prober the package locates, under the declared sweep and deadline", () => {
@@ -239,7 +246,7 @@ describe("qualifyTargets: a pass over the targets", () => {
     doc.plugin = { format: "lv2", id: LV2.uri };
     doc.grid[0].rtSafety.locks = 4;
     const { run, calls } = runner(() => JSON.stringify(doc));
-    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE] });
+    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], admissions: HOSTS_ADMIT });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args.at(-1)).toBe("lv2:urn:example:zero-path");
     expect(calls[0]?.preload).toBeUndefined();

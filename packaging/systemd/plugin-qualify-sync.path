@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# A plugin installed into one of these directories is qualified soon after: the service waits for a minute of
+# quiet first. A drop-in (systemctl edit plugin-qualify-sync.path) adds a directory of qualify.conf's.
+[Unit]
+Description=Qualify plugins as they are installed
+Documentation=man:plugin-qualify-sync(1)
+
+[Path]
+PathChanged=/usr/lib/lv2
+PathChanged=/usr/lib64/lv2
+PathChanged=/usr/local/lib/lv2
+PathChanged=/usr/lib/clap
+PathChanged=/zynthian/zynthian-plugins/lv2
+PathChanged=/zynthian/zynthian-my-data/plugins/lv2
+Unit=plugin-qualify-sync.service
+
+[Install]
+WantedBy=paths.target

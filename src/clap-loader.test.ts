@@ -74,7 +74,7 @@ function answering(stdout: string, status = 0): { run: ClapScanRun; calls: strin
 }
 
 describe("parseClapScan — the tool's document, refused when it is not one", () => {
-  it("the real fake.clap golden: one file, the plugins omx-clap-core 0.14.0 builds into it", () => {
+  it("the real fake.clap golden: one file, the plugins omx-clap-host 0.23.0's fake.clap builds into it", () => {
     const doc = parseClapScan(FAKE_JSON);
     expect(doc.files).toHaveLength(1);
     const file = doc.files[0]!;
@@ -99,6 +99,14 @@ describe("clapScanDescriptors — the interchange rows", () => {
   it("a plugin is `urn:clap:<id>`, format clap, its binary path resolved", () => {
     expect(rows.map((r) => r.uri)).toEqual(FAKE_NAMES.map((n) => `urn:clap:${FAKE_ID}.${n}`));
     expect(rows.every((r) => r.format === "clap" && r.binaryPath.endsWith("/fake.clap") && r.binaryPath.startsWith("/"))).toBe(true);
+  });
+
+  it("omx-clap-host 0.23.0's row names the remote-control pages: passthrough has two, every other plugin has none", () => {
+    expect(byId("passthrough").remoteControls).toEqual([
+      { id: 7, section: "Main", name: 'Page "A"\t1', params: ["0", "1", null, "99", null, null, null, null] },
+      { id: 8, section: "", name: "Two", params: [null, null, null, null, null, null, null, "0"] },
+    ]);
+    expect(rows.filter((r) => r.uri !== byId("passthrough").uri).every((r) => r.remoteControls?.length === 0)).toBe(true);
   });
 
   it("the parameter is a control keyed by its CLAP id, the range and default as declared", () => {
@@ -323,7 +331,9 @@ describe("enum labels, modules and remote-control pages — the controls fixture
     const doc = JSON.parse(CONTROLS_JSON);
     doc.files[0].plugins[0].remote_controls.push({ id: 8, section: "", name: "preset", params: [5, null, null, null, null, null, null, null], forPreset: true });
     expect(clapScanDescriptors(parseClapScan(JSON.stringify(doc)))[0]!.remoteControls?.map((p) => p.id)).toEqual([7]);
-    expect(clapScanDescriptors(parseClapScan(FAKE_JSON)).every((r) => !("remoteControls" in r))).toBe(true);
+    const older = JSON.parse(FAKE_JSON);
+    for (const plugin of older.files[0].plugins) delete plugin.remote_controls;
+    expect(clapScanDescriptors(parseClapScan(JSON.stringify(older))).every((r) => !("remoteControls" in r))).toBe(true);
   });
 
   it("refuses a label or a page slot that is not one", () => {
@@ -387,17 +397,22 @@ describe("--all — the standard CLAP search path", () => {
 describe("--all — both formats, and a search directory that cannot be read", () => {
   const none = '{"scanner":"omx-clap-scan","version":"0","files":[]}';
 
-  it("refuses, naming the LV2 bundles, when the LV2 path holds any: the CLAP side is never reported alone", () => {
+  it("covers the LV2 plugins of every bundle on the LV2 path, then the CLAP plugins: one target per plugin", () => {
     const clapDir = join(scratch, "both", "clap");
     const lv2Dir = join(scratch, "both", "lv2");
     touch("both/clap/x.clap");
-    mkdirSync(join(lv2Dir, "gain.lv2"), { recursive: true });
-    writeFileSync(join(lv2Dir, "gain.lv2", "manifest.ttl"), "");
-    const { run, calls } = answering(none);
-    const env = { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir, ...NO_SYSTEM };
-    expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(ClapScanError);
-    expect(() => discoverAllTargets({ run, env, home: lv2Dir })).toThrow(/1 LV2 bundle.*gain\.lv2/);
-    expect(calls).toEqual([]);
+    for (const [bundle, uris] of [["gain.lv2", ["urn:t:gain"]], ["pair.lv2", ["urn:t:a", "urn:t:b", "urn:t:gain"]]] as const) {
+      mkdirSync(join(lv2Dir, bundle), { recursive: true });
+      writeFileSync(
+        join(lv2Dir, bundle, "manifest.ttl"),
+        uris.map((u) => `<${u}>\n    a lv2:Plugin ;\n    lv2:binary <${bundle}.so> .\n`).join("\n"),
+      );
+    }
+    const { run } = answering(none);
+    const targets = discoverAllTargets({ run, env: { [CLAP_PATH_ENV]: clapDir, LV2_PATH: lv2Dir, ...NO_SYSTEM }, home: lv2Dir });
+    // a URI in two bundles is one plugin, the first bundle's
+    expect(targets.map((t) => [t.format, t.uri])).toEqual([["lv2", "urn:t:gain"], ["lv2", "urn:t:a"], ["lv2", "urn:t:b"]]);
+    expect(targets[0]?.bundle).toBe(join(lv2Dir, "gain.lv2"));
   });
 
   it("walks the CLAP path as before when the LV2 path holds no bundle", () => {
@@ -410,7 +425,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
     expect(calls.map((c) => c[2])).toEqual([clapDir]);
   });
 
-  it("the command exits 2 with both formats present", () => {
+  it("the command exits 2, naming the empty search, when no plugin is on either path", () => {
     const bin = join(PKG, "bin", "plugin-qualify.mjs");
     if (!existsSync(join(PKG, "dist", "index.js"))) return;
     const lv2Dir = join(scratch, "cli", "lv2");
@@ -421,7 +436,7 @@ describe("--all — both formats, and a search directory that cannot be read", (
       env: { ...process.env, HOME: join(scratch, "cli", "home"), LV2_PATH: lv2Dir, CLAP_PATH: join(scratch, "cli", "none"), ...NO_SYSTEM },
     });
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/LV2 bundle/);
+    expect(r.stderr).toMatch(/no plugin to measure/);
   });
 
   it("a directory that cannot be read is a named scan refusal, not a crash", () => {

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The quick qualification of every plugin added or changed since the last run (plugin-qualify-sync(1)).
+# Started by plugin-qualify-sync.timer a little after boot and by plugin-qualify-sync.path when a plugin
+# directory changes; no boot target waits for it.
+[Unit]
+Description=Qualify the plugins added or changed since the last run
+Documentation=man:plugin-qualify-sync(1)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# a package install writes many files: the run starts once the plugin directories have been quiet for a minute
+ExecStart=/usr/bin/plugin-qualify-sync --system --settle-s 60
+StateDirectory=omx
+# The audio comes first, and the machine stays reachable: the lowest CPU priority and the disk only when nothing else
+# wants it; at most two cores' worth of CPU (on a four-core machine two stay free, so sshd and the console answer
+# during a sweep); a memory ceiling the plugins' processes share (one past it is killed and recorded as crashed, the
+# run goes on); a cap on processes and threads; and no real-time scheduling, which a plugin under test must not
+# take from the audio. The Raspberry Pi 4 figures (1000M, 64 tasks) are the ones a sweep was held to by hand there.
+Nice=19
+CPUQuota=200%
+IOSchedulingClass=idle
+MemoryMax=1000M
+TasksMax=64
+RestrictRealtime=yes
+# RuntimeMaxSec= has no effect on a oneshot service, whose run is its start: the start is what is bounded. A run
+# cut short keeps every plugin it finished, and the next one goes on from there.
+TimeoutStartSec=6h
