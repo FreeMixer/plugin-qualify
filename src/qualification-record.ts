@@ -21,6 +21,8 @@ import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
 import { writeFileWhole } from "./whole-file.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { MEASUREMENT_UNMEASURED_REASONS } from "@openmixer/omx-contract";
 
 export const QUALIFICATION_RECORD_SCHEMA = "plugin-qualify.qualification-record/1";
 
@@ -89,6 +91,44 @@ export function unmeasuredFigures(output: ProbeOutput): readonly UnmeasuredFigur
     }));
 }
 
+/** A cell's latency when the run took no figure: the contract's unmeasured word and the hosting code a reader classifies by. */
+export interface UnmeasuredLatency {
+  readonly unmeasuredReason: string;
+  readonly code: string;
+}
+
+/** A grid point as the record writes it: every cell carries `latency`, the figures or why there are none (#201). */
+export type RecordGridPoint = Omit<ProbeGridPoint, "latency"> & {
+  readonly latency: NonNullable<ProbeGridPoint["latency"]> | UnmeasuredLatency;
+};
+
+const UNMEASURED_WORDS: ReadonlySet<string> = new Set(Object.values(MEASUREMENT_UNMEASURED_REASONS).map((r) => r.word));
+const word = (key: keyof typeof MEASUREMENT_UNMEASURED_REASONS): string => MEASUREMENT_UNMEASURED_REASONS[key].word;
+
+/** The unmeasured word of a cell whose run did not end well, by its outcome code. */
+const OUTCOME_WORD: Readonly<Record<string, string>> = {
+  "probe.crashed": word("probeCrashed"),
+  "probe.timeout": word("probeTimeout"),
+  "probe.refused-instantiation": word("refusedInstantiation"),
+  "probe.non-finite-output": word("nonFiniteOutput"),
+};
+
+/**
+ * Why a cell has no latency figure. A cell whose run failed: its outcome's word. A latency step at the cell that did not
+ * end well: the child's own reason, which the runner writes first in the step's detail, when it is a contract word,
+ * else `probe-error`. No latency step at all: the run did not take the figure (`not-attempted`), as a runner or a child
+ * older than the latency arm writes it.
+ */
+export function latencyOfCell(output: ProbeOutput, point: ProbeGridPoint): RecordGridPoint["latency"] {
+  if (point.latency !== undefined) return point.latency;
+  const code = HOSTING_CODE.latencyUnmeasured;
+  if (point.outcome !== PROBE_OK) return { unmeasuredReason: OUTCOME_WORD[point.outcome] ?? word("probeError"), code };
+  const step = output.steps.find((st) => st.step === "latency" && st.rate === point.rate && (st.quantum === undefined || st.quantum === point.quantum));
+  if (step === undefined) return { unmeasuredReason: word("notAttempted"), code };
+  const said = step.detail?.split(":")[0]?.trim() ?? "";
+  return { unmeasuredReason: UNMEASURED_WORDS.has(said) ? said : word("probeError"), code: step.hostingCode ?? code };
+}
+
 /**
  * What the running history made of the measured verdicts, for one host class: the second verdict beside the measured one.
  * Written by `plugin-qualify adjust --history`; the measured `verdicts` above are never changed by it. A record without the
@@ -136,7 +176,7 @@ export interface QualificationRecord {
    * {declaredFrames, measuredFrames}, `cost`, `rtSafety`, `noteSweep`), and the figures the run could not take, named.
    */
   readonly measurements: {
-    readonly grid: readonly ProbeGridPoint[];
+    readonly grid: readonly RecordGridPoint[];
     readonly behaviour?: Readonly<Record<string, unknown>>;
     readonly unmeasured?: readonly UnmeasuredFigure[];
   };
@@ -227,7 +267,7 @@ export function buildQualificationRecord(
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
     measurements: {
-      grid: o.grid,
+      grid: o.grid.map((p) => ({ ...p, latency: latencyOfCell(o, p) })),
       ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }),
       ...(unmeasuredFigures(o).length === 0 ? {} : { unmeasured: unmeasuredFigures(o) }),
     },
