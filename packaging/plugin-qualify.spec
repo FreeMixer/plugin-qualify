@@ -67,7 +67,8 @@ different hosts.
 %install
 packaging/build.sh %{buildroot} %{_prefix}/lib
 %make_install -C native LIBEXECDIR=%{_libexecdir}/%{name}
-install -d %{buildroot}%{_unitdir} %{buildroot}%{_presetdir}
+install -d %{buildroot}%{_unitdir} %{buildroot}%{_presetdir} %{buildroot}%{_systemdgeneratordir}
+install -m 0755 packaging/systemd/plugin-qualify-sync-generator %{buildroot}%{_systemdgeneratordir}/
 install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
   packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
 install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
@@ -100,6 +101,7 @@ fi
 %{_unitdir}/plugin-qualify-sync.service
 %{_unitdir}/plugin-qualify-sync.timer
 %{_unitdir}/plugin-qualify-sync.path
+%{_systemdgeneratordir}/plugin-qualify-sync-generator
 %{_presetdir}/80-plugin-qualify.preset
 %{_prefix}/lib/node_modules/@openmixer/
 %{_libexecdir}/%{name}/
