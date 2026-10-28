@@ -24,6 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { clapQualifyTools } from "./clap-qualify.js";
+import { DISTRIBUTED_DIR_SYSTEM, EMPTY_LAYER, applyDistributed, distributedUri, hostClassOfBoard, matchDistributed, readBoardModel, readDistributedLayer, type DistributedLayer } from "./distributed-records.js";
 import { clapSearchPath, parseClapScan } from "./clap-loader.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
@@ -69,6 +70,8 @@ export const SYNC_SETTINGS: readonly SyncSetting[] = [
   { key: "hostd_port", meaning: "plugin-hostd's command port the new pins are sent to; 0 sends none", default: "5555" },
   { key: "hostd_feedback_port", meaning: "plugin-hostd's feedback port, connected before the command port; 0 is the command port's next", default: "0" },
   { key: "settle_s", meaning: "wait until the plugin directories have been quiet this long before a run", default: "0" },
+  { key: "host_class", meaning: "the machine class whose distributed records are read (a directory name)", default: "the board's own from the device tree (rpi5 on a Raspberry Pi 5), else none" },
+  { key: "distributed_dir", meaning: "the directories of distributed records, colon-separated, each holding <host class>/<set>/", default: `${DISTRIBUTED_DIR_SYSTEM} (system), else $XDG_DATA_HOME/omx/qualification and each $XDG_DATA_DIRS/omx/qualification` },
 ];
 
 export interface SyncSettings {
@@ -83,6 +86,11 @@ export interface SyncSettings {
   readonly hostdPort: number;
   readonly hostdFeedbackPort: number;
   readonly settleS: number;
+  /** The machine class the distributed records are read for; none, and the layer is not read. */
+  readonly hostClass?: string;
+  readonly distributedDirs: readonly string[];
+  /** False under `--no-distributed`. */
+  readonly distributed: boolean;
 }
 
 /** A settings file read: one `key value` per line, `#` starts a comment; a key alone is the empty value. An unknown key is refused by line. */
@@ -105,6 +113,7 @@ export interface SyncArgs {
   readonly config?: string;
   readonly system: boolean;
   readonly force: boolean;
+  readonly noDistributed: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -118,11 +127,13 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let config: string | undefined;
   let system = false;
   let force = false;
+  let noDistributed = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--system") system = true;
     else if (a === "--force") force = true;
+    else if (a === "--no-distributed") noDistributed = true;
     else if (a === "--help") help = true;
     else if (a === "--config" || byFlag.has(a)) {
       const v = argv[++i];
@@ -131,7 +142,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, help, values } };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -141,7 +152,8 @@ export function syncHelpText(): string {
     "",
     `  --config <file>             the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
     "  --system                    a system service's directories, under /var/lib/omx",
-    "  --force                     qualify every plugin again, recorded or not",
+    "  --force                     qualify every plugin again, recorded or not; no distributed record is read",
+    "  --no-distributed            read no distributed record: every plugin not recorded is measured",
     "  --help                      this text",
     ...rows,
     "",
@@ -159,6 +171,7 @@ export function resolveSyncSettings(
   args: SyncArgs,
   env: Readonly<Record<string, string | undefined>>,
   home: string = homedir(),
+  boardModel: () => string | undefined = readBoardModel,
 ): { ok: true; settings: SyncSettings } | { ok: false; error: string } {
   const get = (key: string): string | undefined => args.values.get(key) ?? file.get(key);
   const state = env["XDG_STATE_HOME"] !== undefined && env["XDG_STATE_HOME"] !== "" ? env["XDG_STATE_HOME"] : join(home, ".local", "state");
@@ -186,6 +199,18 @@ export function resolveSyncSettings(
   const hostProfile = shippedHostProfile(profileId);
   if (hostProfile === undefined) return { ok: false, error: `host_profile ${profileId} is not a shipped host profile` };
   const once = (dirs: readonly string[]): string[] => [...new Set(dirs.map((d) => resolve(d)))];
+  const dataHome = env["XDG_DATA_HOME"] !== undefined && env["XDG_DATA_HOME"] !== "" ? env["XDG_DATA_HOME"] : join(home, ".local", "share");
+  const dataDirs = dirList(env["XDG_DATA_DIRS"] ?? "").length > 0 ? dirList(env["XDG_DATA_DIRS"]!) : ["/usr/local/share", "/usr/share"];
+  const distributedNamed = get("distributed_dir");
+  const distributedDirs =
+    distributedNamed !== undefined && distributedNamed !== ""
+      ? dirList(distributedNamed)
+      : args.system
+        ? [DISTRIBUTED_DIR_SYSTEM]
+        : [dataHome, ...dataDirs].map((d) => join(d, "omx", "qualification"));
+  const classNamed = get("host_class");
+  const hostClass = classNamed !== undefined && classNamed !== "" ? classNamed : hostClassOfBoard(boardModel());
+  if (hostClass !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(hostClass)) return { ok: false, error: `host_class ${hostClass} is not a directory name` };
   return {
     ok: true,
     settings: {
@@ -200,6 +225,9 @@ export function resolveSyncSettings(
       hostdPort,
       hostdFeedbackPort: feedbackPort === 0 && hostdPort !== 0 ? hostdPort + 1 : feedbackPort,
       settleS,
+      ...(hostClass === undefined ? {} : { hostClass }),
+      distributedDirs: once(distributedDirs),
+      distributed: !args.noDistributed,
     },
   };
 }
@@ -390,6 +418,8 @@ export interface SyncEntry {
   readonly plugins: readonly SyncPlugin[];
   readonly qualifiedAt: string;
   readonly seconds: number;
+  /** The distributed set the plugins were taken from, when they were not measured here. */
+  readonly distributed?: string;
 }
 
 export interface SyncState {
@@ -564,6 +594,66 @@ export function qualifyItem(ctx: SyncContext, item: SyncItem, files: readonly Fi
   const pinned = plugins.flatMap((p) => p.pin?.integrity.files?.map((f) => f.path) ?? []);
   const all = digestFiles(item.root, [...item.files, ...pinned], files) ?? [...files];
   return { format: item.format, root: item.root, files: all, plugins, qualifiedAt: new Date(started).toISOString(), seconds: (Date.now() - started) / 1000 };
+}
+
+// --- the distributed records ----------------------------------------------------------------------------------------
+
+/** The layer a run reads: none under `--force` or `--no-distributed`, or without a host class. */
+function distributedLayerOf(settings: SyncSettings, force: boolean, log: (line: string) => void): DistributedLayer {
+  if (force || !settings.distributed) return EMPTY_LAYER;
+  if (settings.hostClass === undefined) {
+    log("distributed: no host class (host_class unset, and the board names none); no distributed record is read");
+    return EMPTY_LAYER;
+  }
+  const layer = readDistributedLayer(settings.distributedDirs, settings.hostClass, log);
+  if (layer.records > 0) log(`distributed: ${String(layer.records)} records of ${layer.sets.join(", ")} for ${settings.hostClass}`);
+  return layer;
+}
+
+/**
+ * The item's entry taken from the distributed records, or `undefined` when it is to be measured: no record finds it,
+ * or the ones that do were not taken, each reason said. Its descriptors are written as a measured item's are: a
+ * `.clap` is scanned for them (the scan lists the plugins and measures nothing), an LV2 plugin joins the run's
+ * descriptor pass.
+ */
+function takeDistributed(ctx: SyncContext, layer: DistributedLayer, item: SyncItem, files: readonly FileDigest[]): SyncEntry | undefined {
+  if (layer.records === 0) return undefined;
+  const started = Date.now();
+  const host = ctx.settings.hostProfile.id;
+  const match = matchDistributed(layer, item, host, (paths) => digestFiles(item.root, paths, files));
+  if (match.status === "none") return undefined;
+  if (match.status === "ignored") {
+    for (const line of match.lines) ctx.log(line);
+    return undefined;
+  }
+  let plugins: SyncPlugin[];
+  try {
+    plugins = applyDistributed(ctx.settings.qualificationDir, item, match, host);
+  } catch (e) {
+    ctx.log(`distributed: ${distributedUri(item, match.records[0]!)}: ${(e as Error).message}; measured here`);
+    return undefined;
+  }
+  if (item.format === "clap") scanClapDescriptors(ctx, item);
+  const all = digestFiles(item.root, [...item.files, ...match.files], files) ?? [...files];
+  return { format: item.format, root: item.root, files: all, plugins, qualifiedAt: new Date(started).toISOString(), seconds: (Date.now() - started) / 1000, distributed: match.set };
+}
+
+/** The descriptors of a `.clap` taken from the layer: the scanner lists its plugins, the descriptor writer writes them. */
+function scanClapDescriptors(ctx: SyncContext, item: SyncItem): void {
+  const file = join(item.root, item.files[0]!);
+  let tool: string;
+  try {
+    tool = clapQualifyTools(ctx.env, existsSync).tool;
+  } catch (e) {
+    ctx.log(`${file}: descriptors not written: ${(e as Error).message}`);
+    return;
+  }
+  const r = spawnSync(tool, ["--json", file], { encoding: "utf8", timeout: Math.max(ctx.settings.budgetS, 35) * 1000, killSignal: "SIGKILL", maxBuffer: 64 << 20 });
+  if (r.error !== undefined || r.status !== 0) {
+    ctx.log(`${file}: descriptors not written: the scan ended ${r.error?.message ?? `with exit ${String(r.status)}`}`);
+    return;
+  }
+  writeClapDescriptors(ctx, r.stdout);
 }
 
 // --- the outputs ------------------------------------------------------------------------------------------------------
@@ -754,13 +844,15 @@ export interface SyncSummary {
   readonly crashed: number;
   readonly hung: number;
   readonly unmeasured: number;
+  /** The plugins taken from the distributed records, not measured. */
+  readonly distributed: number;
   readonly seconds: number;
   /** The pins a running daemon took, when one answered. */
   readonly sent?: number;
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The lock of one state file: a second sync on it while one runs returns at once. A lock whose process is gone is taken over. */
@@ -814,7 +906,8 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
     await waitQuiet(dirs, settings.settleS, log);
     const ctx: SyncContext = { settings, env, log };
-    const count = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0 };
+    const count = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0, distributed: 0 };
+    const layer = distributedLayerOf(settings, options.force === true, log);
     let before: string;
     try {
       before = readFileSync(settings.pinFile, "utf8");
@@ -844,6 +937,17 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
         const files = recorded.files ?? digestFiles(item.root, item.files);
         if (files === undefined) {
           log(`${item.key}: a file of it cannot be read; skipped this run`);
+          continue;
+        }
+        const taken = takeDistributed(ctx, layer, item, files);
+        if (taken !== undefined) {
+          entries[item.key] = taken;
+          if (item.format === "lv2") lv2Pinned.push(...taken.plugins.filter((p) => p.pin !== undefined).map((p) => p.uri));
+          count.distributed += taken.plugins.length;
+          for (const p of taken.plugins) log(`distributed: ${p.uri}: applied (${taken.distributed!})`);
+          state = { schema: SYNC_STATE_SCHEMA, entries };
+          writeFileWhole(settings.stateFile, `${JSON.stringify(state, null, 1)}\n`);
+          writeFileWhole(settings.pinFile, syncPinsText(state));
           continue;
         }
         const entry = qualifyItem(ctx, item, files);
