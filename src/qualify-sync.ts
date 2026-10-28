@@ -599,16 +599,31 @@ export function recordStem(recordPath: string): string | undefined {
 }
 
 /**
+ * A stem's id and binary hash, its version segment dropped: what a record and its descriptor share even when their
+ * version segments differ (a CLAP record is keyed `@unversioned` while its descriptor carries the plugin's declared
+ * version). Undefined for a name that is not of the `<id>@<version>-<hash>` shape.
+ */
+function idAndHash(stem: string): string | undefined {
+  const m = /^(.+)@.+-([0-9a-f]{12})$/.exec(stem);
+  return m === null ? undefined : `${m[1]}\0${m[2]}`;
+}
+
+/**
  * What a plugin the sync no longer finds, or finds as other bytes, leaves behind: its qualification record, the probe
  * output copied beside it and its descriptor. A stem the state before held and the state after does not hold is
- * stale; every file of that stem in the two directories is removed. A record another plugin of the state still names
- * (two copies of one binary) is kept. Returns the files removed.
+ * stale; every record file of that stem is removed, and so is a descriptor of its id and binary hash whichever
+ * version suffix it carries — unless that id and hash is still kept under another stem (two copies of one binary, or
+ * a record and a descriptor the sync wrote at different version suffixes for the same plugin). A record another
+ * plugin of the state still names (two copies of one binary) is kept, as is a descriptor the sync did not write.
+ * Returns the files removed.
  */
 export function pruneStale(settings: Pick<SyncSettings, "qualificationDir" | "descriptorDir">, before: SyncState, after: SyncState): string[] {
   const stems = (state: SyncState): Set<string> =>
     new Set(Object.values(state.entries).flatMap((e) => e.plugins.flatMap((p) => (p.record === undefined ? [] : [recordStem(p.record) ?? ""]))).filter((x) => x !== ""));
   const kept = stems(after);
   const stale = [...stems(before)].filter((stem) => !kept.has(stem));
+  const keptIdHash = new Set([...kept].map(idAndHash).filter((x): x is string => x !== undefined));
+  const staleIdHash = new Set(stale.map(idAndHash).filter((x): x is string => x !== undefined));
   const removed: string[] = [];
   const drop = (dir: string, file: string): void => {
     try {
@@ -624,9 +639,17 @@ export function pruneStale(settings: Pick<SyncSettings, "qualificationDir" | "de
   } catch {
     // no directory, no record
   }
-  for (const stem of stale) {
-    for (const f of records) if (f.startsWith(`${stem}.`) && recordStem(f) === stem) drop(settings.qualificationDir, f);
-    drop(settings.descriptorDir, `${stem}.json`);
+  for (const stem of stale) for (const f of records) if (f.startsWith(`${stem}.`) && recordStem(f) === stem) drop(settings.qualificationDir, f);
+  let descriptors: string[] = [];
+  try {
+    descriptors = readdirSync(settings.descriptorDir);
+  } catch {
+    // no directory, no descriptor
+  }
+  for (const f of descriptors) {
+    if (!f.endsWith(".json")) continue;
+    const key = idAndHash(f.slice(0, -".json".length));
+    if (key !== undefined && staleIdHash.has(key) && !keptIdHash.has(key)) drop(settings.descriptorDir, f);
   }
   return removed;
 }
