@@ -129,6 +129,24 @@ describe("a distributed record", () => {
     expect(readdirSync(m.settings.qualificationDir).some((f) => f.endsWith(".probe.json"))).toBe(false);
   });
 
+  it("applies beside a record of earlier bytes of the same plugin in the set, which is passed over", async () => {
+    const m = machine("two-builds");
+    const earlier = join(m.root, "earlier", "plate.clap");
+    writeFakeClap(earlier, "an earlier build\n");
+    const { dir } = writeFixtureSet(m.share, CLASS, SET, earlier);
+    // the earlier build's record names the installed path, as a set measured across an upgrade holds it
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".qualification.json"))) {
+      writeFileSync(join(dir, f), readFileSync(join(dir, f), "utf8").split(earlier).join(m.clap));
+    }
+    writeFixtureSet(m.share, CLASS, SET, m.clap);
+    expect(readdirSync(dir).filter((n) => n.endsWith(".qualification.json"))).toHaveLength(2);
+    const { summary, lines } = await sync(m.settings);
+    expect(lines).toContain(`distributed: clap:${m.clap}#${FIXTURE_CLAP_ID}: applied (${SET})`);
+    expect(lines.some((l) => l.endsWith(": binary differs"))).toBe(false);
+    expect([summary.distributed, measured(summary)]).toEqual([1, 0]);
+    expect(readdirSync(m.settings.qualificationDir).filter((n) => n.endsWith(".qualification.json"))).toHaveLength(1);
+  });
+
   it("is ignored when its probe output is not the copy the record names", async () => {
     const m = machine("tampered");
     const { probePath } = writeFixtureSet(m.share, CLASS, SET, m.clap);

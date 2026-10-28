@@ -169,9 +169,10 @@ export type DistributedMatch =
 
 /**
  * Whether the item is taken from the layer. The records that find it are tried one set at a time, in the order the
- * layer read them; a set applies when each of its records of the item names files that are installed with the
- * SHA-256 it recorded (computed here by `digest`), at least one of them holds a verdict for `host`, and none of those
- * verdicts is one the source could not measure.
+ * layer read them. Of a set, only the records whose every file is installed with the SHA-256 it recorded (computed
+ * here by `digest`) count: a record of other bytes is another build of the plugin and is passed over. The set applies
+ * when at least one record of these bytes holds a verdict for `host`, and none of those verdicts is one the source
+ * could not measure; a set with no record of these bytes is a binary that differs.
  */
 export function matchDistributed(
   layer: DistributedLayer,
@@ -186,17 +187,17 @@ export function matchDistributed(
     if (!lines.includes(line)) lines.push(line);
   };
   for (const set of [...new Set(found.map((r) => r.set))]) {
-    const records = found.filter((r) => r.set === set && r.record.plugin.format === item.format);
-    let ok = records.length > 0;
-    for (const r of records) {
+    // a set may hold records of earlier bytes of the plugin beside the ones of these: only the ones of these bytes count
+    const records = found.filter((r) => {
+      if (r.set !== set || r.record.plugin.format !== item.format) return false;
       const wanted = r.record.binary.files;
       const now = digest(wanted.map((f) => f.path));
-      if (now === undefined || wanted.some((f) => now.find((d) => d.path === f.path)?.sha256 !== f.sha256)) {
-        say(`distributed: ${distributedUri(item, r)}: binary differs`);
-        ok = false;
-      }
+      return now !== undefined && wanted.every((f) => now.find((d) => d.path === f.path)?.sha256 === f.sha256);
+    });
+    if (records.length === 0) {
+      say(`distributed: ${distributedUri(item, found.find((r) => r.set === set)!)}: binary differs`);
+      continue;
     }
-    if (!ok) continue;
     const judged = records.filter((r) => r.record.verdicts.some((v) => v.host === host));
     if (judged.length === 0) {
       say(`distributed: ${distributedUri(item, records[0]!)}: no verdict for ${host} in ${set}`);
