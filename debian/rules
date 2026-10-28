@@ -16,6 +16,7 @@ override_dh_auto_build:
 override_dh_auto_install:
 	packaging/build.sh $(CURDIR)/debian/plugin-qualify /usr/lib
 	$(MAKE) -C native install DESTDIR=$(CURDIR)/debian/plugin-qualify LIBEXECDIR=/usr/lib/plugin-qualify
+	install -D -m 0755 packaging/systemd/plugin-qualify-sync-generator $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-generators/plugin-qualify-sync-generator
 	install -D -m 0644 packaging/systemd/80-plugin-qualify.preset $(CURDIR)/debian/plugin-qualify/usr/lib/systemd/system-preset/80-plugin-qualify.preset
 
 # the units are handed to dh_installsystemd as its own files, so it installs them where this release's systemd
