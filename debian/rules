@@ -31,6 +31,14 @@ execute_before_dh_installsystemd:
 override_dh_installsystemd:
 	dh_installsystemd --name=plugin-qualify-sync --no-start --no-stop-on-upgrade
 
+# python3-lilv writes the LV2 descriptors. Debian 12 (bookworm) does not carry it, so a package built there must stay
+# installable: the dependency is filled in for any other release, read from /etc/os-release (the build container has it,
+# and no apt index or network is needed).
+LILV_DEPENDS := $(shell . /etc/os-release && if [ "$$VERSION_ID" = 12 ]; then :; else echo python3-lilv; fi)
+
+override_dh_gencontrol:
+	dh_gencontrol -- -Vlilv:Depends="$(LILV_DEPENDS)"
+
 override_dh_auto_clean:
 	$(MAKE) -C native clean
 	rm -f $(foreach u,$(SYNC_UNITS),debian/plugin-qualify.plugin-qualify-sync.$(u))
