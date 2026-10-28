@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.15.1
+Version: 0.16.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -115,6 +115,18 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.0-1
+- A package transaction in a plugin folder scans once: debian triggers and rpm file triggers on the standard
+  LV2 and CLAP folders (#169).
+- The path unit names the standard folders; the settings file adds the rest (#170).
+- The sync service carries its own limits (#171).
+- A plugin that is gone leaves no record, descriptor or pin behind (#172).
+- python3-lilv is a dependency of the deb on every suite that carries it (#175).
+- tools/install-roundtrip.sh runs the after-install scan on a clean image (#173).
+- The schema-floor refusal code and the id-hash prefix for descriptors.py are declared (#179, first step of
+  #142).
+- CI: the commit-message check is the ai-trace-check action (#156).
+
 * Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.1-1
 - The scan golden is omx-clap-host 0.23.0's: its rows carry remote_controls (the plugin's remote-control
   pages, [] for a plugin with none), and a test asserts the pages fake.clap's passthrough plugin declares.
