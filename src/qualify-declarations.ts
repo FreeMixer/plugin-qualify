@@ -168,11 +168,19 @@ export const DESCRIPTOR_SCHEMA_INSTALLED = "/usr/share/omx-contract/omx-contract
 export const DESCRIPTOR_SCHEMA_FLOOR = ">= 3.4.0";
 
 /**
+ * Two ids that `_safe` maps onto the same characters (`a b` and `a_b`) would otherwise name the
+ * same file at the same version. The id whose safe form differs from the raw id carries this many
+ * hex digits of the raw id's SHA-256 as well, so the two no longer collide.
+ */
+export const DESCRIPTOR_ID_HASH_PREFIX = 8;
+
+/**
  * Why a scanned descriptor is not written. A file the schema refuses is omx-contract's own
  * `contract.file.invalid`; the others are the scanners' own.
  */
 export const DESCRIPTOR_CODE_SCHEMA = "contract.file.invalid";
 export const DESCRIPTOR_CODE_SCHEMA_MISSING = "qualify.descriptor.schema-missing";
+export const DESCRIPTOR_CODE_SCHEMA_FLOOR = "qualify.descriptor.schema-floor";
 export const DESCRIPTOR_CODE_BINARY_UNHASHED = "qualify.descriptor.binary-unhashed";
 export const DESCRIPTOR_CODE_DIR_UNWRITABLE = "qualify.descriptor.dir-unwritable";
 
