@@ -463,6 +463,12 @@ The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/us
 `clap_extra`) are written into a drop-in of the unit by a systemd generator at boot and at every
 `systemctl daemon-reload`, so the file is the one place a machine's extra folders are written.
 
+The path unit watches a folder, not the bundles inside it: a new bundle appearing in a watched folder is
+seen at once, but a package's own files being replaced in place (an upgrade) is not a change of the folder
+itself. A packaged plugin is still caught at once, by the distribution's install triggers over the standard
+folders. An unpackaged bundle replaced in place in an extra folder is caught at the next run of
+plugin-qualify-sync.timer, at most about 15 minutes after the change.
+
 ### The container image
 
 ```
