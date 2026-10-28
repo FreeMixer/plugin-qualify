@@ -71,6 +71,7 @@ install -d %{buildroot}%{_unitdir} %{buildroot}%{_presetdir}
 install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
   packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
 install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
+install -m 0755 packaging/trigger-scan.sh %{buildroot}%{_libexecdir}/%{name}/trigger-scan
 
 # the preset enables the timer and the path unit; nothing here runs a sweep: the timer fires at the next boot,
 # and the path unit, armed once the transaction is over, waits for a minute of quiet before its first run
@@ -81,6 +82,13 @@ install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_preset
 if [ -d /run/systemd/system ] && systemctl -q is-enabled plugin-qualify-sync.path 2>/dev/null; then
   systemctl start plugin-qualify-sync.path >/dev/null 2>&1 || :
 fi
+
+# a plugin package installed, upgraded or removed in a standard folder: one scan per transaction
+%transfiletriggerin -- /usr/lib/lv2 /usr/lib64/lv2 /usr/local/lib/lv2 /usr/lib/clap /usr/lib64/clap
+%{_libexecdir}/%{name}/trigger-scan
+
+%transfiletriggerpostun -- /usr/lib/lv2 /usr/lib64/lv2 /usr/local/lib/lv2 /usr/lib/clap /usr/lib64/clap
+%{_libexecdir}/%{name}/trigger-scan
 
 %preun
 %systemd_preun plugin-qualify-sync.timer plugin-qualify-sync.path plugin-qualify-sync.service
