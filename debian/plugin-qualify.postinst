@@ -9,4 +9,9 @@ if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
 	deb-systemd-invoke start plugin-qualify-sync.path >/dev/null || true
 fi
 
+# a plugin package was installed, upgraded or removed in a standard folder (debian/triggers): scan once
+if [ "$1" = "triggered" ]; then
+	/usr/lib/plugin-qualify/trigger-scan
+fi
+
 exit 0

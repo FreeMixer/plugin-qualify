@@ -15,6 +15,10 @@ refused is recorded as such, and the run goes on to the next. The pin file plugi
 changed pins are also sent to it with \fBpin_set\fR; while a controller holds that port, they apply at its
 next start.
 .PP
+A plugin that is no longer found, or whose bytes changed, leaves nothing behind: its pin, its qualification
+record and the probe output beside it, and its descriptor are removed, and a running plugin-hostd is told with
+\fBpin_clear\fR. Nothing is removed in a run that could not read a plugin bundle.
+.PP
 The last line on standard output counts the plugins: qualified, skipped, refused, crashed, hung,
 unmeasured, and the seconds the run took.
 .SH OPTIONS
