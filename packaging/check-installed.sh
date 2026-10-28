@@ -83,7 +83,12 @@ for unit in plugin-qualify-sync.service plugin-qualify-sync.timer plugin-qualify
 done
 [ -L /etc/systemd/system/timers.target.wants/plugin-qualify-sync.timer ] || fail "the install did not enable plugin-qualify-sync.timer"
 [ -L /etc/systemd/system/paths.target.wants/plugin-qualify-sync.path ] || fail "the install did not enable plugin-qualify-sync.path"
-[ ! -e /var/lib/omx/qualify-sync.json ] || fail "a sweep ran inside the package transaction"
+# the install's own trigger may have scanned (the package triggers on the plugin folders); on a clean image that scan
+# finds nothing, so no plugin was qualified inside the package transaction
+if [ -e /var/lib/omx/qualify-sync.json ]; then
+  [ "$(node -p "Object.keys(JSON.parse(require('fs').readFileSync('/var/lib/omx/qualify-sync.json','utf8')).entries).length")" = 0 ] ||
+    fail "a sweep qualified plugins inside the package transaction"
+fi
 [ -f /etc/omx/qualify.conf ] || fail "the package installs no /etc/omx/qualify.conf"
 # the installed sync over the safe fixtures, with nothing set but where it looks and writes
 mkdir -p "$out/sync/clap" "$out/sync/lv2"
