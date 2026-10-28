@@ -62,6 +62,26 @@ Each step is its own pull request, with its own test and the arm that breaks it.
 
 Steps 1 and 2 are ours and can start now. Step 3 waits for plugin-hostd's runner. Step 4 waits for its child.
 
+## The grid every host is judged on (#193, 2026-10-28)
+
+The deep run of 2026-10-28 on a Raspberry Pi 5 measured every cell at quantum 512 and most LV2 plugins at 192000
+alone, so every host verdict read `hosting.cost.unmeasured-at-rate-and-quantum`. Two causes: the probe runner was
+always handed quantum 512 (`--quanta` was parsed and never passed on), and plugin-hostd's runner measures an LV2
+plugin at the highest of the rates it is given, one rate a run. The ruling: the grid holds each declared host's
+rate and quantum, an LV2 plugin is measured at the same cells as a CLAP one, and the sampler's memory is bounded
+so an out-of-memory kill is a recorded outcome, not a lost record.
+
+- The grid is a list of cells (rate, quantum): the hosts' cells, 512 at every rate for continuity, or the full
+  product of `--rates` and `--quanta`, or cells named one by one. README "The measurement grid" states it.
+- A CLAP plugin is run once per quantum, at that quantum's rates; an LV2 plugin once per cell. The runs of one
+  plugin and offer are merged into one probe output, which is what the record judges and copies.
+- A run that ended badly leaves its cells in the grid with its outcome; the judge reads a host's cost at its cell
+  and names the run's outcome when that cell failed. `hosting.cost.unmeasured-at-rate-and-quantum` is for a cell
+  the grid does not hold.
+- The memory bound is the runner's data limit (`RLIMIT_DATA` on the child), half of the RAM by default; the
+  interposer exits 121 on a refused allocation and that, or a `SIGKILL` the runner did not send, is `probe.oom`.
+  A cgroup bound would also count page cache and shared memory; the runner does not offer one yet.
+
 ## Not decided here
 
 - Whether the quantum grid stays four literals or is declared by the contract: the contract has rates but no quanta.
