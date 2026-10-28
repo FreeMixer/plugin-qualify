@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.16.0
+Version: 0.16.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -115,6 +115,9 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.1-1
+- The sync service names the interpreter first in ExecStart: executed as a script it stayed in systemd's own
+  SELinux domain on Fedora, with no executable memory for V8 and no /tmp, and died at start (#188).
 * Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.0-1
 - A package transaction in a plugin folder scans once: debian triggers and rpm file triggers on the standard
   LV2 and CLAP folders (#169).
