@@ -458,6 +458,11 @@ Those are the service's (`--system`); run by a user, the files go under `$XDG_ST
 directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
 pinned. `--force` qualifies everything again.
 
+The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/usr/local/lib/lv2`,
+`/usr/lib/clap`, `/usr/lib64/clap`). The folders the settings file adds (`lv2_path`, `lv2_extra`, `clap_path`,
+`clap_extra`) are written into a drop-in of the unit by a systemd generator at boot and at every
+`systemctl daemon-reload`, so the file is the one place a machine's extra folders are written.
+
 ### The container image
 
 ```
