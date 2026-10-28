@@ -20,12 +20,22 @@ import { classifyPluginHosting, type QualifiedPlugin } from "./hosting-suitabili
 import type { SuitabilityRating } from "./rating.js";
 import type { PluginLoader, PluginTarget } from "./loader.js";
 import { EXIT_CODE, OUTPUT_FORMATS, QUALIFY_OPTIONS, type OutputFormat } from "./qualify-options.js";
+import { GRID_HOSTS, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { parseMemoryLimit } from "./memory-bound.js";
 
 export interface QualifyArgs {
   readonly all: boolean;
   readonly targets: readonly string[];
   readonly rates: readonly number[];
   readonly quanta: readonly number[];
+  /** How the grid is chosen (`--grid`, `--grid-hosts`). */
+  readonly grid: GridSpec;
+  /** `--cells-per-plugin-budget`: at most this many cells a plugin; 0 is every cell. */
+  readonly cellsPerPluginBudget: number;
+  /** `--blocks`: blocks of the CLAP sweep a cell, when given. */
+  readonly blocks?: number;
+  /** `--memory-limit`: bytes, or `off`; absent is the default, half of the RAM. */
+  readonly memoryLimit?: number | "off";
   readonly out?: string;
   /** `--pins`: where the pins file is written. */
   readonly pins?: string;
@@ -79,6 +89,23 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
   if (rates === undefined) return { ok: false, error: "--rates must be positive integers, comma-separated" };
   const quanta = numberList((seen.get("--quanta") as string | undefined) ?? defaultOf("--quanta"));
   if (quanta === undefined) return { ok: false, error: "--quanta must be positive integers, comma-separated" };
+  const gridText = seen.get("--grid") as string | undefined;
+  if (gridText !== undefined && seen.has("--grid-hosts") && gridText.trim() !== "hosts") return { ok: false, error: "--grid-hosts and --grid name two grids; give one" };
+  const grid = gridText === undefined ? { ok: true as const, spec: GRID_HOSTS } : parseGridSpec(gridText);
+  if (!grid.ok) return { ok: false, error: `--grid: ${grid.error}` };
+  const count = (flag: string, min: number): number | undefined => {
+    const v = seen.get(flag) as string | undefined;
+    if (v === undefined) return undefined;
+    const n = Number(v);
+    return /^\d+$/.test(v.trim()) && Number.isSafeInteger(n) && n >= min ? n : NaN;
+  };
+  const cellsPerPluginBudget = count("--cells-per-plugin-budget", 0) ?? 0;
+  if (Number.isNaN(cellsPerPluginBudget)) return { ok: false, error: "--cells-per-plugin-budget must be a whole number, 0 or more" };
+  const blocks = count("--blocks", 1);
+  if (blocks !== undefined && Number.isNaN(blocks)) return { ok: false, error: "--blocks must be a whole number, 1 or more" };
+  const memoryText = seen.get("--memory-limit") as string | undefined;
+  const memory = memoryText === undefined ? undefined : parseMemoryLimit(memoryText);
+  if (memory !== undefined && !memory.ok) return { ok: false, error: `--memory-limit: ${memory.error}` };
   const format = (seen.get("--format") as string | undefined) ?? defaultOf("--format");
   if (!(OUTPUT_FORMATS as readonly string[]).includes(format)) {
     return { ok: false, error: `--format must be one of ${OUTPUT_FORMATS.join(", ")}` };
@@ -94,6 +121,10 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
       targets,
       rates,
       quanta,
+      grid: grid.spec,
+      cellsPerPluginBudget,
+      ...(blocks === undefined ? {} : { blocks }),
+      ...(memory === undefined ? {} : { memoryLimit: memory.bytes }),
       ...(out === undefined ? {} : { out }),
       ...(pins === undefined ? {} : { pins }),
       format: format as OutputFormat,
@@ -108,7 +139,7 @@ export function helpText(): string {
   const rows = QUALIFY_OPTIONS.map((o) => {
     const left = o.value === undefined ? o.flag : `${o.flag} <${o.value}>`;
     const def = o.default === undefined ? "" : ` (default: ${o.default})`;
-    return `  ${left.padEnd(28)}${o.describe}${def}`;
+    return `  ${left.padEnd(36)}${o.describe}${def}`;
   });
   return [
     "plugin-qualify — qualify audio plugins for real-time hosting",
