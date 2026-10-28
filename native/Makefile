@@ -6,10 +6,11 @@
 #
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
+#                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so,
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc}.lv2
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency}.lv2
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
@@ -34,7 +35,7 @@ CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.7.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
-OMX_CONTRACT_VERSION := 3.0.0
+OMX_CONTRACT_VERSION := 3.4.0
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.14.0
@@ -89,6 +90,7 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
+	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap \
@@ -96,9 +98,10 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/fail-alloc.so \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
-	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so
+	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
+	$(BUILD)/fixtures/lv2/latency.lv2/latency.so
 
-$(BUILD) $(BUILD)/fixtures:
+$(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
@@ -148,6 +151,13 @@ $(BUILD)/fixtures/params-%.clap: fixtures/gain.c | $(BUILD)/fixtures
 
 $(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_INFO_FAILS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# a plugin that kills the host loading it, and one that never returns from process(): the sync's crash and hang
+$(BUILD)/fixtures-faulty/crashes-at-load.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_CRASHES_AT_LOAD -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+$(BUILD)/fixtures-faulty/hangs.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_HANGS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # a whole-frame delay read the way omx-pitch lands it at 44.1 kHz, declared and not
 FIXTURE_DELAY = 883
@@ -212,6 +222,12 @@ $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so: fixtures/lv2-synth.c fixtures/sy
 	mkdir -p $(@D)
 	cp fixtures/synth-alloc.lv2/manifest.ttl fixtures/synth-alloc.lv2/synth.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES_ON_NOTE -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+
+# four effects with a delay each is known to have: declared on its port, undeclared, declared wrongly, and silent
+$(BUILD)/fixtures/lv2/latency.lv2/latency.so: fixtures/lv2-latency.c fixtures/latency.lv2/manifest.ttl fixtures/latency.lv2/latency.ttl
+	mkdir -p $(@D)
+	cp fixtures/latency.lv2/manifest.ttl fixtures/latency.lv2/latency.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 
 # five plugins, each demanding one thing of the measuring host: options, a worker, patch:Set, a
 # bounded sweep, a stdout of its own

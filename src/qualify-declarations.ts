@@ -165,7 +165,7 @@ export const DESCRIPTOR_HASH_PREFIX = 12;
  */
 export const DESCRIPTOR_SCHEMA_ENV = "OMX_CONTRACT_SCHEMA";
 export const DESCRIPTOR_SCHEMA_INSTALLED = "/usr/share/omx-contract/omx-contract.schema.json";
-export const DESCRIPTOR_SCHEMA_FLOOR = ">= 3.0.0";
+export const DESCRIPTOR_SCHEMA_FLOOR = ">= 3.4.0";
 
 /**
  * Why a scanned descriptor is not written. A file the schema refuses is omx-contract's own

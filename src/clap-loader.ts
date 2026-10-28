@@ -18,7 +18,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import type { PluginLoader, PluginTarget } from "./loader.js";
-import { lv2BundlesOnPath } from "./lv2-loader.js";
+import { lv2BundlesOnPath, lv2Loader } from "./lv2-loader.js";
 import {
   CLAP_PATH_ENV,
   CLAP_SCAN_TIMEOUT_S,
@@ -464,23 +464,19 @@ export function discoverClapTargets(options: ClapDiscoverOptions = {}): PluginTa
 export interface DiscoverAllOptions extends ClapDiscoverOptions {}
 
 /**
- * The targets of `--all`. The LV2 plugins lilv finds cannot be measured from this entry point, so
- * when the LV2 search path holds any bundle the run refuses (exit 2) and names how many, rather
- * than qualifying only the CLAP side and reporting everything qualified.
+ * The targets of `--all`: every LV2 plugin of the bundles on the LV2 search path ({@link lv2BundlesOnPath}, each
+ * through {@link lv2Loader} as a named bundle is), then every CLAP plugin on the CLAP path. An LV2 URI found in two
+ * bundles keeps the first, as the search path does. A directory that cannot be read is a {@link ClapScanError} naming it.
  */
 export function discoverAllTargets(options: DiscoverAllOptions = {}): PluginTarget[] {
   const env = options.env ?? process.env;
-  let bundles: string[];
+  const lv2 = new Map<string, PluginTarget>();
   try {
-    bundles = lv2BundlesOnPath(env, options.home ?? homedir());
+    for (const bundle of lv2BundlesOnPath(env, options.home ?? homedir())) {
+      for (const t of lv2Loader.resolve(bundle) ?? []) if (!lv2.has(t.uri)) lv2.set(t.uri, t);
+    }
   } catch (e) {
     throw unreadable("the LV2 search path", e);
   }
-  if (bundles.length > 0) {
-    throw new ClapScanError(
-      `--all cannot measure LV2 from this entry point and ${String(bundles.length)} LV2 bundle(s) are on the LV2 path ` +
-        `(first: ${bundles[0]}); name the plugins or bundles to qualify instead, or set LV2_PATH to an empty directory`,
-    );
-  }
-  return discoverClapTargets(options);
+  return [...lv2.values(), ...discoverClapTargets(options)];
 }

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The first run on every boot: a machine whose records are empty qualifies everything, one whose records are
+# current only checks that nothing changed. Two minutes after boot, so the console's UI is up first.
+[Unit]
+Description=Qualify new and changed plugins after boot
+Documentation=man:plugin-qualify-sync(1)
+
+[Timer]
+OnBootSec=2min
+Unit=plugin-qualify-sync.service
+
+[Install]
+WantedBy=timers.target

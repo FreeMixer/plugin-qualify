@@ -94,7 +94,7 @@ class ClapMapping(unittest.TestCase):
         entry = "controls.clap#clap_entry[org.freemixer.plugin-qualify.fixture.controls]"
         self.assertEqual(doc, {
             "$schema": d.SCHEMA_URL,
-            "requires": {"omx-contract-schema": ">= 3.0.0"},
+            "requires": {"omx-contract-schema": ">= 3.4.0"},
             "origin": "scanned",
             "plugin": {"format": "clap", "id": "org.freemixer.plugin-qualify.fixture.controls", "name": "controls",
                        "vendor": "plugin-qualify", "version": "1", "doc": "plugin-qualify fixture",
@@ -331,7 +331,7 @@ class Lv2RoundTrip(unittest.TestCase):
     def test_every_fixture_plugin_is_written_and_none_refused(self):
         self.assertEqual(self.refused, [])
         self.assertEqual(sorted(self.docs()), sorted(self.rows))
-        self.assertEqual(len(self.rows), 10)
+        self.assertEqual(len(self.rows), 14)
 
     def test_each_file_is_named_by_id_version_and_its_binary_hash(self):
         plugins = self.scanner.w.get_all_plugins()

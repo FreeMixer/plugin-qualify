@@ -17,9 +17,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ClapQualifyError, clapQualifyTools, proberOffer, type RtSafetyDocument } from "./clap-qualify.js";
+import { locateNativeTool } from "./tool-paths.js";
 import type { HostProfile } from "./host-profiles.js";
-import { OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
+import { IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST } from "./qualification-record.js";
 import type { PluginTarget } from "./loader.js";
+import { SPAWNED_ADMISSIONS, admitPlugin, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
@@ -29,6 +32,7 @@ import {
   CLAP_SWEEP_FRAMES,
   LV2_HOSTING_BLOCK_FRAMES,
   LV2_HOSTING_TIMEOUT_S,
+  LV2_MEASURE_TOOL_NAME,
   PROBE_RUNNER_DEFAULT,
   PROBE_RUNNER_ENV,
 } from "./qualify-declarations.js";
@@ -67,6 +71,8 @@ export interface ProbeTargetOptions {
   readonly rates: readonly number[];
   /** Host extensions to offer beyond the prober's own (a CLAP run). */
   readonly offer?: readonly string[];
+  /** The wall clock the runner gives one run, in seconds; else the format's declared one. */
+  readonly wallS?: number;
   readonly run?: ProbeRun;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly exists?: (path: string) => boolean;
@@ -74,7 +80,7 @@ export interface ProbeTargetOptions {
 
 /** The runner's arguments for a CLAP file; `child` is the prober the runner starts. */
 export function clapRunnerArgs(
-  options: { rates: readonly number[]; offer?: readonly string[]; out: string; log: string; child: string },
+  options: { rates: readonly number[]; offer?: readonly string[]; wallS?: number; out: string; log: string; child: string },
   binaryPath: string,
   id: string | undefined,
 ): string[] {
@@ -90,7 +96,7 @@ export function clapRunnerArgs(
     String(CLAP_SWEEP_BLOCKS),
     ...(options.offer === undefined || options.offer.length === 0 ? [] : ["--offer", options.offer.join(",")]),
     "--wall-s",
-    String(CLAP_QUALIFY_TIMEOUT_S),
+    String(options.wallS ?? CLAP_QUALIFY_TIMEOUT_S),
     "--out",
     options.out,
     "--log",
@@ -101,19 +107,19 @@ export function clapRunnerArgs(
 }
 
 /**
- * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by the runner's own LV2
- * child. The runner of plugin-hostd 0.4.0 starts a CLAP prober only (the LV2 child, plugin-hostd#76, is in no release yet), so
- * against it this run ends with the runner's own refusal, which {@link runOne} reports.
+ * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by `lv2_measure`: the one this run
+ * located when `child` names it, else the one the runner looks for where the packages install it.
  */
-export function lv2RunnerArgs(options: { rates: readonly number[]; out: string; log: string }, uri: string): string[] {
+export function lv2RunnerArgs(options: { rates: readonly number[]; wallS?: number; out: string; log: string; child?: string }, uri: string): string[] {
   return [
     "run",
+    ...(options.child === undefined ? [] : ["--child", options.child]),
     "--rates",
     options.rates.join(","),
     "--quantum",
     String(LV2_HOSTING_BLOCK_FRAMES),
     "--wall-s",
-    String(LV2_HOSTING_TIMEOUT_S),
+    String(options.wallS ?? LV2_HOSTING_TIMEOUT_S),
     "--out",
     options.out,
     "--log",
@@ -138,15 +144,20 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget
     let args: string[];
     let runEnv: Record<string, string | undefined> = { ...env };
     let expectedId: string;
+    const wall = options.wallS === undefined ? {} : { wallS: options.wallS };
     if (target.format === "clap") {
       if (target.binaryPath === undefined) throw new ProbeRunnerError(`${target.uri}: no .clap to load; name the file or a directory holding it`);
       expectedId = target.uri.startsWith("urn:clap:") ? target.uri.slice("urn:clap:".length) : target.uri;
       const { tool: child, interposer } = clapQualifyTools(env, options.exists ?? existsSync);
-      args = clapRunnerArgs({ rates: options.rates, ...(options.offer === undefined ? {} : { offer: options.offer }), out, log, child }, target.binaryPath, expectedId);
+      args = clapRunnerArgs({ rates: options.rates, ...(options.offer === undefined ? {} : { offer: options.offer }), ...wall, out, log, child }, target.binaryPath, expectedId);
       runEnv = { ...env, LD_PRELOAD: interposer };
     } else {
       expectedId = target.uri;
-      args = lv2RunnerArgs({ rates: options.rates, out, log }, target.uri);
+      const child = locateNativeTool(LV2_MEASURE_TOOL_NAME, env, options.exists ?? existsSync).path;
+      args = lv2RunnerArgs(
+        { rates: options.rates, ...wall, out, log, ...(child === undefined ? {} : { child }) },
+        target.uri,
+      );
     }
     const r = (options.run ?? spawnRunner)(tool, args, runEnv);
     if (r.error !== undefined) {
@@ -199,16 +210,30 @@ export interface ProbePass {
  */
 export function qualifyTargets(
   targets: readonly PluginTarget[],
-  options: ProbeTargetOptions & { readonly profiles?: readonly HostProfile[] },
+  options: ProbeTargetOptions & { readonly profiles?: readonly HostProfile[]; readonly admissions?: AdmissionRuns },
 ): ProbePass {
   const profiles = options.profiles ?? [OPENMIXER_CONSOLE_PROFILE];
+  const admissionRuns = options.admissions ?? SPAWNED_ADMISSIONS;
   const runs: { bytes: Buffer; judgment: Judgment }[] = [];
   const verdicts: QualifyVerdict[] = [];
   const documents: RtSafetyDocument[] = [];
   const failures: { uri: string; problem: string }[] = [];
   for (const target of targets) {
     const byOffer = new Map<string, { offer: readonly string[]; profiles: HostProfile[] }>();
-    for (const profile of profiles) {
+    // the record carries the console's two tiers whatever hosts were asked about, so they are judged too
+    const tierProfiles = [IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST[target.format]]
+      .flatMap((id) => (id === undefined ? [] : [shippedHostProfile(id)]))
+      .filter((p): p is HostProfile => p !== undefined);
+    const judgedProfiles = [...profiles, ...tierProfiles.filter((t) => !profiles.some((p) => p.id === t.id))];
+    // an LV2 plugin is run under each measured host once, whichever probe output it is judged with
+    const admissions: Record<string, HostAdmission> = {};
+    if (target.format === "lv2") {
+      for (const profile of judgedProfiles) {
+        const host = admittedHostOf(profile);
+        if (host !== undefined) admissions[profile.id] = admitPlugin(host, target.uri, admissionRuns);
+      }
+    }
+    for (const profile of judgedProfiles) {
       const offer = target.format === "clap" ? (proberOffer(profile) ?? []) : [];
       const key = offer.join(",");
       const entry = byOffer.get(key) ?? { offer, profiles: [] };
@@ -222,7 +247,7 @@ export function qualifyTargets(
     try {
       for (const { offer, profiles: forOffer } of byOffer.values()) {
         const probed = probeTarget(target, { ...options, offer });
-        const judgment = judgeProbeOutput(probed.output, forOffer);
+        const judgment = judgeProbeOutput(probed.output, forOffer, { admissions });
         targetRuns.push({ bytes: probed.bytes, judgment });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);
       }
@@ -230,7 +255,13 @@ export function qualifyTargets(
       if (!(e instanceof ProbeRunnerError) && !(e instanceof ClapQualifyError)) throw e;
       failures.push({ uri: target.uri, problem: e.message });
       for (const profile of profiles) {
-        verdicts.push({ uri: target.uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: "not-measured" });
+        // no probe output means no record, but a host that refused the plugin when it was run is still a measured refusal
+        const a = admissions[profile.id];
+        verdicts.push(
+          a !== undefined && a.measured && !a.admitted
+            ? { uri: target.uri, host: profile.id, measured: true, rating: "unsuitable", qualified: false, deciding: a.code ?? `${a.host}.not-admitted` }
+            : { uri: target.uri, host: profile.id, measured: false, rating: "unknown", qualified: false, deciding: "not-measured" },
+        );
       }
       continue;
     }

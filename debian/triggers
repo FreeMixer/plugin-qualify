@@ -1,0 +1,6 @@
+# a plugin package unpacked or removed in any of these folders: postinst triggered scans once for the transaction
+interest-noawait /usr/lib/lv2
+interest-noawait /usr/lib64/lv2
+interest-noawait /usr/local/lib/lv2
+interest-noawait /usr/lib/clap
+interest-noawait /usr/lib64/clap

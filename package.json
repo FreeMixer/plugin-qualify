@@ -1,7 +1,7 @@
 {
   "name": "@openmixer/plugin-qualify",
-  "version": "0.14.1",
-  "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, a mod-host hosting sweep, and a fail-closed rating.",
+  "version": "0.15.1",
+  "description": "Qualify audio plugins for real-time hosting: scan, offline latency and cost measurement, and a fail-closed rating.",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -17,7 +17,8 @@
     "node": ">=18"
   },
   "bin": {
-    "plugin-qualify": "./bin/plugin-qualify.mjs"
+    "plugin-qualify": "./bin/plugin-qualify.mjs",
+    "plugin-qualify-sync": "./bin/plugin-qualify-sync.mjs"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -96,6 +97,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@openmixer/omx-contract": "^3.0.0"
+    "@openmixer/omx-contract": "^3.4.0"
   }
 }

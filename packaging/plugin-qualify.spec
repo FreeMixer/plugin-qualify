@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.14.1
+Version: 0.15.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -21,9 +21,10 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
-BuildRequires: pkgconfig(omx-contract) >= 3.0.0
+BuildRequires: pkgconfig(omx-contract) >= 3.4.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
+BuildRequires: systemd-rpm-macros
 
 Requires: nodejs >= 18
 Requires: python3
@@ -33,12 +34,14 @@ Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
 Requires: plugin-hostd >= 0.4.0
 Recommends: mod-host
-# omx-clap-scan, which lists the plugins in a .clap before each is qualified
-Requires: omx-clap-host >= 0.13.0
+# omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
+# remote-control pages (remote_controls), which the descriptors keep
+Requires: omx-clap-host >= 0.23.0
 # the hosting codes' TypeScript modules, which the shipped tools/gen-hosting-codes.mjs reads through
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
-# /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on
-Requires: omx-clap-core >= 0.17.0
+# /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on; the host above brings the same version
+Requires: omx-clap-core >= 0.23.0
+%{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
 %global __requires_exclude_from ^%{_prefix}/lib/node_modules/.*$
@@ -64,16 +67,74 @@ different hosts.
 %install
 packaging/build.sh %{buildroot} %{_prefix}/lib
 %make_install -C native LIBEXECDIR=%{_libexecdir}/%{name}
+install -d %{buildroot}%{_unitdir} %{buildroot}%{_presetdir}
+install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
+  packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
+install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
+install -m 0755 packaging/trigger-scan.sh %{buildroot}%{_libexecdir}/%{name}/trigger-scan
+
+# the preset enables the timer and the path unit; nothing here runs a sweep: the timer fires at the next boot,
+# and the path unit, armed once the transaction is over, waits for a minute of quiet before its first run
+%post
+%systemd_post plugin-qualify-sync.timer plugin-qualify-sync.path
+
+%posttrans
+if [ -d /run/systemd/system ] && systemctl -q is-enabled plugin-qualify-sync.path 2>/dev/null; then
+  systemctl start plugin-qualify-sync.path >/dev/null 2>&1 || :
+fi
+
+# a plugin package installed, upgraded or removed in a standard folder: one scan per transaction
+%transfiletriggerin -- /usr/lib/lv2 /usr/lib64/lv2 /usr/local/lib/lv2 /usr/lib/clap /usr/lib64/clap
+%{_libexecdir}/%{name}/trigger-scan
+
+%transfiletriggerpostun -- /usr/lib/lv2 /usr/lib64/lv2 /usr/local/lib/lv2 /usr/lib/clap /usr/lib64/clap
+%{_libexecdir}/%{name}/trigger-scan
+
+%preun
+%systemd_preun plugin-qualify-sync.timer plugin-qualify-sync.path plugin-qualify-sync.service
+
+%postun
+%systemd_postun plugin-qualify-sync.timer plugin-qualify-sync.path plugin-qualify-sync.service
 
 %files
 %license LICENSE
 %doc README.md
 %{_bindir}/plugin-qualify
+%{_bindir}/plugin-qualify-sync
 %{_mandir}/man1/plugin-qualify.1*
+%{_mandir}/man1/plugin-qualify-sync.1*
+%dir %{_sysconfdir}/omx
+%config(noreplace) %{_sysconfdir}/omx/qualify.conf
+%{_unitdir}/plugin-qualify-sync.service
+%{_unitdir}/plugin-qualify-sync.timer
+%{_unitdir}/plugin-qualify-sync.path
+%{_presetdir}/80-plugin-qualify.preset
 %{_prefix}/lib/node_modules/@openmixer/
 %{_libexecdir}/%{name}/
 
 %changelog
+* Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.1-1
+- The scan golden is omx-clap-host 0.23.0's: its rows carry remote_controls (the plugin's remote-control
+  pages, [] for a plugin with none), and a test asserts the pages fake.clap's passthrough plugin declares.
+  The live-scan test failed against 0.23.0 on the stale golden, which stopped the npm publish of 0.15.0.
+- Floors: omx-clap-host >= 0.23.0, omx-clap-core >= 0.23.0.
+* Tue Oct 27 2026 Pau Aliagas <linuxnow@gmail.com> - 0.15.0-1
+- plugin-qualify-sync (new): qualifies every installed CLAP and LV2 plugin once, and again when
+  its files change, as a systemd service started after boot and when a plugin is installed;
+  it writes the pin file and the qualification records, and a plugin that crashes or
+  hangs is recorded as such. tools/mod-host-admit.mjs ships with its dist (#154).
+- An LV2 record carries the latency and the cost measured at the run's rate, and names the
+  figures a run could not take, so an LV2 plugin can be live (#163).
+- plugin-qualify adjust --history: the second verdict is decided from plugin-hostd's running
+  history, demoting or promoting on cost alone and never lifting a refusal, and --pins
+  writes it (#158).
+- mod-host admission sends add and remove only, with no activate (#159); mod-host and jalv
+  verdicts are measured by running the plugin, and the record holds the console's two
+  tiers (#152).
+- --all covers the LV2 bundles on the LV2 path as it covers CLAP; a bundle is a directory
+  holding manifest.ttl (#66, #152).
+- The --no-host-sweep flag, which nothing read, is removed.
+- Floors: omx-contract >= 3.4.0.
 * Sat Oct 24 2026 Pau Aliagas <linuxnow@gmail.com> - 0.14.1-1
 - descriptors.py reads its scan argument intermixed with the options: on
   Python 3.11 and 3.12.3 (Debian bookworm, Ubuntu noble) `clap --descriptor-dir
