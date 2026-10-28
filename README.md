@@ -234,6 +234,13 @@ stays silent, an instrument with no count to hold) is left out of the grid point
 `measurements.unmeasured` with its hosting code (`hosting.latency.unmeasured`,
 `hosting.cost.unmeasured-at-rate-and-quantum`).
 
+Every cell of a record carries `latency`: the two figures when the run took them, else
+`{ unmeasuredReason, code }`, the contract's word for why and the hosting code a reader classifies by. A latency
+step that did not end well gives the child's reason (`silent-output`, say); a cell whose run failed, its outcome's
+word (`probe-crashed`, or `probe-error` for `probe.oom`); a run that took no latency at all (a runner or a child
+older than the latency arm), `not-attempted`. The declared figure alone, for a plugin whose response could not be
+measured, is not in the probe output today: plugin-hostd's runner writes a cell's latency only with both figures.
+
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
