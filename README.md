@@ -370,7 +370,7 @@ With several profiles, the exit code is `0` only if every plugin qualifies under
 
 ### The JSON document
 
-`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.2,
+`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.5,
 the same format the OpenMixer console reads). The
 `plugins` array holds the raw, host-free measurements. Beside it, `hostProfiles` holds each
 profile the run judged against, in full, and `verdicts` holds one entry per plugin per profile:
