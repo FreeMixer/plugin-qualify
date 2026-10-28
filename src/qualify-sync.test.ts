@@ -138,6 +138,10 @@ describe("the units the packages ship", () => {
   it("the timer is wanted by timers.target and the path unit by paths.target, and both start the service", () => {
     expect(unit("plugin-qualify-sync.timer")).toMatch(/OnBootSec=\S+[\s\S]*Unit=plugin-qualify-sync\.service[\s\S]*WantedBy=timers\.target/);
     expect(unit("plugin-qualify-sync.path")).toMatch(/Unit=plugin-qualify-sync\.service[\s\S]*WantedBy=paths\.target/);
+    // OnUnitInactiveSec is a rescan on top of the first-boot run: an upgrade of an unpackaged bundle in place is
+    // not a change of the watched folder the path unit sees, so only this periodic run notices it (plugin-qualify#178).
+    expect(unit("plugin-qualify-sync.timer")).toMatch(/^OnBootSec=2min$/m);
+    expect(unit("plugin-qualify-sync.timer")).toMatch(/^OnUnitInactiveSec=15min$/m);
     expect(unit("80-plugin-qualify.preset").split("\n").filter((l) => l.startsWith("enable "))).toEqual([
       "enable plugin-qualify-sync.timer",
       "enable plugin-qualify-sync.path",
