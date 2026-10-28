@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+#
+# A systemd generator (run at boot and at every `systemctl daemon-reload`): the folders the settings file adds to
+# the plugin search (lv2_path, lv2_extra, clap_path, clap_extra) become PathChanged= lines of
+# plugin-qualify-sync.path, beside the standard folders the unit itself names. The unit carries no folder of any
+# one distribution; the settings file is the one place a machine's extra folders are written.
+#
+#   plugin-qualify-sync-generator <normal-dir> [<early-dir> <late-dir>]
+#
+# PLUGIN_QUALIFY_CONF names the settings file (default /etc/omx/qualify.conf).
+
+out=${1:?usage: plugin-qualify-sync-generator <normal-dir>}
+conf=${PLUGIN_QUALIFY_CONF:-/etc/omx/qualify.conf}
+[ -r "$conf" ] || exit 0
+
+dirs=$(awk '
+	{ sub(/#.*/, ""); }
+	$1 == "lv2_path" || $1 == "lv2_extra" || $1 == "clap_path" || $1 == "clap_extra" {
+		v = $0; sub(/^[ \t]*[^ \t]+[ \t]*/, "", v); sub(/[ \t]+$/, "", v)
+		n = split(v, d, ":")
+		for (i = 1; i <= n; i++) if (d[i] ~ /^\/[^ \t]*$/ && !seen[d[i]]++) print d[i]
+	}' "$conf")
+[ -n "$dirs" ] || exit 0
+
+mkdir -p "$out/plugin-qualify-sync.path.d" || exit 0
+{
+	echo "# generated from $conf by plugin-qualify-sync-generator; edit the settings file and run systemctl daemon-reload"
+	echo "[Path]"
+	for d in $dirs; do echo "PathChanged=$d"; done
+} > "$out/plugin-qualify-sync.path.d/50-qualify-conf.conf"
+exit 0
