@@ -51,6 +51,72 @@ describe("the shipped profiles", () => {
     expect(new Set(MOD_HOST_LV2_FEATURES).size).toBe(13);
     expect(JALV_PROFILE).toMatchObject({ clapExtensions: null, instruments: true, isolation: "per-process" });
   });
+
+  it("holds the seven plus the eight omx-clap-core #94 added, in the adapter's order", () => {
+    // plugin-qualify#118: the three rtmempool URIs, the state paths, uri-map and event, after the seven.
+    expect(OMX_INPROCESS_FEATURES.slice(0, 7)).toEqual([
+      "http://lv2plug.in/ns/ext/urid#map",
+      "http://lv2plug.in/ns/ext/urid#unmap",
+      "http://lv2plug.in/ns/ext/options#options",
+      "http://lv2plug.in/ns/ext/buf-size#boundedBlockLength",
+      "http://lv2plug.in/ns/ext/worker#schedule",
+      "http://lv2plug.in/ns/ext/state#loadDefaultState",
+      "http://lv2plug.in/ns/ext/log#log",
+    ]);
+    expect(OMX_INPROCESS_FEATURES.slice(7)).toEqual([
+      "http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool",
+      "http://kxstudio.sf.net/ns/lv2ext/rtmempool#Pool",
+      "http://home.gna.org/lv2dynparam/rtmempool/v1",
+      "http://lv2plug.in/ns/ext/state#makePath",
+      "http://lv2plug.in/ns/ext/state#mapPath",
+      "http://lv2plug.in/ns/ext/state#freePath",
+      "http://lv2plug.in/ns/ext/uri-map",
+      "http://lv2plug.in/ns/ext/event",
+    ]);
+    expect(OMX_INPROCESS_FEATURES).toHaveLength(15);
+    expect(new Set(OMX_INPROCESS_FEATURES).size).toBe(15);
+  });
+});
+
+describe("OMX_INPROCESS_FEATURES against omx-clap-core's own header", () => {
+  // omx-clap-core's own tree: the deps checkout `make -C native deps` fetches (CI), else the installed header
+  const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const CORE_H = [
+    join(PKG, "native", "deps", "omx-clap-core", "lv2", "core", "lv2_core.h"),
+    "/usr/include/omx-clap-core/lv2_core.h",
+  ].find((p) => existsSync(p));
+
+  // the header spells each URI as a macro of the LV2 headers; each macro's URI is the spelling of that header
+  const URI_OF: Record<string, string> = {
+    LV2_URID__map: "http://lv2plug.in/ns/ext/urid#map",
+    LV2_URID__unmap: "http://lv2plug.in/ns/ext/urid#unmap",
+    LV2_OPTIONS__options: "http://lv2plug.in/ns/ext/options#options",
+    LV2_BUF_SIZE__boundedBlockLength: "http://lv2plug.in/ns/ext/buf-size#boundedBlockLength",
+    LV2_WORKER__schedule: "http://lv2plug.in/ns/ext/worker#schedule",
+    LV2_STATE__loadDefaultState: "http://lv2plug.in/ns/ext/state#loadDefaultState",
+    LV2_LOG__log: "http://lv2plug.in/ns/ext/log#log",
+    LV2_RTSAFE_MEMORY_POOL__Pool: "http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool",
+    LV2_RTMEMPOOL_POOL_SPELLED_URI: "http://kxstudio.sf.net/ns/lv2ext/rtmempool#Pool",
+    LV2_RTSAFE_MEMORY_POOL_DEPRECATED_URI: "http://home.gna.org/lv2dynparam/rtmempool/v1",
+    LV2_STATE__makePath: "http://lv2plug.in/ns/ext/state#makePath",
+    LV2_STATE__mapPath: "http://lv2plug.in/ns/ext/state#mapPath",
+    LV2_STATE__freePath: "http://lv2plug.in/ns/ext/state#freePath",
+    LV2_URI_MAP_URI: "http://lv2plug.in/ns/ext/uri-map",
+    LV2_EVENT_URI: "http://lv2plug.in/ns/ext/event",
+  };
+
+  it("equals LV2_CORE_PROVIDED_INIT, URI for URI, in order", (ctx) => {
+    if (CORE_H === undefined) {
+      if (process.env["CI"]) throw new Error("no lv2_core.h: CI fetches it with make -C native deps");
+      return ctx.skip("no lv2_core.h: make -C native deps, or install omx-clap-core-devel");
+    }
+    const init = /#define\s+LV2_CORE_PROVIDED_INIT\s*\\?\s*\{([^}]*)\}/.exec(readFileSync(CORE_H, "utf8"));
+    // a header older than omx-clap-core 0.15 (the pin native/Makefile fetches today) has no such list
+    if (init === null) return ctx.skip(`${CORE_H} has no LV2_CORE_PROVIDED_INIT (omx-clap-core before 0.15)`);
+    const names = init[1]!.replace(/\\\n/g, " ").split(",").map((n) => n.trim()).filter((n) => n !== "" && n !== "NULL");
+    expect(names.filter((n) => URI_OF[n] === undefined), "a macro this test does not know").toEqual([]);
+    expect(names.map((n) => URI_OF[n])).toEqual(OMX_INPROCESS_FEATURES);
+  });
 });
 
 describe("omx-clap-host's profile", () => {
