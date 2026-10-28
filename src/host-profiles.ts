@@ -24,6 +24,11 @@ import type { HostProfile } from "./measurement/format.js";
  * the console hands the same array to the in-process LV2 table at `omx_host_backend_configure`,
  * which builds one provider per URI and refuses a URI it cannot provide; there is no C copy (the
  * console's native test reads this export).
+ *
+ * Equal to omx-clap-core's `LV2_CORE_PROVIDED_INIT` (`lv2/core/lv2_core.h`), same URIs in the same
+ * order: the original seven, then the three state-path features, the three rtmempool URIs (the
+ * current spelling, the deprecated v1 URI, and the `#Pool` spelling some TTLs require), then
+ * uri-map and event (omx-clap-core #94).
  */
 export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/urid#map",
@@ -33,6 +38,14 @@ export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/worker#schedule",
   "http://lv2plug.in/ns/ext/state#loadDefaultState",
   "http://lv2plug.in/ns/ext/log#log",
+  "http://lv2plug.in/ns/ext/state#makePath",
+  "http://lv2plug.in/ns/ext/state#mapPath",
+  "http://lv2plug.in/ns/ext/state#freePath",
+  "http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool",
+  "http://home.gna.org/lv2dynparam/rtmempool/v1",
+  "http://kxstudio.sf.net/ns/lv2ext/rtmempool#Pool",
+  "http://lv2plug.in/ns/ext/uri-map",
+  "http://lv2plug.in/ns/ext/event",
 ];
 
 /**
