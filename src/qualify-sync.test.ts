@@ -124,10 +124,13 @@ describe("the units the packages ship", () => {
 
   it("the service runs the sync as a system service, with flags the sync takes, and never in the audio's way", () => {
     const service = unit("plugin-qualify-sync.service");
-    const exec = /^ExecStart=(\S+) (.*)$/m.exec(service)!;
-    expect(exec[1]).toBe("/usr/bin/plugin-qualify-sync");
-    expect(parseSyncArgs(exec[2]!.split(" ")).ok).toBe(true);
-    expect(exec[2]).toContain("--system");
+    const exec = /^ExecStart=(\S+) (\S+) (.*)$/m.exec(service)!;
+    // the interpreter first, the script as its argument: a service that executes the node script itself stays in
+    // systemd's own SELinux domain on Fedora, which has no executable memory for V8 and no /tmp, and dies at start (#188)
+    expect(exec[1]).toBe("/usr/bin/node");
+    expect(exec[2]).toBe("/usr/bin/plugin-qualify-sync");
+    expect(parseSyncArgs(exec[3]!.split(" ")).ok).toBe(true);
+    expect(exec[3]).toContain("--system");
     for (const line of ["Type=oneshot", "Nice=19", "IOSchedulingClass=idle", "StateDirectory=omx"]) expect(service).toContain(line);
     expect(service).toMatch(/^CPUQuota=\d+%$/m);
     expect(service).toMatch(/^TimeoutStartSec=\S+$/m);
