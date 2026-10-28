@@ -154,4 +154,40 @@ describe("pruneStale", () => {
     const upgraded: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { a: entry(q(stem(GONE, "d"))), b: entry(q(stem(GONE, "d"))) } };
     expect(pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, upgraded).map((f) => f.replace(m.root, "")).sort()).toEqual([`/descriptors/${m.files[GONE]}.json`, `/qualification/${m.files[GONE]}.default.probe.json`, `/qualification/${m.files[GONE]}.default.qualification.json`].sort());
   });
+
+  // #177: a CLAP record is keyed `<id>@unversioned-<hash>` while its descriptor is keyed `<id>@<declared version>-<hash>`
+  const CLAP_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
+  const clapEntry = (record: string, uri = `urn:clap:${CLAP_ID}`) => ({ format: "clap" as const, root: "/r", files: [], qualifiedAt: "", seconds: 0, plugins: [{ uri, outcome: "qualified" as const, record }] });
+
+  it("removes a CLAP plugin's descriptor by id and binary hash, though its record names a different version suffix than its descriptor does", () => {
+    const m = machine();
+    const hash = "d".repeat(12);
+    const recordStemName = `${CLAP_ID}@unversioned-${hash}`;
+    const descriptorStemName = `${CLAP_ID}@1-${hash}`;
+    const record = join(m.q, `${recordStemName}.default.qualification.json`);
+    writeFileSync(record, "{}");
+    writeFileSync(join(m.q, `${recordStemName}.default.probe.json`), "{}");
+    writeFileSync(join(m.d, `${descriptorStemName}.json`), "{}");
+    const before: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(record) } };
+    const after: SyncState = { schema: SYNC_STATE_SCHEMA, entries: {} };
+    const removed = pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, after).map((f) => f.replace(m.root, ""));
+    expect(removed.sort()).toEqual([`/descriptors/${descriptorStemName}.json`, `/qualification/${recordStemName}.default.probe.json`, `/qualification/${recordStemName}.default.qualification.json`].sort());
+  });
+
+  it("keeps a descriptor whose id and binary hash the state still names, even though its own stem became stale", () => {
+    const m = machine();
+    const hash = "e".repeat(12);
+    const staleStem = `${CLAP_ID}@unversioned-${hash}`;
+    const keptStem = `${CLAP_ID}@1-${hash}`;
+    const staleRecord = join(m.q, `${staleStem}.default.qualification.json`);
+    const keptRecord = join(m.q, `${keptStem}.default.qualification.json`);
+    writeFileSync(staleRecord, "{}");
+    writeFileSync(keptRecord, "{}");
+    writeFileSync(join(m.d, `${keptStem}.json`), "{}");
+    const before: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(staleRecord) } };
+    const after: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(keptRecord) } };
+    const removed = pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, after).map((f) => f.replace(m.root, ""));
+    expect(removed).toEqual([`/qualification/${staleStem}.default.qualification.json`]);
+    expect(existsSync(join(m.d, `${keptStem}.json`))).toBe(true);
+  });
 });
