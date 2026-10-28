@@ -26,9 +26,9 @@ import type { HostProfile } from "./measurement/format.js";
  * console's native test reads this export).
  *
  * Equal to omx-clap-core's `LV2_CORE_PROVIDED_INIT` (`lv2/core/lv2_core.h`), same URIs in the same
- * order: the original seven, then the three state-path features, the three rtmempool URIs (the
- * current spelling, the deprecated v1 URI, and the `#Pool` spelling some TTLs require), then
- * uri-map and event (omx-clap-core #94).
+ * order: the original seven, then the three rtmempool URIs (the header's `LV2_RTSAFE_MEMORY_POOL__Pool`,
+ * the `#Pool` spelling some TTLs require, and the deprecated v1 URI), the three state-path features,
+ * then uri-map and event (omx-clap-core #94).
  */
 export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/urid#map",
@@ -38,12 +38,12 @@ export const OMX_INPROCESS_FEATURES: readonly string[] = [
   "http://lv2plug.in/ns/ext/worker#schedule",
   "http://lv2plug.in/ns/ext/state#loadDefaultState",
   "http://lv2plug.in/ns/ext/log#log",
+  "http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool",
+  "http://kxstudio.sf.net/ns/lv2ext/rtmempool#Pool",
+  "http://home.gna.org/lv2dynparam/rtmempool/v1",
   "http://lv2plug.in/ns/ext/state#makePath",
   "http://lv2plug.in/ns/ext/state#mapPath",
   "http://lv2plug.in/ns/ext/state#freePath",
-  "http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool",
-  "http://home.gna.org/lv2dynparam/rtmempool/v1",
-  "http://kxstudio.sf.net/ns/lv2ext/rtmempool#Pool",
   "http://lv2plug.in/ns/ext/uri-map",
   "http://lv2plug.in/ns/ext/event",
 ];
