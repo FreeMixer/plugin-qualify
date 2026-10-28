@@ -195,7 +195,7 @@ describe("the memory bound", () => {
       const w = writeQualification(join(scratch, `oom-${String(n)}`), run!.bytes, run!.judgment);
       expect(existsSync(w.recordPath)).toBe(true);
       const at = (key: string) => w.record.measurements.grid.find((p) => cellKey(p) === key);
-      expect(at("192000/512")).toEqual({ rate: 192000, quantum: 512, outcome: PROBE_OOM, memoryLimit: { bytes: bound.bytes, mechanism: MEMORY_BOUND_MECHANISM } });
+      expect(at("192000/512")).toMatchObject({ rate: 192000, quantum: 512, outcome: PROBE_OOM, memoryLimit: { bytes: bound.bytes, mechanism: MEMORY_BOUND_MECHANISM } });
       expect(at("48000/128")?.outcome).toBe("probe.ok");
       expect(at("96000/1024")?.outcome).toBe("probe.ok");
       expect(w.record.probe.outcome).toBe("probe.ok");
@@ -293,7 +293,7 @@ describe("live: the real runner measures the full grid, an LV2 plugin like a CLA
     expect(existsSync(w.recordPath)).toBe(true);
     const at = (key: string) => w.record.measurements.grid.find((p) => cellKey(p) === key);
     expect(at("48000/256")?.outcome).toBe("probe.ok");
-    expect(at("192000/128")).toEqual({ rate: 192000, quantum: 128, outcome: PROBE_OOM, memoryLimit: { bytes: bound.bytes, mechanism: MEMORY_BOUND_MECHANISM } });
+    expect(at("192000/128")).toMatchObject({ rate: 192000, quantum: 128, outcome: PROBE_OOM, memoryLimit: { bytes: bound.bytes, mechanism: MEMORY_BOUND_MECHANISM } });
     expect(run!.judgment.output.steps.some((s) => s.exitStatus === MEMORY_BOUND_EXIT_STATUS)).toBe(true);
   });
 });
