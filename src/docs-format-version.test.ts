@@ -22,7 +22,7 @@ describe("the README states the format version this build writes", () => {
 
 describe("the cost-grid design note attributes perRateQuantum to the descriptor, not the measurement format", () => {
   it("does not claim format.ts adds perRateQuantum", () => {
-    const note = readFileSync(join(PKG, "docs/design/probe-isolation-and-cost-grid.md"), "utf8");
+    const note = readFileSync(join(PKG, "docs", "design", "probe-isolation-and-cost-grid.md"), "utf8");
     expect(note).not.toMatch(/`format\.ts`[^\n]*\bperRateQuantum\b/);
     expect(note).toContain("`src/hosting-suitability.ts`) adds `perRateQuantum`");
   });
