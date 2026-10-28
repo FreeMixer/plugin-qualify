@@ -21,6 +21,7 @@ import { manifestPlugins } from "./lv2-loader.js";
 import { parsePinLine } from "./pins-file.js";
 import {
   SYNC_SETTINGS,
+  ZYNTHIAN_LV2_DIRS,
   changedPinLines,
   digestFiles,
   discoverSyncItems,
@@ -143,13 +144,14 @@ describe("the units the packages ship", () => {
     ]);
   });
 
-  it("the path unit watches every directory a system service searches by default", () => {
+  it("the path unit watches every standard directory a system service searches by default; the directories it adds come from the settings file", () => {
     const watched = [...unit("plugin-qualify-sync.path").matchAll(/^PathChanged=(.*)$/gm)].map((m) => m[1]);
     const args = parseSyncArgs(["--system"]);
     if (!args.ok) throw new Error(args.error);
     const r = resolveSyncSettings(new Map(), args.args, {}, "/root");
     if (!r.ok) throw new Error(r.error);
-    for (const dir of [...r.settings.lv2Dirs, ...r.settings.clapDirs.filter((d) => !d.startsWith("/root"))]) expect(watched).toContain(dir);
+    // the sync's own default for lv2_extra (Zynthian's two) is a setting, not a standard folder: the generated drop-in carries it
+    for (const dir of [...r.settings.lv2Dirs.filter((d) => !ZYNTHIAN_LV2_DIRS.includes(d)), ...r.settings.clapDirs.filter((d) => !d.startsWith("/root"))]) expect(watched).toContain(dir);
   });
 
   it("the settings file names only settings", () => {
