@@ -13,7 +13,8 @@
  *
  * What a run leaves: the state file (what was qualified, from which bytes, and how it ended), the qualification
  * records and the descriptors in their directories, and the pin file plugin-hostd loads as `pin_file`, written whole.
- * When a daemon answers on the command port, the pins that changed are also sent to it with `pin_set`.
+ * When a daemon answers on the command port, the pins that changed are also sent to it with `pin_set`, and the ones
+ * of a plugin that is gone with `pin_clear`. What a gone plugin left in the records and the descriptors is removed.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -586,6 +587,50 @@ export function changedPinLines(before: string, after: string): string[] {
   return [...pinLinesOf(after).entries()].filter(([uri, line]) => was.get(uri) !== line).map(([, line]) => line);
 }
 
+/** The uris `before` pins that `after` no longer does: the plugins that went away. */
+export function removedPinUris(before: string, after: string): string[] {
+  const now = pinLinesOf(after);
+  return [...pinLinesOf(before).keys()].filter((uri) => !now.has(uri));
+}
+
+/** `<id>@<version>-<binary sha first 12>`, the stem a qualification record, its probe copy and its descriptor share. */
+export function recordStem(recordPath: string): string | undefined {
+  return /^(.*-[0-9a-f]{12})\.(?:[^.]+\.(?:qualification|probe)|unmeasured)\.json$/.exec(basename(recordPath))?.[1];
+}
+
+/**
+ * What a plugin the sync no longer finds, or finds as other bytes, leaves behind: its qualification record, the probe
+ * output copied beside it and its descriptor. A stem the state before held and the state after does not hold is
+ * stale; every file of that stem in the two directories is removed. A record another plugin of the state still names
+ * (two copies of one binary) is kept. Returns the files removed.
+ */
+export function pruneStale(settings: Pick<SyncSettings, "qualificationDir" | "descriptorDir">, before: SyncState, after: SyncState): string[] {
+  const stems = (state: SyncState): Set<string> =>
+    new Set(Object.values(state.entries).flatMap((e) => e.plugins.flatMap((p) => (p.record === undefined ? [] : [recordStem(p.record) ?? ""]))).filter((x) => x !== ""));
+  const kept = stems(after);
+  const stale = [...stems(before)].filter((stem) => !kept.has(stem));
+  const removed: string[] = [];
+  const drop = (dir: string, file: string): void => {
+    try {
+      unlinkSync(join(dir, file));
+      removed.push(join(dir, file));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+  };
+  let records: string[] = [];
+  try {
+    records = readdirSync(settings.qualificationDir);
+  } catch {
+    // no directory, no record
+  }
+  for (const stem of stale) {
+    for (const f of records) if (f.startsWith(`${stem}.`) && recordStem(f) === stem) drop(settings.qualificationDir, f);
+    drop(settings.descriptorDir, `${stem}.json`);
+  }
+  return removed;
+}
+
 /** What became of the pins sent to a daemon: its replies, or why none came. */
 export type SentPins =
   | { readonly replies: readonly string[] }
@@ -754,12 +799,15 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
       before = "";
     }
     let state = readSyncState(settings.stateFile, log);
+    const stateBefore = state;
+    let unreadable = false;
     const lv2Pinned: string[] = [];
     // a change made while a pass ran is caught by one more pass, a few at most
     for (let pass = 0; pass < 3; pass++) {
       const signature = directoriesSignature(dirs);
       const { items, problems } = discoverSyncItems(settings);
       for (const p of problems) log(p);
+      unreadable = problems.length > 0;
       const found = new Set(items.map((i) => i.key));
       const entries: Record<string, SyncEntry> = {};
       for (const [key, entry] of Object.entries(state.entries)) if (found.has(key)) entries[key] = entry;
@@ -794,7 +842,12 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
     const after = syncPinsText(state);
     if (after !== before) writeFileWhole(settings.pinFile, after);
     writeLv2Descriptors(ctx, lv2Pinned);
-    const changed = changedPinLines(before, after);
+    // the files of a plugin that is gone, or was replaced by other bytes: only when every directory could be read, so
+    // an unreadable one is never taken for an uninstall
+    if (unreadable) log("a plugin directory could not be read; no record or descriptor is removed this run");
+    else for (const f of pruneStale(settings, stateBefore, state)) log(`${f}: removed, its plugin is gone or changed`);
+    // a plugin that was pinned and is not any more is also forgotten by a running daemon
+    const changed = [...changedPinLines(before, after), ...removedPinUris(before, after).map((uri) => `pin_clear ${uri}`)];
     const sent = await sendPins(settings.hostdPort, settings.hostdFeedbackPort, changed);
     if ("unsent" in sent) {
       const why = {
