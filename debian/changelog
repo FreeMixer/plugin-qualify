@@ -1,3 +1,10 @@
+plugin-qualify (0.16.1) unstable; urgency=medium
+
+  * The sync service names the interpreter first in ExecStart: executed as a script it stayed in systemd's own
+    SELinux domain on Fedora, with no executable memory for V8 and no /tmp, and died at start (#188).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Wed, 28 Oct 2026 16:30:56 +0100
+
 plugin-qualify (0.16.0) unstable; urgency=medium
 
   * A package transaction in a plugin folder scans once: debian triggers and rpm file triggers on the standard
