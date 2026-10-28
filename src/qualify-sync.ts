@@ -813,6 +813,12 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
   }
 }
 
+/** What a failed descriptor pass says: plainly, once, when the lilv binding is what is missing (a suite without python3-lilv). */
+export function lv2DescriptorFailure(status: number | null, error: string | undefined, stderr: string): string {
+  if (/No module named '?lilv/.test(stderr)) return "LV2 descriptors are not written: python3-lilv is not installed (install it, or the plugins are still qualified and pinned without descriptors)";
+  return `LV2 descriptors not all written (${error ?? `exit ${String(status)}`}): ${stderr.trim().split("\n").slice(-3).join("; ")}`;
+}
+
 /** The descriptors of the LV2 plugins qualified this run, in one pass of the LV2 scanner; a failure is named. */
 function writeLv2Descriptors(ctx: SyncContext, uris: readonly string[]): void {
   if (uris.length === 0) return;
@@ -823,7 +829,7 @@ function writeLv2Descriptors(ctx: SyncContext, uris: readonly string[]): void {
       [join(toolsDir(), "scan.py"), "--descriptor-dir", ctx.settings.descriptorDir, "--out", join(out, "catalog.json"), ...uris],
       { encoding: "utf8", timeout: ctx.settings.budgetS * 1000 * Math.max(1, Math.ceil(uris.length / 10)), env: { ...ctx.env, LV2_PATH: ctx.settings.lv2Dirs.join(":") } },
     );
-    if (r.status !== 0) ctx.log(`LV2 descriptors not all written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim().split("\n").slice(-3).join("; ")}`);
+    if (r.status !== 0) ctx.log(lv2DescriptorFailure(r.status, r.error?.message, r.stderr ?? ""));
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
