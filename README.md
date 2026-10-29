@@ -546,7 +546,7 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 
 Those are the service's (`--system`); run by a user, the files go under `$XDG_STATE_HOME/omx`. An LV2
 directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
-pinned. `--force` qualifies everything again, and `--no-distributed` reads no distributed record.
+pinned. `--force` qualifies everything again, and `--no-distributed` reads no distributed record. A second `plugin-qualify-sync` waits for the run in progress (a lock on `<state_file>.lock`); `--no-wait` exits 0 at once and leaves a marker, and the holder runs once more at its end over what changed meanwhile.
 
 The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/usr/local/lib/lv2`,
 `/usr/lib/clap`, `/usr/lib64/clap`). The folders the settings file adds (`lv2_path`, `lv2_extra`, `clap_path`,

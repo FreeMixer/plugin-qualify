@@ -16,9 +16,9 @@
  * When a daemon answers on the command port, the pins that changed are also sent to it with `pin_set`, and the ones
  * of a plugin that is gone with `pin_clear`. What a gone plugin left in the records and the descriptors is removed.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -124,6 +124,7 @@ export interface SyncArgs {
   readonly system: boolean;
   readonly force: boolean;
   readonly noDistributed: boolean;
+  readonly noWait: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -138,12 +139,14 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let system = false;
   let force = false;
   let noDistributed = false;
+  let noWait = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--system") system = true;
     else if (a === "--force") force = true;
     else if (a === "--no-distributed") noDistributed = true;
+    else if (a === "--no-wait") noWait = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -153,7 +156,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, help, values } };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -164,6 +167,7 @@ export function syncHelpText(): string {
     `  ${"--config <file>".padEnd(36)}the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
     "  --system                            a system service's directories, under /var/lib/omx",
     "  --force                             qualify every plugin again, recorded or not; no distributed record is read",
+    "  --no-wait                           a run in progress is not waited for: exit 0, and the holder runs once more at its end",
     "  --no-distributed                    read no distributed record: every plugin not recorded is measured",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
@@ -925,53 +929,106 @@ export function summaryLine(s: SyncSummary): string {
   return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}, ${s.seconds.toFixed(1)} s`;
 }
 
-/** The lock of one state file: a second sync on it while one runs returns at once. A lock whose process is gone is taken over. */
-function takeLock(stateFile: string): (() => void) | undefined {
+/** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
+const LOCK_HELD = 99;
+
+export interface SyncLock {
+  release(): Promise<void>;
+}
+
+/**
+ * The lock of one state file: flock(1) on `<state file>.lock`, held by a child process for as long as this one lives or
+ * until `release`, so a crashed run frees it. Waits for the holder, or with `wait` false returns `undefined` at once.
+ */
+export function takeLock(stateFile: string, wait: boolean): Promise<SyncLock | undefined> {
   const lock = `${stateFile}.lock`;
   mkdirSync(dirname(lock), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(lock, "wx");
-      writeSync(fd, String(process.pid));
-      closeSync(fd);
-      return () => rmSync(lock, { force: true });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      const pid = Number(readFileSync(lock, "utf8"));
-      try {
-        if (Number.isInteger(pid) && pid > 0) {
-          process.kill(pid, 0);
-          return undefined;
-        }
-      } catch {
-        // its process is gone
-      }
-      unlinkSync(lock);
-    }
-  }
-  return undefined;
+  const child = spawn("flock", ["-x", "-E", String(LOCK_HELD), ...(wait ? [] : ["-n"]), lock, "sh", "-c", "echo locked; exec cat"], { stdio: ["pipe", "pipe", "inherit"] });
+  return new Promise((resolvePromise, reject) => {
+    const exited = new Promise<void>((done) => child.once("close", () => done()));
+    child.once("error", reject);
+    child.stdout.once("data", () =>
+      resolvePromise({
+        release: () => {
+          child.stdin.end();
+          return exited;
+        },
+      }),
+    );
+    child.once("close", (code) => {
+      if (code === LOCK_HELD) resolvePromise(undefined);
+      else reject(new Error(`flock ${lock} failed (exit ${String(code)})`));
+    });
+  });
 }
+
+/** What a second run leaves for the holder: one more run at its end, over what changed meanwhile. */
+const againMarker = (stateFile: string): string => `${stateFile}.again`;
 
 export interface SyncRunOptions {
   readonly force?: boolean;
+  /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
+  readonly wait?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly log?: (line: string) => void;
 }
 
 /**
- * One run: wait for quiet, qualify what is new or changed, drop what is gone, write the state, the records, the
- * descriptors and the pin file, and send the changed pins to a running daemon. The state and the pin file are written
- * whole after every item, so a run cut short keeps all it finished. `undefined` when another run holds the lock.
+ * One run under the lock: waits for a run in progress, or with `wait` false leaves a marker for it and returns
+ * `undefined`. The holder runs once more at its end for every marker left meanwhile.
  */
 export async function runSync(settings: SyncSettings, options: SyncRunOptions = {}): Promise<SyncSummary | undefined> {
   const log = options.log ?? (() => {});
-  const env = options.env ?? process.env;
-  const unlock = takeLock(settings.stateFile);
-  if (unlock === undefined) {
-    log(`another sync holds ${settings.stateFile}.lock; this one does nothing`);
-    return undefined;
+  const marker = againMarker(settings.stateFile);
+  let lock = await takeLock(settings.stateFile, options.wait !== false);
+  if (lock === undefined) {
+    // the marker first, then the lock once more: a holder that finished in between is not left without a successor
+    writeFileSync(marker, "");
+    lock = await takeLock(settings.stateFile, false);
+    if (lock === undefined) {
+      log(`a run is in progress (${settings.stateFile}.lock); it runs once more at its end over what changed`);
+      return undefined;
+    }
   }
   try {
+    let total: SyncSummary | undefined;
+    for (;;) {
+      rmSync(marker, { force: true });
+      const one = await runLocked(settings, options);
+      total = total === undefined ? one : addSummaries(total, one);
+      if (!existsSync(marker)) return total;
+      log("a run was asked for while this one ran; running once more");
+    }
+  } finally {
+    await lock.release();
+  }
+}
+
+function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
+  const sent = (a.sent ?? 0) + (b.sent ?? 0);
+  return {
+    qualified: a.qualified + b.qualified,
+    skipped: a.skipped + b.skipped,
+    refused: a.refused + b.refused,
+    crashed: a.crashed + b.crashed,
+    hung: a.hung + b.hung,
+    unmeasured: a.unmeasured + b.unmeasured,
+    distributed: a.distributed + b.distributed,
+    seconds: a.seconds + b.seconds,
+    ...(sent === 0 ? {} : { sent }),
+  };
+}
+
+/**
+ * One run: wait for quiet, qualify what is new or changed, drop what is gone, write the state, the records, the
+ * descriptors and the pin file, and send the changed pins to a running daemon. The state and the pin file are written
+ * whole after every item, so a run cut short keeps all it finished.
+ */
+async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promise<SyncSummary> {
+  const log = options.log ?? (() => {});
+  const env = options.env ?? process.env;
+  log("sync run begins");
+  {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
     await waitQuiet(dirs, settings.settleS, log);
@@ -1058,8 +1115,6 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
     for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
     const taken = replies.filter((r) => r === "resp 0").length;
     return { ...count, seconds: (Date.now() - started) / 1000, ...(taken === 0 ? {} : { sent: taken }) };
-  } finally {
-    unlock();
   }
 }
 
