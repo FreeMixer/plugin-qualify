@@ -1,3 +1,15 @@
+plugin-qualify (0.17.0) unstable; urgency=medium
+
+  * The distributed records layer: the sync reads the records a device ships before it measures, and takes a plugin
+    only on a binary checksum match; plugin-qualify-records-package builds the Debian package of a device's
+    qualification records (#195).
+  * The measurement grid covers every declared host rate and quantum, for LV2 as for CLAP, with the runs merged into
+    one probe output and a bounded memory: a run past the bound is probe.oom (#193).
+  * A record cell without latency figures says why, by the contract's reason code (#201).
+  * The commit-message check is named for what it checks.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Thu, 29 Oct 2026 12:00:00 +0100
+
 plugin-qualify (0.16.1) unstable; urgency=medium
 
   * The sync service names the interpreter first in ExecStart: executed as a script it stayed in systemd's own
