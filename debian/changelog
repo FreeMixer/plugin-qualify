@@ -1,3 +1,9 @@
+plugin-qualify (0.17.3) unstable; urgency=medium
+
+  * The sync takes a pin's files from plugin-hostd --pin-files, preset files included (#228); records carry the LV2 adapter's admission (#223) and the latency object on every cell (#201); the mod-host probe uses the device's LV2_PATH (#224); the sync takes a lock (#222); published descriptors are readable by the console (#221). Needs plugin-hostd 0.15.0.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Thu, 29 Oct 2026 23:26:32 +0100
+
 plugin-qualify (0.17.2) unstable; urgency=medium
 
   * The sync writes CLAP descriptors one plugin per run with its own timeout, keys CLAP targets by file, and removes the records of a plugin's other bytes (#218, #219).
