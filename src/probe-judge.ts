@@ -133,7 +133,9 @@ export function clapLineFromProbeOutput(output: ProbeOutput, facts: JudgeFacts =
   const points = okPoints(output);
   const latency: Record<string, { declaredFrames: number; measuredFrames: number }> = {};
   for (const p of points) {
-    if (p.latency !== undefined && latency[String(p.rate)] === undefined) latency[String(p.rate)] = p.latency;
+    if (p.latency?.measuredFrames !== undefined && latency[String(p.rate)] === undefined) {
+      latency[String(p.rate)] = { declaredFrames: p.latency.declaredFrames, measuredFrames: p.latency.measuredFrames };
+    }
   }
   const withRt = points.filter((p) => p.rtSafety !== undefined);
   return {
