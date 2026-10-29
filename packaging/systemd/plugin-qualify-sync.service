@@ -13,7 +13,7 @@ Type=oneshot
 # The interpreter is named first: when systemd executes the node script itself, Fedora's SELinux policy keeps the
 # service in systemd's own domain (init_t), which may neither make V8's code pages executable nor write under /tmp,
 # and the run dies before its first line; executing /usr/bin/node takes the ordinary daemon transition.
-ExecStart=/usr/bin/node /usr/bin/plugin-qualify-sync --system --settle-s 60
+ExecStart=/usr/bin/node /usr/bin/plugin-qualify-sync --system --no-wait --settle-s 60
 StateDirectory=omx
 # The audio comes first, and the machine stays reachable: the lowest CPU priority and the disk only when nothing else
 # wants it; at most two cores' worth of CPU (on a four-core machine two stay free, so sshd and the console answer
