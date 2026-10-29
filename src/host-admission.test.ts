@@ -15,6 +15,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   admitPlugin,
+  SPAWNED_ADMISSIONS,
   classifyJalvRun,
   classifyModHostRun,
   type AdmissionRuns,
@@ -199,6 +200,9 @@ net.createServer((c) => c.on("data", (d) => {
   const cmd = d.toString().split(" ")[0];
   if (cmd !== "add" && cmd !== "remove") return c.write("few arguments\0"); // mod-host answers a verb it lacks with no resp line
   if (mode === "abort" && cmd === "add") process.kill(process.pid, "SIGABRT");
+  // "path": as mod-host does, a plugin outside the LV2_PATH it was started with is an unknown URI
+  const seen = (process.env.LV2_PATH || "").split(":").includes(process.env.STAND_BUNDLES);
+  if (mode === "path" && cmd === "add" && !seen) return c.write("resp -101\0");
   c.write("resp " + (mode === "refuse" && cmd === "add" ? -102 : 0) + "\0");
 })).listen(port, "127.0.0.1");
 `,
@@ -214,4 +218,36 @@ net.createServer((c) => c.on("data", (d) => {
   it("a refusal stops the run at the refused step", () => expect(classifyModHostRun(admit("refuse")).code).toBe("mod-host.resp-102"));
   it("a host that aborts on add is the signal", () => expect(classifyModHostRun(admit("abort")).code).toBe("mod-host.signal-SIGABRT"));
   it("no mod-host on the PATH is not installed", () => expect(admit("ok", dirname(process.execPath))).toEqual({ installed: false, steps: [] }));
+
+  // plugin-qualify#224: the sync's mod-host was started with no LV2_PATH and answered -101 for mda Piano, which lives in
+  // Zynthian's own LV2 directory; the admission hosts now start on the device's directories
+  it("a plugin outside lilv's defaults is admitted when the host is started on the device's LV2_PATH", () => {
+    const bundles = join(dir, "zynthian-plugins", "lv2");
+    const env = { ...process.env, PATH: `${dir}:${process.env["PATH"]}`, STAND_IN: "path", STAND_BUNDLES: bundles };
+    delete (env as Record<string, string | undefined>)["LV2_PATH"];
+    expect(classifyModHostRun(SPAWNED_ADMISSIONS.modHost("urn:x", env)).code).toBe("mod-host.resp-101");
+    const onDevice = { ...env, LV2_PATH: `/usr/lib/lv2:${bundles}` };
+    expect(admitPlugin("mod-host", "urn:x", SPAWNED_ADMISSIONS, onDevice)).toMatchObject({ host: "mod-host", admitted: true });
+  });
+});
+
+describe("qualifyTargets starts the admission hosts on the LV2 directories it is given", () => {
+  it("mod-host gets admissionLv2Path as its LV2_PATH, not the run's one-bundle world", () => {
+    const uri = "http://moddevices.com/plugins/mda/Piano";
+    const doc = fixtureJson("success-msi");
+    doc.plugin = { format: "lv2", id: uri };
+    const run: ProbeRun = (_tool, args) => {
+      writeFileSync(args[args.indexOf("--out") + 1]!, JSON.stringify(doc));
+      return { status: 0, signal: null };
+    };
+    const seen: (string | undefined)[] = [];
+    const runs: AdmissionRuns = {
+      modHost: (u, env) => (seen.push(env?.["LV2_PATH"]), recorded(uri).modHost(u)),
+      jalv: (u, env) => (seen.push(env?.["LV2_PATH"]), recorded(uri).jalv(u)),
+    };
+    const dirs = ["/usr/lib/lv2", "/usr/local/lib/lv2", "/zynthian/zynthian-plugins/lv2"];
+    qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: { LV2_PATH: "/tmp/one-bundle-world" }, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: runs, admissionLv2Path: dirs });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((p) => p === dirs.join(":"))).toBe(true);
+  });
 });

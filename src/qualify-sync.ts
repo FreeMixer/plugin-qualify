@@ -550,6 +550,8 @@ function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][
     profiles: [s.hostProfile],
     wallS: s.budgetS,
     env,
+    // mod-host and jalv are admitted on the device's LV2 directories, not on the one-bundle world the probe measures in
+    admissionLv2Path: s.lv2Dirs,
   });
 }
 
