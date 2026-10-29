@@ -102,8 +102,10 @@ fi
 %doc README.md
 %{_bindir}/plugin-qualify
 %{_bindir}/plugin-qualify-sync
+%{_bindir}/plugin-qualify-records-package
 %{_mandir}/man1/plugin-qualify.1*
 %{_mandir}/man1/plugin-qualify-sync.1*
+%{_mandir}/man1/plugin-qualify-records-package.1*
 %dir %{_sysconfdir}/omx
 %config(noreplace) %{_sysconfdir}/omx/qualify.conf
 %{_unitdir}/plugin-qualify-sync.service
