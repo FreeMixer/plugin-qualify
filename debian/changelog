@@ -1,3 +1,9 @@
+plugin-qualify (0.17.2) unstable; urgency=medium
+
+  * The sync writes CLAP descriptors one plugin per run with its own timeout, keys CLAP targets by file, and removes the records of a plugin's other bytes (#218, #219).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Thu, 29 Oct 2026 11:49:36 +0100
+
 plugin-qualify (0.17.1) unstable; urgency=medium
 
   * The Debian release build installs python3 for the changelog step; no code change.

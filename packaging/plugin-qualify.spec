@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.17.1
+Version:        0.17.2
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -117,6 +117,9 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.2-1
+- The sync writes CLAP descriptors one plugin per run with its own timeout, keys CLAP targets by file, and removes the records of a plugin's other bytes (#218, #219).
+
 * Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.1-1
 - The Debian release build installs python3 for the changelog step; no code change.
 * Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.0-1
