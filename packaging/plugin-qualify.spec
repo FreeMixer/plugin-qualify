@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.17.0
+Version: 0.17.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -117,6 +117,8 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.1-1
+- The Debian release build installs python3 for the changelog step; no code change.
 * Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.0-1
 - The distributed records layer: the sync reads the records a device ships before it measures, and takes a plugin
   only on a binary checksum match; plugin-qualify-records-package builds the Debian package of a device's
