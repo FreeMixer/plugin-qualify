@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.17.2
+Version:        0.17.3
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -31,8 +31,8 @@ Requires: python3
 Requires: python3-lilv
 # the scanned descriptors are held to omx-contract's schema before they are written (tools/descriptors.py)
 Requires: python3-jsonschema
-# plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
-Requires: plugin-hostd >= 0.4.0
+# plugin-hostd-probe, the runner every CLAP plugin is measured through; --pin-files, which the sync takes its pins from, first released in 0.15.0
+Requires: plugin-hostd >= 0.15.0
 Recommends: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
 # remote-control pages (remote_controls), which the descriptors keep
@@ -120,6 +120,9 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.3-1
+- The sync takes a pin's files from plugin-hostd --pin-files, preset files included (#228); records carry the LV2 adapter's admission (#223) and the latency object on every cell (#201); the mod-host probe uses the device's LV2_PATH (#224); the sync takes a lock (#222); published descriptors are readable by the console (#221). Needs plugin-hostd 0.15.0.
+
 * Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.2-1
 - The sync writes CLAP descriptors one plugin per run with its own timeout, keys CLAP targets by file, and removes the records of a plugin's other bytes (#218, #219).
 
