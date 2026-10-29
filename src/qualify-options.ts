@@ -38,10 +38,10 @@ export const QUALIFY_OPTIONS: readonly QualifyOption[] = [
   {
     flag: "--grid",
     value: "hosts|full|cells",
-    describe: "the cells measured: hosts = each judged host's rate/quantum, then 512 at every rate; full = every rate at every quantum; or <rate>/<quantum>,...",
-    default: "hosts",
+    describe: "the cells measured: full = every rate at every quantum; hosts = each judged host's rate/quantum, then 512 at every rate (the fast option); or <rate>/<quantum>,...",
+    default: "full",
   },
-  { flag: "--grid-hosts", describe: "the same as --grid hosts" },
+  { flag: "--grid-hosts", describe: "the fast grid, the same as --grid hosts" },
   { flag: "--cells-per-plugin-budget", value: "n", describe: "measure at most the first n cells of the grid a plugin (0: every cell)", default: "0" },
   { flag: "--blocks", value: "n", describe: "blocks of the CLAP sweep a cell (the LV2 pass has a fixed shape)", default: String(CLAP_SWEEP_BLOCKS) },
   { flag: "--memory-limit", value: "size|off", describe: "the memory bound of every run (bytes, or with K, M, G); past it a cell is probe.oom", default: "half of the RAM" },

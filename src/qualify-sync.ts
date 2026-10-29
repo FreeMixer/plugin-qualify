@@ -32,7 +32,7 @@ import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
 import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets } from "./probe-runner.js";
-import { GRID_HOSTS, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { writeQualification, type NotMeasured } from "./qualification-record.js";
 import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
@@ -69,7 +69,7 @@ export const SYNC_SETTINGS: readonly SyncSetting[] = [
   { key: "state_file", meaning: "what was qualified, from which bytes, and how it ended", default: "/var/lib/omx/qualify-sync.json (system), else $XDG_STATE_HOME/omx/qualify-sync.json" },
   { key: "budget_s", meaning: "the wall clock one run gets (one cell of an LV2 plugin, one quantum of a CLAP one), in seconds; past it the plugin is recorded as hung", default: "60" },
   { key: "host_profile", meaning: "the host the verdict is for (a shipped profile id)", default: "omx-clap-host" },
-  { key: "grid", meaning: "the cells measured: hosts (the host's and the console tiers' rate/quantum, then 512 at every rate), full, or <rate>/<quantum>,...", default: "hosts" },
+  { key: "grid", meaning: "the cells measured: full (every rate at every block size, 16 cells), hosts (the fast option: the host's and the console tiers' rate/quantum, then 512 at every rate; also --grid-hosts), or <rate>/<quantum>,...", default: "full" },
   { key: "cells_per_plugin_budget", meaning: "measure at most the first n cells of the grid a plugin; 0 is every cell", default: "0" },
   { key: "memory_limit", meaning: "the memory bound of every run: bytes, or with K, M, G; off for none; past it a cell is probe.oom", default: "half of the RAM" },
   { key: "hostd_port", meaning: "plugin-hostd's command port the new pins are sent to; 0 sends none", default: "5555" },
@@ -145,6 +145,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--force") force = true;
     else if (a === "--no-distributed") noDistributed = true;
     else if (a === "--help") help = true;
+    else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
       const v = argv[++i];
       if (v === undefined) return { ok: false, error: `${a} needs a value` };
@@ -164,6 +165,7 @@ export function syncHelpText(): string {
     "  --system                            a system service's directories, under /var/lib/omx",
     "  --force                             qualify every plugin again, recorded or not; no distributed record is read",
     "  --no-distributed                    read no distributed record: every plugin not recorded is measured",
+    "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
     ...rows,
     "",
@@ -206,7 +208,7 @@ export function resolveSyncSettings(
   if (feedbackPort === undefined || !Number.isInteger(feedbackPort) || feedbackPort > 65535) return { ok: false, error: "hostd_feedback_port must be a port number, or 0" };
   if (settleS === undefined) return { ok: false, error: "settle_s must be a number of seconds" };
   const gridText = get("grid");
-  const grid = gridText === undefined || gridText === "" ? { ok: true as const, spec: GRID_HOSTS } : parseGridSpec(gridText);
+  const grid = gridText === undefined || gridText === "" ? { ok: true as const, spec: GRID_FULL } : parseGridSpec(gridText);
   if (!grid.ok) return { ok: false, error: `grid: ${grid.error}` };
   const cellsPerPluginBudget = number("cells_per_plugin_budget", 0);
   if (cellsPerPluginBudget === undefined || !Number.isInteger(cellsPerPluginBudget)) return { ok: false, error: "cells_per_plugin_budget must be a whole number, 0 or more" };

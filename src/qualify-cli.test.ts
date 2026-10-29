@@ -49,9 +49,11 @@ describe("parseQualifyArgs — the named-plugin path is first-class", () => {
     expect(a.args.format).toBe("text");
   });
 
-  it("the grid is the hosts' by default; --grid full, named cells, --grid-hosts, a cell budget, --blocks and --memory-limit (#193)", () => {
+  it("the grid is the full one by default; --grid full, named cells, --grid-hosts, a cell budget, --blocks and --memory-limit (#193)", () => {
     const d = parseQualifyArgs([ZERO_PATH_URI]);
-    expect(d.ok && [d.args.grid, d.args.cellsPerPluginBudget, d.args.blocks, d.args.memoryLimit]).toEqual([{ kind: "hosts" }, 0, undefined, undefined]);
+    expect(d.ok && [d.args.grid, d.args.cellsPerPluginBudget, d.args.blocks, d.args.memoryLimit]).toEqual([{ kind: "full" }, 0, undefined, undefined]);
+    const h = parseQualifyArgs([ZERO_PATH_URI, "--grid-hosts"]);
+    expect(h.ok && h.args.grid).toEqual({ kind: "hosts" });
     const f = parseQualifyArgs([ZERO_PATH_URI, "--grid", "full", "--cells-per-plugin-budget", "3", "--blocks", "128", "--memory-limit", "2G"]);
     expect(f.ok && [f.args.grid, f.args.cellsPerPluginBudget, f.args.blocks, f.args.memoryLimit]).toEqual([{ kind: "full" }, 3, 128, 2 ** 31]);
     const c = parseQualifyArgs([ZERO_PATH_URI, "--grid", "48000/128"]);

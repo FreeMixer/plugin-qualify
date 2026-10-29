@@ -110,12 +110,16 @@ describe("the settings", () => {
     expect(r.settings.pinFile).toBe("/home/u/.local/state/omx/qualified.pins");
   });
 
-  it("the grid is the hosts' by default, full or named cells when set, with a cell budget and a memory bound (#193)", () => {
+  it("the grid is the full one by default, hosts (also --grid-hosts) or named cells when set, with a cell budget and a memory bound (#193)", () => {
     const args = parseSyncArgs([]);
     if (!args.ok) throw new Error(args.error);
     const d = resolveSyncSettings(new Map(), args.args, {}, "/home/u");
     if (!d.ok) throw new Error(d.error);
-    expect(d.settings.grid).toEqual({ kind: "hosts" });
+    expect(d.settings.grid).toEqual({ kind: "full" });
+    const fast = parseSyncArgs(["--grid-hosts"]);
+    if (!fast.ok) throw new Error(fast.error);
+    const h = resolveSyncSettings(new Map(), fast.args, {}, "/home/u");
+    expect(h.ok && h.settings.grid).toEqual({ kind: "hosts" });
     expect(d.settings.cellsPerPluginBudget).toBe(0);
     expect(d.settings.memory?.bytes).toBeGreaterThan(0);
     const set = resolveSyncSettings(new Map([["grid", "48000/128,96000/1024"], ["cells_per_plugin_budget", "2"], ["memory_limit", "1G"]]), args.args, {}, "/home/u");

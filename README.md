@@ -75,17 +75,17 @@ A plugin is measured in cells, each one sample rate and one quantum (block size 
 gets reads the cell of that host's rate and quantum, so the grid has to hold it.
 
 ```
-plugin-qualify --all --out ./q                          # the hosts' grid (the default, also --grid-hosts)
-plugin-qualify --all --grid full --out ./q              # every --rates rate at every --quanta quantum
+plugin-qualify --all --out ./q                          # the full grid (the default): 4 rates x 4 block sizes
+plugin-qualify --all --grid-hosts --out ./q             # the hosts' grid, the fast option (also --grid hosts)
 plugin-qualify --grid 48000/128,96000/1024 urn:my:fx    # exactly these cells
 ```
 
-- `--grid hosts` (the default; `--grid-hosts` says the same): the rate and quantum of every host the run judges
+- `--grid hosts` (the fast option; `--grid-hosts` says the same): the rate and quantum of every host the run judges
   (each `--host-profile`, and the console's two tiers, `openmixer-console` and the format's isolated host), then
   quantum 512 at every `--rates` rate, so that a record stays comparable with the ones written before the grid.
   With the four shipped hosts that is seven cells: 96000/1024 (`openmixer-console`), 48000/256 (`jalv`),
   48000/128 (`mod-host`, `omx-clap-host`), and 512 at 44100, 48000, 96000 and 192000.
-- `--grid full`: every `--rates` rate at every `--quanta` quantum, 16 cells with the defaults
+- `--grid full` (the default; every plugin is measured under the same conditions, so any host's verdict can be read at any cell and the figures compare): every `--rates` rate at every `--quanta` quantum, 16 cells with the defaults
   (44100, 48000, 96000, 192000 by 128, 256, 512, 1024).
 - `--grid <rate>/<quantum>,...`: exactly the cells named.
 
@@ -120,6 +120,8 @@ A host whose own cell ended `probe.oom` is `unknown` there as well (`memory`, `p
 run within the bound at that host's rate and quantum.
 
 ### How long a run takes
+
+The default grid is the full one, so the expected time of a run with no grid option is the `full` row: about 65 hours on a Raspberry Pi 5 for the vangelis set (1823 records). `--grid-hosts` is the fast option, about 30 hours there.
 
 Times from one deep run on a Raspberry Pi 5 (4 cores, 4 GB), 1823 records (494 CLAP, two offers of each of 247,
 and 1329 LV2), six hours in all with the grid of before (CLAP at four rates in one run at quantum 512, LV2 at
@@ -535,7 +537,7 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 | `state_file` | `/var/lib/omx/qualify-sync.json` |
 | `budget_s` | `60` |
 | `host_profile` | `omx-clap-host` |
-| `grid` | `hosts`: the cells of `host_profile` and of the console's two tiers, then 512 at every rate (`full`, or `<rate>/<quantum>,...`) |
+| `grid` | `full`: every rate at every block size, 16 cells (`hosts`, or `--grid-hosts`: the cells of `host_profile` and of the console's two tiers, then 512 at every rate; or `<rate>/<quantum>,...`) |
 | `cells_per_plugin_budget` | `0`, every cell of the grid |
 | `memory_limit` | half of the machine's RAM (`off` for none) |
 | `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
