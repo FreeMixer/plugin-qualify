@@ -32,6 +32,8 @@ function stands(ids: readonly string[]): { env: Record<string, string>; clap: st
   mkdirSync(clap);
   mkdirSync(join(root, "lv2"));
   writeFileSync(join(clap, "multi.clap"), "bytes of a bundle with several plugins");
+  // a file beside the .clap that the daemon's stand-in names for its pins, which no probe output lists
+  writeFileSync(join(clap, "multi.clap.resources"), "resources the daemon names");
   writeFileSync(join(root, "scan.json"), JSON.stringify({ scanner: "clap-qualify", version: "0.1.0", files: [{ path: join(clap, "multi.clap"), plugins: ids.map(plugin) }] }));
   writeFileSync(join(root, "probe.json"), PROBE);
   const script = (name: string, body: string): string => {
@@ -49,8 +51,10 @@ function stands(ids: readonly string[]): { env: Record<string, string>; clap: st
     `while [ "$1" != "--out" ]; do shift; done; o="$2"; shift 2; while [ "\${1#--}" != "$1" ]; do shift 2; done; f="$1"; id="$2"
 sed -e "s|\\"id\\": \\"org.example.plate\\"|\\"id\\": \\"$id\\"|" -e "s|/usr/lib64/clap/example-plate.clap|$f|" ${JSON.stringify(join(root, "probe.json"))} > "$o"`,
   );
+  // plugin-hostd --pin-files clap:<path>#<id>: the file and its directory, as the daemon's CLAP collector names them
+  const hostd = script("plugin-hostd", `while [ "$1" != "--pin-files" ]; do shift; done; u="$2"; p="\${u#clap:}"; p="\${p%#*}"; echo "root $(dirname "$p")"; echo "file $(basename "$p")"; echo "file multi.clap.resources"`);
   return {
-    env: { ...process.env, OMX_CLAP_QUALIFY: scanner, OMX_RT_INTERPOSE: interposer, OMX_PROBE_RUNNER: runner } as Record<string, string>,
+    env: { ...process.env, OMX_CLAP_QUALIFY: scanner, OMX_RT_INTERPOSE: interposer, OMX_PROBE_RUNNER: runner, PLUGIN_HOSTD: hostd } as Record<string, string>,
     clap,
     out,
     flags: [
@@ -76,6 +80,8 @@ describe("a .clap that declares two plugin ids", () => {
     const file = join(m.clap, "multi.clap");
     const pins = readFileSync(join(m.out, "qualified.pins"), "utf8").split("\n").map((l) => parsePinLine(l)).filter((p) => p !== undefined);
     expect(pins.map((p) => p!.uri).sort(), said).toEqual(ids.map((id) => `clap:${file}#${id}`).sort());
+    // the files of each pin are plugin-hostd's (plugin-qualify#228), not the probe's: the one it adds is held
+    for (const p of pins) expect(p!.files.map((f) => f.path).sort(), said).toEqual(["multi.clap", "multi.clap.resources"]);
     const records = readdirSync(join(m.out, "qualification")).filter((f) => f.endsWith(".qualification.json")).sort();
     expect(records.map((f) => f.split("@")[0])).toEqual([...ids].sort());
     expect(summary?.qualified, said).toBe(2);
