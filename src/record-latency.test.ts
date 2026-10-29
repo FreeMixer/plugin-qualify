@@ -42,6 +42,16 @@ describe("a record's cells all carry latency", () => {
     expect(cell(rec, 48000, 128)?.latency).toEqual({ unmeasuredReason: "silent-output", code: HOSTING_CODE.latencyUnmeasured });
   });
 
+  it("a cell the plugin declared latency for but the probe did not measure keeps the declared figure and says why (#201)", () => {
+    const rec = recordOf((d) => {
+      d.grid[0].latency = { declaredFrames: 64 };
+      Object.assign(d.steps.find((s: any) => s.step === "latency" && s.rate === 48000), {
+        outcome: "probe.not-attempted", hostingCode: HOSTING_CODE.latencyUnmeasured, detail: "silent-output: the response stayed silent",
+      });
+    });
+    expect(cell(rec, 48000, 128)?.latency).toEqual({ declaredFrames: 64, unmeasuredReason: "silent-output", code: HOSTING_CODE.latencyUnmeasured });
+  });
+
   it("a reason that is not a contract word is probe-error; a cell whose run failed is named by its outcome", () => {
     const rec = recordOf((d) => {
       delete d.grid[0].latency;

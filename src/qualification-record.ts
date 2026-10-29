@@ -93,13 +93,15 @@ export function unmeasuredFigures(output: ProbeOutput): readonly UnmeasuredFigur
 
 /** A cell's latency when the run took no figure: the contract's unmeasured word and the hosting code a reader classifies by. */
 export interface UnmeasuredLatency {
+  /** The figure the plugin declared (LV2 latency port, CLAP latency extension) when it loaded but the probe did not measure. */
+  readonly declaredFrames?: number;
   readonly unmeasuredReason: string;
   readonly code: string;
 }
 
 /** A grid point as the record writes it: every cell carries `latency`, the figures or why there are none (#201). */
 export type RecordGridPoint = Omit<ProbeGridPoint, "latency"> & {
-  readonly latency: NonNullable<ProbeGridPoint["latency"]> | UnmeasuredLatency;
+  readonly latency: (Omit<NonNullable<ProbeGridPoint["latency"]>, "measuredFrames"> & { readonly measuredFrames: number }) | UnmeasuredLatency;
 };
 
 const UNMEASURED_WORDS: ReadonlySet<string> = new Set(Object.values(MEASUREMENT_UNMEASURED_REASONS).map((r) => r.word));
@@ -120,7 +122,13 @@ const OUTCOME_WORD: Readonly<Record<string, string>> = {
  * older than the latency arm writes it.
  */
 export function latencyOfCell(output: ProbeOutput, point: ProbeGridPoint): RecordGridPoint["latency"] {
-  if (point.latency !== undefined) return point.latency;
+  const had = point.latency;
+  if (had?.measuredFrames !== undefined) return { ...had, measuredFrames: had.measuredFrames };
+  const why = unmeasuredOfCell(output, point);
+  return had === undefined ? why : { declaredFrames: had.declaredFrames, ...why };
+}
+
+function unmeasuredOfCell(output: ProbeOutput, point: ProbeGridPoint): UnmeasuredLatency {
   const code = HOSTING_CODE.latencyUnmeasured;
   if (point.outcome !== PROBE_OK) return { unmeasuredReason: OUTCOME_WORD[point.outcome] ?? word("probeError"), code };
   const step = output.steps.find((st) => st.step === "latency" && st.rate === point.rate && (st.quantum === undefined || st.quantum === point.quantum));
