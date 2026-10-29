@@ -25,6 +25,9 @@ import type { PluginTarget } from "./loader.js";
 import { SPAWNED_ADMISSIONS, admitPlugin, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
+import { budgetCells, gridCells, runnerInvocations, type GridCell, type GridSpec, type RunnerInvocation } from "./measurement-grid.js";
+import type { MemoryBound } from "./memory-bound.js";
+import { mergeProbeRuns, ProbeMergeError } from "./probe-merge.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import {
   CLAP_QUALIFY_TIMEOUT_S,
@@ -33,8 +36,10 @@ import {
   LV2_HOSTING_BLOCK_FRAMES,
   LV2_HOSTING_TIMEOUT_S,
   LV2_MEASURE_TOOL_NAME,
+  MEMORY_BOUND_EXIT_ENV,
   PROBE_RUNNER_DEFAULT,
   PROBE_RUNNER_ENV,
+  QUALIFY_QUANTA,
 } from "./qualify-declarations.js";
 
 export class ProbeRunnerError extends Error {
@@ -67,8 +72,14 @@ const spawnRunner: ProbeRun = (tool, args, env) => {
 };
 
 export interface ProbeTargetOptions {
-  /** The rates the plugin is measured at. */
+  /** The rates the plugin is measured at; with no `cells`, each at `CLAP_SWEEP_FRAMES`. */
   readonly rates: readonly number[];
+  /** The cells of the grid this plugin is measured at (`measurement-grid.ts`); each format's runs are planned from them. */
+  readonly cells?: readonly GridCell[];
+  /** Blocks of the CLAP sweep a cell; else `CLAP_SWEEP_BLOCKS`. The LV2 pass has a fixed shape. */
+  readonly blocks?: number;
+  /** The memory bound every run is held to; none (the runner's own default) when absent. */
+  readonly memory?: MemoryBound;
   /** Host extensions to offer beyond the prober's own (a CLAP run). */
   readonly offer?: readonly string[];
   /** The wall clock the runner gives one run, in seconds; else the format's declared one. */
@@ -80,7 +91,17 @@ export interface ProbeTargetOptions {
 
 /** The runner's arguments for a CLAP file; `child` is the prober the runner starts. */
 export function clapRunnerArgs(
-  options: { rates: readonly number[]; offer?: readonly string[]; wallS?: number; out: string; log: string; child: string },
+  options: {
+    rates: readonly number[];
+    quantum?: number;
+    blocks?: number;
+    dataBytes?: number;
+    offer?: readonly string[];
+    wallS?: number;
+    out: string;
+    log: string;
+    child: string;
+  },
   binaryPath: string,
   id: string | undefined,
 ): string[] {
@@ -91,12 +112,13 @@ export function clapRunnerArgs(
     "--rates",
     options.rates.join(","),
     "--quantum",
-    String(CLAP_SWEEP_FRAMES),
+    String(options.quantum ?? CLAP_SWEEP_FRAMES),
     "--blocks",
-    String(CLAP_SWEEP_BLOCKS),
+    String(options.blocks ?? CLAP_SWEEP_BLOCKS),
     ...(options.offer === undefined || options.offer.length === 0 ? [] : ["--offer", options.offer.join(",")]),
     "--wall-s",
     String(options.wallS ?? CLAP_QUALIFY_TIMEOUT_S),
+    ...(options.dataBytes === undefined ? [] : ["--data-bytes", String(options.dataBytes)]),
     "--out",
     options.out,
     "--log",
@@ -110,16 +132,20 @@ export function clapRunnerArgs(
  * The runner's arguments for an LV2 plugin, named as `lv2:<uri>` and measured by `lv2_measure`: the one this run
  * located when `child` names it, else the one the runner looks for where the packages install it.
  */
-export function lv2RunnerArgs(options: { rates: readonly number[]; wallS?: number; out: string; log: string; child?: string }, uri: string): string[] {
+export function lv2RunnerArgs(
+  options: { rates: readonly number[]; quantum?: number; dataBytes?: number; wallS?: number; out: string; log: string; child?: string },
+  uri: string,
+): string[] {
   return [
     "run",
     ...(options.child === undefined ? [] : ["--child", options.child]),
     "--rates",
     options.rates.join(","),
     "--quantum",
-    String(LV2_HOSTING_BLOCK_FRAMES),
+    String(options.quantum ?? LV2_HOSTING_BLOCK_FRAMES),
     "--wall-s",
     String(options.wallS ?? LV2_HOSTING_TIMEOUT_S),
+    ...(options.dataBytes === undefined ? [] : ["--data-bytes", String(options.dataBytes)]),
     "--out",
     options.out,
     "--log",
@@ -134,7 +160,7 @@ export interface ProbedTarget {
   readonly output: ProbeOutput;
 }
 
-function runOne(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget {
+function runOne(target: PluginTarget, options: ProbeTargetOptions, invocation: RunnerInvocation): ProbedTarget {
   const env = options.env ?? process.env;
   const tool = probeRunnerTool(env);
   const work = mkdtempSync(join(tmpdir(), "plugin-qualify-probe-"));
@@ -145,20 +171,28 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget
     let runEnv: Record<string, string | undefined> = { ...env };
     let expectedId: string;
     const wall = options.wallS === undefined ? {} : { wallS: options.wallS };
+    const bound = options.memory === undefined ? {} : { dataBytes: options.memory.bytes };
+    const at = { rates: invocation.rates, quantum: invocation.quantum, ...bound };
     if (target.format === "clap") {
       if (target.binaryPath === undefined) throw new ProbeRunnerError(`${target.uri}: no .clap to load; name the file or a directory holding it`);
       expectedId = target.uri.startsWith("urn:clap:") ? target.uri.slice("urn:clap:".length) : target.uri;
       const { tool: child, interposer } = clapQualifyTools(env, options.exists ?? existsSync);
-      args = clapRunnerArgs({ rates: options.rates, ...(options.offer === undefined ? {} : { offer: options.offer }), ...wall, out, log, child }, target.binaryPath, expectedId);
+      args = clapRunnerArgs(
+        { ...at, ...(options.blocks === undefined ? {} : { blocks: options.blocks }), ...(options.offer === undefined ? {} : { offer: options.offer }), ...wall, out, log, child },
+        target.binaryPath,
+        expectedId,
+      );
       runEnv = { ...env, LD_PRELOAD: interposer };
     } else {
       expectedId = target.uri;
       const child = locateNativeTool(LV2_MEASURE_TOOL_NAME, env, options.exists ?? existsSync).path;
       args = lv2RunnerArgs(
-        { rates: options.rates, ...wall, out, log, ...(child === undefined ? {} : { child }) },
+        { ...at, ...wall, out, log, ...(child === undefined ? {} : { child }) },
         target.uri,
       );
     }
+    // under a bound, the interposer ends the child the moment an allocation is refused, with the status that names it
+    if (options.memory !== undefined) runEnv = { ...runEnv, [MEMORY_BOUND_EXIT_ENV]: "1" };
     const r = (options.run ?? spawnRunner)(tool, args, runEnv);
     if (r.error !== undefined) {
       throw new ProbeRunnerError(`cannot run the probe runner "${tool}" (${r.error.message}): install plugin-hostd or set ${PROBE_RUNNER_ENV} to plugin-hostd-probe`);
@@ -186,9 +220,23 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget
   }
 }
 
-/** The probe output of one target, through the runner. Throws {@link ProbeRunnerError} when there is none to judge. */
+/** The cells a target is measured at: the options' cells, else every rate at `CLAP_SWEEP_FRAMES`. */
+export function targetCells(options: Pick<ProbeTargetOptions, "rates" | "cells">): readonly GridCell[] {
+  return options.cells ?? options.rates.map((rate) => ({ rate, quantum: CLAP_SWEEP_FRAMES }));
+}
+
+/**
+ * The probe output of one target over its grid, through the runner: one run per quantum (CLAP) or per cell (LV2),
+ * merged into one document (`probe-merge.ts`). Throws {@link ProbeRunnerError} when a run leaves nothing to judge.
+ */
 export function probeTarget(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget {
-  return runOne(target, options);
+  const parts = runnerInvocations(target.format, targetCells(options)).map((invocation) => ({ ...runOne(target, options, invocation), invocation }));
+  try {
+    return mergeProbeRuns(parts, options.memory);
+  } catch (e) {
+    if (e instanceof ProbeMergeError) throw new ProbeRunnerError(e.message);
+    throw e;
+  }
 }
 
 /** What the pass over a run's targets produced. */
@@ -210,7 +258,16 @@ export interface ProbePass {
  */
 export function qualifyTargets(
   targets: readonly PluginTarget[],
-  options: ProbeTargetOptions & { readonly profiles?: readonly HostProfile[]; readonly admissions?: AdmissionRuns },
+  options: ProbeTargetOptions & {
+    readonly profiles?: readonly HostProfile[];
+    readonly admissions?: AdmissionRuns;
+    /** How the grid is chosen; with it, each target's cells come from the hosts it is judged under. */
+    readonly grid?: GridSpec;
+    /** The quanta of a `full` grid; else `QUALIFY_QUANTA`. */
+    readonly quanta?: readonly number[];
+    /** At most this many cells a plugin, the first of the grid's order; 0 or absent is every cell. */
+    readonly cellsPerPluginBudget?: number;
+  },
 ): ProbePass {
   const profiles = options.profiles ?? [OPENMIXER_CONSOLE_PROFILE];
   const admissionRuns = options.admissions ?? SPAWNED_ADMISSIONS;
@@ -225,6 +282,11 @@ export function qualifyTargets(
       .flatMap((id) => (id === undefined ? [] : [shippedHostProfile(id)]))
       .filter((p): p is HostProfile => p !== undefined);
     const judgedProfiles = [...profiles, ...tierProfiles.filter((t) => !profiles.some((p) => p.id === t.id))];
+    const cells =
+      options.grid === undefined
+        ? options.cells
+        : gridCells(options.grid, { rates: options.rates, quanta: options.quanta ?? QUALIFY_QUANTA, hosts: judgedProfiles.map((p) => ({ rate: p.cost.rate, quantum: p.cost.quantum })) });
+    const measured = cells === undefined ? {} : { cells: budgetCells(cells, options.cellsPerPluginBudget) };
     // an LV2 plugin is run under each measured host once, whichever probe output it is judged with
     const admissions: Record<string, HostAdmission> = {};
     if (target.format === "lv2") {
@@ -246,7 +308,7 @@ export function qualifyTargets(
     const targetRuns: { bytes: Buffer; judgment: Judgment }[] = [];
     try {
       for (const { offer, profiles: forOffer } of byOffer.values()) {
-        const probed = probeTarget(target, { ...options, offer });
+        const probed = probeTarget(target, { ...options, ...measured, offer });
         const judgment = judgeProbeOutput(probed.output, forOffer, { admissions });
         targetRuns.push({ bytes: probed.bytes, judgment });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);

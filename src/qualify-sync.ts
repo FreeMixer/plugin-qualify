@@ -32,8 +32,10 @@ import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
 import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets } from "./probe-runner.js";
+import { GRID_HOSTS, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { writeQualification, type NotMeasured } from "./qualification-record.js";
-import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM } from "./qualify-declarations.js";
+import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
 
@@ -65,8 +67,11 @@ export const SYNC_SETTINGS: readonly SyncSetting[] = [
   { key: "qualification_dir", meaning: "where the qualification records go", default: "/var/lib/omx/qualification (system), else $XDG_STATE_HOME/omx/qualification" },
   { key: "descriptor_dir", meaning: "where the scanned descriptors go", default: `${DESCRIPTOR_DIR_SYSTEM} (system), else $XDG_STATE_HOME/${DESCRIPTOR_DIR_STATE_SUBDIR}` },
   { key: "state_file", meaning: "what was qualified, from which bytes, and how it ended", default: "/var/lib/omx/qualify-sync.json (system), else $XDG_STATE_HOME/omx/qualify-sync.json" },
-  { key: "budget_s", meaning: "the wall clock one plugin gets, in seconds; past it the plugin is recorded as hung", default: "60" },
+  { key: "budget_s", meaning: "the wall clock one run gets (one cell of an LV2 plugin, one quantum of a CLAP one), in seconds; past it the plugin is recorded as hung", default: "60" },
   { key: "host_profile", meaning: "the host the verdict is for (a shipped profile id)", default: "omx-clap-host" },
+  { key: "grid", meaning: "the cells measured: hosts (the host's and the console tiers' rate/quantum, then 512 at every rate), full, or <rate>/<quantum>,...", default: "hosts" },
+  { key: "cells_per_plugin_budget", meaning: "measure at most the first n cells of the grid a plugin; 0 is every cell", default: "0" },
+  { key: "memory_limit", meaning: "the memory bound of every run: bytes, or with K, M, G; off for none; past it a cell is probe.oom", default: "half of the RAM" },
   { key: "hostd_port", meaning: "plugin-hostd's command port the new pins are sent to; 0 sends none", default: "5555" },
   { key: "hostd_feedback_port", meaning: "plugin-hostd's feedback port, connected before the command port; 0 is the command port's next", default: "0" },
   { key: "settle_s", meaning: "wait until the plugin directories have been quiet this long before a run", default: "0" },
@@ -83,6 +88,11 @@ export interface SyncSettings {
   readonly stateFile: string;
   readonly budgetS: number;
   readonly hostProfile: HostProfile;
+  /** The cells measured, and at most how many a plugin (0: every cell). */
+  readonly grid: GridSpec;
+  readonly cellsPerPluginBudget: number;
+  /** The memory bound of every run; `undefined` is `off`. */
+  readonly memory?: MemoryBound;
   readonly hostdPort: number;
   readonly hostdFeedbackPort: number;
   readonly settleS: number;
@@ -146,15 +156,15 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
 }
 
 export function syncHelpText(): string {
-  const rows = SYNC_SETTINGS.map((s) => `  ${`${flagOf(s.key)} <value>`.padEnd(28)}${s.meaning}${s.default === "" ? "" : ` (default: ${s.default})`}`);
+  const rows = SYNC_SETTINGS.map((s) => `  ${`${flagOf(s.key)} <value>`.padEnd(36)}${s.meaning}${s.default === "" ? "" : ` (default: ${s.default})`}`);
   return [
     "plugin-qualify-sync: qualify every plugin on the search paths once, and again when its files change",
     "",
-    `  --config <file>             the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
-    "  --system                    a system service's directories, under /var/lib/omx",
-    "  --force                     qualify every plugin again, recorded or not; no distributed record is read",
-    "  --no-distributed            read no distributed record: every plugin not recorded is measured",
-    "  --help                      this text",
+    `  ${"--config <file>".padEnd(36)}the settings file (default: ${SYNC_CONF}; a missing file is the defaults)`,
+    "  --system                            a system service's directories, under /var/lib/omx",
+    "  --force                             qualify every plugin again, recorded or not; no distributed record is read",
+    "  --no-distributed                    read no distributed record: every plugin not recorded is measured",
+    "  --help                              this text",
     ...rows,
     "",
     "every setting is also a line of the settings file, its key as the first word",
@@ -195,6 +205,15 @@ export function resolveSyncSettings(
   if (hostdPort === undefined || !Number.isInteger(hostdPort) || hostdPort > 65535) return { ok: false, error: "hostd_port must be a port number, or 0" };
   if (feedbackPort === undefined || !Number.isInteger(feedbackPort) || feedbackPort > 65535) return { ok: false, error: "hostd_feedback_port must be a port number, or 0" };
   if (settleS === undefined) return { ok: false, error: "settle_s must be a number of seconds" };
+  const gridText = get("grid");
+  const grid = gridText === undefined || gridText === "" ? { ok: true as const, spec: GRID_HOSTS } : parseGridSpec(gridText);
+  if (!grid.ok) return { ok: false, error: `grid: ${grid.error}` };
+  const cellsPerPluginBudget = number("cells_per_plugin_budget", 0);
+  if (cellsPerPluginBudget === undefined || !Number.isInteger(cellsPerPluginBudget)) return { ok: false, error: "cells_per_plugin_budget must be a whole number, 0 or more" };
+  const memoryText = get("memory_limit");
+  const memoryLimit = memoryText === undefined || memoryText === "" ? undefined : parseMemoryLimit(memoryText);
+  if (memoryLimit !== undefined && !memoryLimit.ok) return { ok: false, error: `memory_limit: ${memoryLimit.error}` };
+  const memory = memoryBoundOf(memoryLimit?.bytes);
   const profileId = get("host_profile") || "omx-clap-host";
   const hostProfile = shippedHostProfile(profileId);
   if (hostProfile === undefined) return { ok: false, error: `host_profile ${profileId} is not a shipped host profile` };
@@ -222,6 +241,9 @@ export function resolveSyncSettings(
       stateFile: place("state_file", "/var/lib/omx/qualify-sync.json", join("omx", "qualify-sync.json")),
       budgetS,
       hostProfile,
+      grid: grid.spec,
+      cellsPerPluginBudget,
+      ...(memory === undefined ? {} : { memory }),
       hostdPort,
       hostdFeedbackPort: feedbackPort === 0 && hostdPort !== 0 ? hostdPort + 1 : feedbackPort,
       settleS,
@@ -514,7 +536,17 @@ function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgmen
 }
 
 function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][number], env: Readonly<Record<string, string | undefined>>) {
-  return qualifyTargets([target], { rates: [ctx.settings.hostProfile.cost.rate], profiles: [ctx.settings.hostProfile], wallS: ctx.settings.budgetS, env });
+  const s = ctx.settings;
+  return qualifyTargets([target], {
+    rates: QUALIFY_RATES,
+    quanta: QUALIFY_QUANTA,
+    grid: s.grid,
+    cellsPerPluginBudget: s.cellsPerPluginBudget,
+    ...(s.memory === undefined ? {} : { memory: s.memory }),
+    profiles: [s.hostProfile],
+    wallS: s.budgetS,
+    env,
+  });
 }
 
 /** The descriptors of a scanned `.clap`, through the one descriptor writer; a failure is named and the run goes on. */

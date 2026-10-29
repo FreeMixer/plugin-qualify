@@ -110,6 +110,27 @@ describe("the settings", () => {
     expect(r.settings.pinFile).toBe("/home/u/.local/state/omx/qualified.pins");
   });
 
+  it("the grid is the hosts' by default, full or named cells when set, with a cell budget and a memory bound (#193)", () => {
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const d = resolveSyncSettings(new Map(), args.args, {}, "/home/u");
+    if (!d.ok) throw new Error(d.error);
+    expect(d.settings.grid).toEqual({ kind: "hosts" });
+    expect(d.settings.cellsPerPluginBudget).toBe(0);
+    expect(d.settings.memory?.bytes).toBeGreaterThan(0);
+    const set = resolveSyncSettings(new Map([["grid", "48000/128,96000/1024"], ["cells_per_plugin_budget", "2"], ["memory_limit", "1G"]]), args.args, {}, "/home/u");
+    if (!set.ok) throw new Error(set.error);
+    expect(set.settings.grid).toEqual({ kind: "cells", cells: [{ rate: 48000, quantum: 128 }, { rate: 96000, quantum: 1024 }] });
+    expect(set.settings.cellsPerPluginBudget).toBe(2);
+    expect(set.settings.memory).toEqual({ bytes: 2 ** 30, mechanism: "rlimit-data" });
+    const off = resolveSyncSettings(new Map([["memory_limit", "off"], ["grid", "full"]]), args.args, {}, "/home/u");
+    expect(off.ok && off.settings.memory).toBeUndefined();
+    expect(off.ok && off.settings.grid).toEqual({ kind: "full" });
+    for (const [k, v] of [["grid", "48000"], ["cells_per_plugin_budget", "1.5"], ["memory_limit", "much"]] as const) {
+      expect(resolveSyncSettings(new Map([[k, v]]), args.args, {}).ok, k).toBe(false);
+    }
+  });
+
   it("a budget, a port or a host that is not one is refused, never defaulted", () => {
     const args = parseSyncArgs([]);
     if (!args.ok) throw new Error(args.error);

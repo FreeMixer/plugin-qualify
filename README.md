@@ -69,6 +69,81 @@ A named LV2 plugin is measured the same way as a CLAP one: through the probe run
 output it writes (`plugin-qualify judge` below). Exit code: `0` every plugin qualified, `1` some did not, `2`
 something could not be measured.
 
+## The measurement grid
+
+A plugin is measured in cells, each one sample rate and one quantum (block size in frames). The verdict a host
+gets reads the cell of that host's rate and quantum, so the grid has to hold it.
+
+```
+plugin-qualify --all --out ./q                          # the hosts' grid (the default, also --grid-hosts)
+plugin-qualify --all --grid full --out ./q              # every --rates rate at every --quanta quantum
+plugin-qualify --grid 48000/128,96000/1024 urn:my:fx    # exactly these cells
+```
+
+- `--grid hosts` (the default; `--grid-hosts` says the same): the rate and quantum of every host the run judges
+  (each `--host-profile`, and the console's two tiers, `openmixer-console` and the format's isolated host), then
+  quantum 512 at every `--rates` rate, so that a record stays comparable with the ones written before the grid.
+  With the four shipped hosts that is seven cells: 96000/1024 (`openmixer-console`), 48000/256 (`jalv`),
+  48000/128 (`mod-host`, `omx-clap-host`), and 512 at 44100, 48000, 96000 and 192000.
+- `--grid full`: every `--rates` rate at every `--quanta` quantum, 16 cells with the defaults
+  (44100, 48000, 96000, 192000 by 128, 256, 512, 1024).
+- `--grid <rate>/<quantum>,...`: exactly the cells named.
+
+The cells are taken in that order: the hosts' own cells first, in the order the hosts are named, then the
+512 cells, then the rest by rate and quantum. `--cells-per-plugin-budget N` keeps the first N, so a first pass
+over a large machine can measure the hosts' cells alone (`--cells-per-plugin-budget 3` with the four shipped hosts).
+`--blocks N` shortens the CLAP sweep of each cell from 512 blocks to N; the LV2 pass has a fixed shape (30
+lifecycles and 3 swept runs per cell) and is not shortened by it.
+
+An LV2 plugin is measured on the same grid as a CLAP one. plugin-hostd's runner measures an LV2 plugin at one
+rate per run (the highest it is given), which is why records written before the grid hold LV2 figures at 192000
+only; plugin-qualify now runs it once per cell. A CLAP plugin is run once per quantum, at every rate of the grid
+at that quantum. The runs of one plugin and one offer make one probe output: the grid points of every run, the
+steps of every run, and the run's outcome. The record and its byte copy hold that document.
+
+A run that ended badly leaves a grid point at each of its cells with the run's outcome in place of figures, so a
+cell is never silently absent. The cost a host is judged by is read at its cell: a measured cell is compared with
+the host's budget; a cell whose run failed reads `unknown` with that run's outcome (`probe.oom`, say); only a
+cell the grid does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`.
+
+### The memory bound
+
+A sampler loading its library can take all the memory of a small machine, and the kernel then kills it, or
+something else. Every run is bounded: `--memory-limit <bytes>` (`512M`, `2G`, or `off`), by default half of
+the machine's RAM. The bound is the runner's data limit (`--data-bytes`, `RLIMIT_DATA` on the measuring child:
+its heap and private writable mappings), and the interposer the child runs under turns an allocation refused
+under that limit into an immediate exit with status 121. A run that ends that way, or by a `SIGKILL` the
+runner did not send (the kernel's out-of-memory killer), is recorded as `probe.oom`: its cells carry the
+outcome and `memoryLimit { bytes, mechanism }`, the plugin's record is still written, and the other cells are
+judged as usual. A plugin whose every run ended `probe.oom` is `unknown` under every host, deciding `probe.oom`.
+A host whose own cell ended `probe.oom` is `unknown` there as well (`memory`, `probe.oom`): the plugin did not
+run within the bound at that host's rate and quantum.
+
+### How long a run takes
+
+Times from one deep run on a Raspberry Pi 5 (4 cores, 4 GB), 1823 records (494 CLAP, two offers of each of 247,
+and 1329 LV2), six hours in all with the grid of before (CLAP at four rates in one run at quantum 512, LV2 at
+192000/512 alone):
+
+| | runs | mean a run | total |
+| --- | --- | --- | --- |
+| CLAP, one run per offer (4 cells) | 494 | 2.8 s | 0.38 h |
+| LV2, one run (1 cell) | 1329 | 10.5 s | 3.86 h |
+| host admissions (jalv, mod-host) and the scan | | | about 1.8 h |
+
+A CLAP plugin takes one run per quantum of the grid, an LV2 plugin one run per cell; the admissions do not
+grow with the grid. On that machine, then, about:
+
+| grid | CLAP runs a plugin | LV2 runs a plugin | expected |
+| --- | --- | --- | --- |
+| hosts (7 cells) | 4 | 7 | 1.5 h + 27 h + 1.8 h, about 30 h |
+| full (16 cells) | 4 | 16 | 1.5 h + 62 h + 1.8 h, about 65 h |
+| hosts, `--cells-per-plugin-budget 3` | 3 | 3 | 1.1 h + 11.6 h + 1.8 h, about 15 h |
+
+These are ceilings: the LV2 time a run was taken at 192000, the dearest rate. `--blocks 128` takes a quarter of
+the CLAP sweep a cell. A first pass with `--cells-per-plugin-budget 3`, then `--grid full` over the plugins worth
+it, keeps a small machine's night bounded.
+
 ## CLAP plugins: the RT-safety verdict
 
 A `.clap` file, or a directory holding one, is scanned by `omx-clap-scan` (from omx-clap-core; set
@@ -95,7 +170,7 @@ are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive
 system lv2 directories) rather than qualify only the CLAP side. A directory on the CLAP path that cannot
 be read (permissions, a symlink loop) also refuses with exit 2, naming it.
 
-The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
+The prober runs each plugin headless at every cell of the grid (see "The measurement grid"), under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
 the file's SHA-256 beside what it measured. The verdict is the real-time-safety one: **suitable**
 only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
@@ -159,6 +234,13 @@ stays silent, an instrument with no count to hold) is left out of the grid point
 `measurements.unmeasured` with its hosting code (`hosting.latency.unmeasured`,
 `hosting.cost.unmeasured-at-rate-and-quantum`).
 
+Every cell of a record carries `latency`: the two figures when the run took them, else
+`{ unmeasuredReason, code }`, the contract's word for why and the hosting code a reader classifies by. A latency
+step that did not end well gives the child's reason (`silent-output`, say); a cell whose run failed, its outcome's
+word (`probe-crashed`, or `probe-error` for `probe.oom`); a run that took no latency at all (a runner or a child
+older than the latency arm), `not-attempted`. The declared figure alone, for a plugin whose response could not be
+measured, is not in the probe output today: plugin-hostd's runner writes a cell's latency only with both figures.
+
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
 keeps what a console needs to draw a third-party plugin's controls: an enum parameter's labels (as
@@ -201,7 +283,8 @@ history outside its grammar is not read and is named on stderr; a history of a v
 `tools/lv2-measure.mjs` measures the hosting dimensions (`stability`, `rtSafety`, `features`) through
 the LV2 measurer the package installs, `lv2_measure`: each plugin is loaded through lilv in its own
 process, instantiated and destroyed 30 times, and run under the interposer while every control is
-swept, at the highest `--rates` rate:
+swept. `tools/lv2-measure.mjs` measures at the highest `--rates` rate; `plugin-qualify` runs the measurer
+once per cell of its grid (see "The measurement grid"):
 
 ```
 node tools/lv2-measure.mjs --rates 48000 --dimensions stability,rtSafety,features \
@@ -418,11 +501,11 @@ The package ships it as a service that runs two minutes after boot and whenever 
 changes, once the directory has been quiet for a minute. A run finds every `.clap` under the CLAP
 directories and every plugin of every bundle under the LV2 ones, and hashes each one's files as
 plugin-hostd does for a pin. A plugin whose files hash as recorded is skipped. A new or changed one gets the
-quick qualification through the probe runner: its pin, the RT-safety sweep, cost and latency, its
+quick qualification through the probe runner, on the grid `grid` names (see "The measurement grid"): its pin, the RT-safety sweep, cost and latency, its
 qualification record and its descriptor. The soak is not part of it, and every record it writes says so in
 `notMeasured` (`hosting.stability.unsoaked`).
 
-Each plugin has `budget_s` seconds. One that crashes or hangs is recorded as `crashed` or `hung`, one that
+Each run of the runner (one cell of an LV2 plugin, one quantum of a CLAP one) has `budget_s` seconds, under `memory_limit`. One that crashes or hangs is recorded as `crashed` or `hung`, one that
 fails the sweep is pinned `verdict=refused`, and the run goes on to the next. The pin file and the state are
 written whole after every plugin, so a run cut short keeps what it finished. The last line counts the run:
 
@@ -452,6 +535,9 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 | `state_file` | `/var/lib/omx/qualify-sync.json` |
 | `budget_s` | `60` |
 | `host_profile` | `omx-clap-host` |
+| `grid` | `hosts`: the cells of `host_profile` and of the console's two tiers, then 512 at every rate (`full`, or `<rate>/<quantum>,...`) |
+| `cells_per_plugin_budget` | `0`, every cell of the grid |
+| `memory_limit` | half of the machine's RAM (`off` for none) |
 | `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
 | `host_class` | the board's own, from the device tree (`rpi5`); none elsewhere |
 | `distributed_dir` | `/usr/share/omx/qualification` |
