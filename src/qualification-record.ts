@@ -162,6 +162,11 @@ export interface QualificationRecord {
   readonly testedVersion?: string;
   readonly binary: ProbeOutput["binary"];
   readonly verdicts: readonly RecordVerdict[];
+  /**
+   * An LV2 plugin run under plugin-hostd's LV2 adapter (omx-clap-host), as under mod-host: admitted, or refused with
+   * its code, or `measured: false` when it was not tried. Beside the verdicts, which it does not change (#223).
+   */
+  readonly adapter?: { readonly host: string; readonly measured: boolean; readonly admitted: boolean; readonly code?: string; readonly params: Readonly<Record<string, string | number>> };
   readonly tiers: RecordTiers;
   /** The cost reasons at each host's rate and quantum, beside the verdicts; an instrument's with the notes it held. */
   readonly cost: readonly {
@@ -266,6 +271,7 @@ export function buildQualificationRecord(
       ...(h.verdict.deciding === undefined ? {} : { deciding: h.verdict.deciding }),
       reasons: h.reasons,
     })),
+    ...(judgment.adapter === undefined ? {} : { adapter: judgment.adapter }),
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
     measurements: {

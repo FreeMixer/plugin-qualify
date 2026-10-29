@@ -188,6 +188,8 @@ export interface HostJudgment {
 
 export interface Judgment {
   readonly output: ProbeOutput;
+  /** An LV2 plugin's run under plugin-hostd's LV2 adapter, beside the verdicts (plugin-qualify#223). */
+  readonly adapter?: HostAdmission;
   readonly hosts: readonly HostJudgment[];
   /** For a CLAP plugin, the document of each host that today's judge writes; the pins are taken from these. */
   readonly documents: readonly RtSafetyDocument[];
