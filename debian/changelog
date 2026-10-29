@@ -1,3 +1,9 @@
+plugin-qualify (0.17.1) unstable; urgency=medium
+
+  * The Debian release build installs python3 for the changelog step; no code change.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Thu, 29 Oct 2026 12:30:00 +0100
+
 plugin-qualify (0.17.0) unstable; urgency=medium
 
   * The distributed records layer: the sync reads the records a device ships before it measures, and takes a plugin
