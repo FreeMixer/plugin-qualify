@@ -12,3 +12,9 @@ enum omx_rt_kind {
   OMX_RT_OPEN, OMX_RT_NANOSLEEP, OMX_RT_WRITE, OMX_RT_READ,
 };
 struct omx_rt_event { int kind; int depth; void *frames[OMX_RT_EV_DEPTH]; };
+
+/* The memory bound (#193): with OMX_RT_OOM_EXIT_ENV set in its environment, the interposer ends the process with
+ * OMX_RT_OOM_EXIT_STATUS the moment an allocation is refused, so a run that outgrew its data limit is told from a crash
+ * by its exit status. src/qualify-declarations.ts holds the same two (MEMORY_BOUND_EXIT_ENV, MEMORY_BOUND_EXIT_STATUS). */
+#define OMX_RT_OOM_EXIT_ENV "OMX_RT_OOM_EXIT"
+#define OMX_RT_OOM_EXIT_STATUS 121

@@ -43,6 +43,9 @@
 #elif defined FIXTURE_HANGS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.hangs"
 #define FIXTURE_NAME "gain whose process never returns"
+#elif defined FIXTURE_HOGS_MB
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.hogs-memory"
+#define FIXTURE_NAME "gain that takes memory by the rate, as a sampler does"
 #elif defined FIXTURE_INFO_FAILS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.info-fails"
 #define FIXTURE_NAME "gain whose get_info fails"
@@ -85,6 +88,10 @@ struct gain {
   float line[2][FIXTURE_DELAY + 1];
   uint32_t at;
 #endif
+#ifdef FIXTURE_HOGS_MB
+  /* FIXTURE_HOGS_MB MiB for every 48000 Hz of the rate it is activated at, touched, held until deactivate */
+  char *hog;
+#endif
 };
 
 #ifdef FIXTURE_DELAY
@@ -102,9 +109,24 @@ static bool gain_init(const clap_plugin_t *p) {
 static void gain_destroy(const clap_plugin_t *p) { free(p->plugin_data); }
 static bool gain_activate(const clap_plugin_t *p, double rate, uint32_t min, uint32_t max) {
   (void)p; (void)rate; (void)min; (void)max;
+#ifdef FIXTURE_HOGS_MB
+  struct gain *g = p->plugin_data;
+  size_t bytes = (size_t)((double)FIXTURE_HOGS_MB * 1048576.0 * rate / 48000.0);
+  g->hog = malloc(bytes);
+  if (g->hog == NULL) return false;
+  memset(g->hog, 1, bytes);
+#endif
   return true;
 }
-static void gain_deactivate(const clap_plugin_t *p) { (void)p; }
+static void gain_deactivate(const clap_plugin_t *p) {
+#ifdef FIXTURE_HOGS_MB
+  struct gain *g = p->plugin_data;
+  free(g->hog);
+  g->hog = NULL;
+#else
+  (void)p;
+#endif
+}
 static bool gain_start(const clap_plugin_t *p) { (void)p; return true; }
 static void gain_stop(const clap_plugin_t *p) { (void)p; }
 static void gain_reset(const clap_plugin_t *p) {

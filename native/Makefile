@@ -9,7 +9,7 @@
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
-#                            build/fixtures/fail-alloc.so,
+#                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
 #                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency}.lv2
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
@@ -95,7 +95,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
-	$(BUILD)/fixtures/fail-alloc.so \
+	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
@@ -193,6 +193,10 @@ $(BUILD)/fixtures/requires-timer.clap: fixtures/host-ext-gate.c | $(BUILD)/fixtu
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_REQUIRES=REQ_TIMER -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 $(BUILD)/fixtures/requires-thread-pool.clap: fixtures/host-ext-gate.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_REQUIRES=REQ_THREAD_POOL -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# the gain taking 64 MiB for every 48000 Hz it is activated at, as a sampler's library grows with the rate: the memory bound's
+$(BUILD)/fixtures-faulty/hogs-memory.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_HOGS_MB=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # a preload failing one chosen allocation, for the prober's out-of-memory paths
 $(BUILD)/fixtures/fail-alloc.so: fixtures/fail-alloc.c | $(BUILD)/fixtures

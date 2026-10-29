@@ -35,6 +35,7 @@ import {
   exitCodeFor,
   helpText,
   lv2Loader,
+  memoryBoundOf,
   parseQualifyArgs,
   pinsFile,
   qualificationRecordOf,
@@ -179,7 +180,17 @@ if (parsed.args.all) {
   const lv2 = plugins.filter((p) => p.format === "lv2").length;
   process.stderr.write(`plugin-qualify: --all qualifies ${String(lv2)} LV2 and ${String(plugins.length - lv2)} CLAP plugins on the search paths\n`);
 }
-const pass = qualifyTargets(plugins, { rates: parsed.args.rates, profiles: profiles.profiles });
+const memory = memoryBoundOf(parsed.args.memoryLimit);
+process.stderr.write(`plugin-qualify: memory bound ${memory === undefined ? "off" : `${String(memory.bytes)} bytes (${memory.mechanism})`}\n`);
+const pass = qualifyTargets(plugins, {
+  rates: parsed.args.rates,
+  quanta: parsed.args.quanta,
+  grid: parsed.args.grid,
+  cellsPerPluginBudget: parsed.args.cellsPerPluginBudget,
+  ...(parsed.args.blocks === undefined ? {} : { blocks: parsed.args.blocks }),
+  ...(memory === undefined ? {} : { memory }),
+  profiles: profiles.profiles,
+});
 for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
 if (parsed.args.out !== undefined) {
   for (const run of mergeRunsByRecord(pass.runs)) {
