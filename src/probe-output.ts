@@ -91,7 +91,8 @@ export interface ProbeGridPoint {
   readonly rate: number;
   readonly quantum: number;
   readonly outcome: string;
-  readonly latency?: { readonly declaredFrames: number; readonly measuredFrames: number };
+  /** `measuredFrames` is absent where the probe did not measure; the declared figure is kept whenever the plugin loaded (#201). */
+  readonly latency?: { readonly declaredFrames: number; readonly measuredFrames?: number };
   readonly cost?: ProbeCost;
   readonly rtSafety?: ProbeRtSafety;
   readonly noteSweep?: ProbeNoteSweep;
@@ -296,7 +297,10 @@ function readPoint(v: unknown, i: number): ProbeGridPoint {
   let latency: ProbeGridPoint["latency"];
   if (latencyIn !== undefined) {
     const l = record(latencyIn, `${where} latency`);
-    latency = { declaredFrames: count(l, "declaredFrames", `${where} latency`), measuredFrames: count(l, "measuredFrames", `${where} latency`) };
+    latency = {
+      declaredFrames: count(l, "declaredFrames", `${where} latency`),
+      ...(l["measuredFrames"] === undefined ? {} : { measuredFrames: count(l, "measuredFrames", `${where} latency`) }),
+    };
   }
   return {
     rate: posInt(o, "rate", where),

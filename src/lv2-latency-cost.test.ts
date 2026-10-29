@@ -144,9 +144,10 @@ describe("the record of an LV2 plugin", () => {
     expect(record.measurements.unmeasured).toBeUndefined();
   });
 
-  live("a plugin whose latency cannot be measured has no figure in its grid, the reason in its place and a named code beside it", () => {
+  live("a plugin whose latency cannot be measured has no measured figure in its grid: its declared figure, the reason and a named code stand in its place", () => {
     const record = recordOf(measure(LATENCY("mute"), 48000));
-    expect(record.measurements.grid[0]!.latency).toEqual({ unmeasuredReason: "silent-output", code: "hosting.latency.unmeasured" });
+    // the plugin loaded, so its declared figure is recorded beside the reason (#201)
+    expect(record.measurements.grid[0]!.latency).toEqual({ declaredFrames: 0, unmeasuredReason: "silent-output", code: "hosting.latency.unmeasured" });
     expect(record.measurements.grid[0]!.cost).toBeDefined();
     expect(record.measurements.unmeasured).toEqual([
       { dimension: "latency", rate: 48000, quantum: 512, code: "hosting.latency.unmeasured", detail: expect.stringMatching(/^silent-output: /) },
