@@ -190,6 +190,8 @@ export interface QualificationRecord {
   readonly measuredAt: string;
   /** The second verdict, per host class of the history that was read; absent until `adjust --history` has run. */
   readonly history?: readonly HistoryBlock[];
+  /** Where the record came from when it was not measured on this device: the distributed set's provenance, as the set's package wrote it. */
+  readonly provenance?: Readonly<Record<string, unknown>>;
   /** The probe output this record judged. */
   readonly probe: {
     readonly file: string;

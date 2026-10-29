@@ -18,7 +18,8 @@
   },
   "bin": {
     "plugin-qualify": "./bin/plugin-qualify.mjs",
-    "plugin-qualify-sync": "./bin/plugin-qualify-sync.mjs"
+    "plugin-qualify-sync": "./bin/plugin-qualify-sync.mjs",
+    "plugin-qualify-records-package": "./bin/plugin-qualify-records-package.mjs"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
