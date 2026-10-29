@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.16.1
+Version: 0.17.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -117,6 +117,14 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.0-1
+- The distributed records layer: the sync reads the records a device ships before it measures, and takes a plugin
+  only on a binary checksum match; plugin-qualify-records-package builds the Debian package of a device's
+  qualification records (#195).
+- The measurement grid covers every declared host rate and quantum, for LV2 as for CLAP, with the runs merged into
+  one probe output and a bounded memory: a run past the bound is probe.oom (#193).
+- A record cell without latency figures says why, by the contract's reason code (#201).
+- The commit-message check is named for what it checks.
 * Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.1-1
 - The sync service names the interpreter first in ExecStart: executed as a script it stayed in systemd's own
   SELinux domain on Fedora, with no executable memory for V8 and no /tmp, and died at start (#188).
