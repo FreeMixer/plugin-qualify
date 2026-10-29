@@ -261,6 +261,11 @@ export function qualifyTargets(
   options: ProbeTargetOptions & {
     readonly profiles?: readonly HostProfile[];
     readonly admissions?: AdmissionRuns;
+    /**
+     * The LV2 directories the hosts of an admission see (`LV2_PATH`), the device's as the sync's settings name them;
+     * absent, they get the run's environment as it is.
+     */
+    readonly admissionLv2Path?: readonly string[];
     /** How the grid is chosen; with it, each target's cells come from the hosts it is judged under. */
     readonly grid?: GridSpec;
     /** The quanta of a `full` grid; else `QUALIFY_QUANTA`. */
@@ -271,6 +276,8 @@ export function qualifyTargets(
 ): ProbePass {
   const profiles = options.profiles ?? [OPENMIXER_CONSOLE_PROFILE];
   const admissionRuns = options.admissions ?? SPAWNED_ADMISSIONS;
+  const runEnvironment = options.env ?? process.env;
+  const admissionEnv = options.admissionLv2Path === undefined ? runEnvironment : { ...runEnvironment, LV2_PATH: options.admissionLv2Path.join(":") };
   const runs: { bytes: Buffer; judgment: Judgment }[] = [];
   const verdicts: QualifyVerdict[] = [];
   const documents: RtSafetyDocument[] = [];
@@ -292,7 +299,7 @@ export function qualifyTargets(
     if (target.format === "lv2") {
       for (const profile of judgedProfiles) {
         const host = admittedHostOf(profile);
-        if (host !== undefined) admissions[profile.id] = admitPlugin(host, target.uri, admissionRuns);
+        if (host !== undefined) admissions[profile.id] = admitPlugin(host, target.uri, admissionRuns, admissionEnv);
       }
     }
     for (const profile of judgedProfiles) {

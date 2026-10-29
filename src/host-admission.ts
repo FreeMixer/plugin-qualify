@@ -101,34 +101,44 @@ export const JALV_HOSTED_MS = 3000;
 /** The wall clock of one whole mod-host admission, in milliseconds. */
 export const MOD_HOST_ADMISSION_MS = 30000;
 
+/**
+ * The runs of one plugin under the installed hosts. `env` is the environment each host starts with: its `LV2_PATH`
+ * must be the device's LV2 directories, the ones the host sees in use (plugin-qualify#224: a mod-host started with no
+ * `LV2_PATH` sees only lilv's defaults and answers -101 for a plugin it runs every day).
+ */
 export interface AdmissionRuns {
-  readonly modHost: (uri: string) => ModHostRun;
-  readonly jalv: (uri: string) => JalvRun;
+  readonly modHost: (uri: string, env?: Readonly<Record<string, string | undefined>>) => ModHostRun;
+  readonly jalv: (uri: string, env?: Readonly<Record<string, string | undefined>>) => JalvRun;
 }
 
 const MOD_HOST_ADMIT = fileURLToPath(new URL("../tools/mod-host-admit.mjs", import.meta.url));
 
 /** The runs against the installed hosts. */
 export const SPAWNED_ADMISSIONS: AdmissionRuns = {
-  modHost(uri) {
-    const r = spawnSync(process.execPath, [MOD_HOST_ADMIT, uri], { encoding: "utf8", timeout: MOD_HOST_ADMISSION_MS });
+  modHost(uri, env) {
+    const r = spawnSync(process.execPath, [MOD_HOST_ADMIT, uri], { encoding: "utf8", timeout: MOD_HOST_ADMISSION_MS, ...(env === undefined ? {} : { env: { ...env } }) });
     if (r.error !== undefined || r.status !== 0) {
       throw new Error(`mod-host admission of ${uri} gave no answer (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
     }
     return JSON.parse(r.stdout) as ModHostRun;
   },
-  jalv(uri) {
-    const r = spawnSync("jalv", ["-n", "plugin-qualify", uri], { encoding: "utf8", timeout: JALV_HOSTED_MS, input: "" });
+  jalv(uri, env) {
+    const r = spawnSync("jalv", ["-n", "plugin-qualify", uri], { encoding: "utf8", timeout: JALV_HOSTED_MS, input: "", ...(env === undefined ? {} : { env: { ...env } }) });
     const code = (r.error as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") return { installed: false, stillRunning: false, status: null, signal: null, stderr: "" };
     return { installed: true, stillRunning: code === "ETIMEDOUT", status: r.status, signal: code === "ETIMEDOUT" ? null : r.signal, stderr: r.stderr ?? "" };
   },
 };
 
-/** One admission of `uri` under `host`. */
-export function admitPlugin(host: AdmittedHost, uri: string, runs: AdmissionRuns = SPAWNED_ADMISSIONS): HostAdmission {
+/** One admission of `uri` under `host`, the host started with `env` (its `LV2_PATH` the device's LV2 directories). */
+export function admitPlugin(
+  host: AdmittedHost,
+  uri: string,
+  runs: AdmissionRuns = SPAWNED_ADMISSIONS,
+  env?: Readonly<Record<string, string | undefined>>,
+): HostAdmission {
   try {
-    return host === "mod-host" ? classifyModHostRun(runs.modHost(uri)) : classifyJalvRun(runs.jalv(uri));
+    return host === "mod-host" ? classifyModHostRun(runs.modHost(uri, env)) : classifyJalvRun(runs.jalv(uri, env));
   } catch (e) {
     // the run itself broke: nothing was learned about the plugin, so nothing is rated
     return { host, measured: false, admitted: false, code: `${host}.admission-failed`, params: { problem: e instanceof Error ? e.message : String(e) } };
