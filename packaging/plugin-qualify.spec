@@ -72,11 +72,13 @@ install -m 0755 packaging/systemd/plugin-qualify-sync-generator %{buildroot}%{_s
 install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
   packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
 install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
+install -D -m 0644 packaging/systemd/plugin-qualify.tmpfiles.conf %{buildroot}%{_tmpfilesdir}/plugin-qualify.conf
 install -m 0755 packaging/trigger-scan.sh %{buildroot}%{_libexecdir}/%{name}/trigger-scan
 
 # the preset enables the timer and the path unit; nothing here runs a sweep: the timer fires at the next boot,
 # and the path unit, armed once the transaction is over, waits for a minute of quiet before its first run
 %post
+systemd-tmpfiles --create %{_tmpfilesdir}/plugin-qualify.conf >/dev/null 2>&1 || :
 %systemd_post plugin-qualify-sync.timer plugin-qualify-sync.path
 
 %posttrans
@@ -113,6 +115,7 @@ fi
 %{_unitdir}/plugin-qualify-sync.path
 %{_systemdgeneratordir}/plugin-qualify-sync-generator
 %{_presetdir}/80-plugin-qualify.preset
+%{_tmpfilesdir}/plugin-qualify.conf
 %{_prefix}/lib/node_modules/@openmixer/
 %{_libexecdir}/%{name}/
 

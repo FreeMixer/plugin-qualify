@@ -14,7 +14,10 @@ Type=oneshot
 # service in systemd's own domain (init_t), which may neither make V8's code pages executable nor write under /tmp,
 # and the run dies before its first line; executing /usr/bin/node takes the ordinary daemon transition.
 ExecStart=/usr/bin/node /usr/bin/plugin-qualify-sync --system --settle-s 60
+# /var/lib/omx and the descriptors in it are read by the console, another user (#221)
 StateDirectory=omx
+StateDirectoryMode=0755
+UMask=0022
 # The audio comes first, and the machine stays reachable: the lowest CPU priority and the disk only when nothing else
 # wants it; at most two cores' worth of CPU (on a four-core machine two stay free, so sshd and the console answer
 # during a sweep); a memory ceiling the plugins' processes share (one past it is killed and recorded as crashed, the
