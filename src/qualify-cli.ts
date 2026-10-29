@@ -175,11 +175,15 @@ export function resolveTargets(targets: readonly string[], loaders: readonly Plu
       continue;
     }
     for (const p of found) {
-      const prior = plugins.get(p.uri);
+      // Two files can hold a plugin of the same id (a bundle's formats, or copies of it): the file is part of the key.
+      const key = `${p.uri}\0${p.binaryPath ?? ""}`;
+      const prior = plugins.get(key);
       // A URI and its bundle name the same plugin: keep the richer record (bundle, binary).
-      if (prior === undefined || (prior.binary === undefined && p.binary !== undefined)) plugins.set(p.uri, p);
+      if (prior === undefined || (prior.binary === undefined && p.binary !== undefined)) plugins.set(key, p);
     }
   }
+  // a bare uri is the same plugin as a file's that holds it: it adds nothing once a file of that id is named
+  for (const [key, p] of plugins) if (p.binaryPath === undefined && [...plugins.values()].some((q) => q.uri === p.uri && q.binaryPath !== undefined)) plugins.delete(key);
   return refused.length > 0 ? { ok: false, refused } : { ok: true, plugins: [...plugins.values()] };
 }
 
