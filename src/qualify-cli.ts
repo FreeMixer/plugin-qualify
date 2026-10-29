@@ -20,7 +20,7 @@ import { classifyPluginHosting, type QualifiedPlugin } from "./hosting-suitabili
 import type { SuitabilityRating } from "./rating.js";
 import type { PluginLoader, PluginTarget } from "./loader.js";
 import { EXIT_CODE, OUTPUT_FORMATS, QUALIFY_OPTIONS, type OutputFormat } from "./qualify-options.js";
-import { GRID_HOSTS, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
 import { parseMemoryLimit } from "./memory-bound.js";
 
 export interface QualifyArgs {
@@ -91,7 +91,7 @@ export function parseQualifyArgs(argv: readonly string[]): ParseResult {
   if (quanta === undefined) return { ok: false, error: "--quanta must be positive integers, comma-separated" };
   const gridText = seen.get("--grid") as string | undefined;
   if (gridText !== undefined && seen.has("--grid-hosts") && gridText.trim() !== "hosts") return { ok: false, error: "--grid-hosts and --grid name two grids; give one" };
-  const grid = gridText === undefined ? { ok: true as const, spec: GRID_HOSTS } : parseGridSpec(gridText);
+  const grid = gridText === undefined && seen.has("--grid-hosts") ? parseGridSpec("hosts") : gridText === undefined ? { ok: true as const, spec: GRID_FULL } : parseGridSpec(gridText);
   if (!grid.ok) return { ok: false, error: `--grid: ${grid.error}` };
   const count = (flag: string, min: number): number | undefined => {
     const v = seen.get(flag) as string | undefined;
