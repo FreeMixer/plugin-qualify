@@ -97,3 +97,29 @@ describe("a .clap that declares two plugin ids", () => {
     expect(readdirSync(join(m.out, "qualification")).filter((f) => f.endsWith(".qualification.json"))[0]).toMatch(/^org\.example\.one@/);
   });
 });
+
+describe("a CLAP descriptor write that hangs (#202)", () => {
+  it("times out for that plugin alone: the other id is still written and the failure is that plugin's outcome code", async () => {
+    const ids = ["studio.kx.distrho.MVerb", "studio.kx.distrho.3BandEQ"];
+    const m = stands(ids);
+    // a python3 stand-in: the descriptor writer hangs when its input names MVerb, else records the id it was given
+    const bin = mkdtempSync(join(scratch, "py-"));
+    const fake = join(bin, "python3");
+    writeFileSync(fake, `#!/bin/sh\ninput=$(cat)\ncase "$input" in *MVerb*) sleep 30;; *) echo "$input" > ${JSON.stringify(join(bin, "wrote-3BandEQ"))};; esac\n`);
+    chmodSync(fake, 0o755);
+    const env = { ...m.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    const flags = [...m.flags, "--budget-s", "1"];
+    const args = parseSyncArgs(flags);
+    if (!args.ok) throw new Error(args.error);
+    const r = resolveSyncSettings(new Map(), args.args, env, "/home/u");
+    if (!r.ok) throw new Error(r.error);
+    const lines: string[] = [];
+    await runSync(r.settings, { env, log: (l) => lines.push(l) });
+    const said = lines.join("\n");
+    expect(readFileSync(join(bin, "wrote-3BandEQ"), "utf8"), said).toContain("3BandEQ");
+    const file = join(m.clap, "multi.clap");
+    expect(said).toContain(`${file}#studio.kx.distrho.MVerb`);
+    expect(said).toMatch(/MVerb[^\n]*\(qualify\.sync\.descriptor-failed\)[^\n]*descriptor not written/);
+    expect(said).not.toMatch(/3BandEQ[^\n]*descriptor-failed/);
+  });
+});

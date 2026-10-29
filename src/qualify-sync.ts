@@ -414,6 +414,8 @@ export const SYNC_CODE = {
   scanHung: "qualify.sync.scan-hung",
   /** The scanner listed the plugin but could not create or init it. */
   scanRefused: "qualify.sync.scan-refused",
+  /** The plugin's descriptor could not be written (the writer failed or ran out of time). */
+  descriptorFailed: "qualify.sync.descriptor-failed",
   /** The probe runner wrote no document to judge. */
   notMeasured: "qualify.sync.not-measured",
 } as const;
@@ -551,15 +553,34 @@ function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][
   });
 }
 
-/** The descriptors of a scanned `.clap`, through the one descriptor writer; a failure is named and the run goes on. */
-function writeClapDescriptors(ctx: SyncContext, scan: string): void {
-  const r = spawnSync("python3", [join(toolsDir(), "descriptors.py"), "clap", "--descriptor-dir", ctx.settings.descriptorDir], {
-    input: scan,
-    encoding: "utf8",
-    timeout: ctx.settings.budgetS * 1000,
-    env: { ...ctx.env },
-  });
-  if (r.status !== 0) ctx.log(`descriptors of a .clap not all written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
+/**
+ * The descriptors of a scanned `.clap`, through the one descriptor writer, one plugin per run and each under its own
+ * wall clock: a plugin whose write hangs or fails is named by id in the result and the others are still written.
+ */
+function writeClapDescriptors(ctx: SyncContext, scan: string): ReadonlyMap<string, string> {
+  const problems = new Map<string, string>();
+  let doc: { files?: { plugins?: { id?: string }[] }[] };
+  try {
+    doc = JSON.parse(scan) as typeof doc;
+  } catch (e) {
+    problems.set("*", `the scan is not JSON: ${(e as Error).message}`);
+    return problems;
+  }
+  for (const file of doc.files ?? []) {
+    for (const p of file.plugins ?? []) {
+      const id = p.id ?? "?";
+      const one = JSON.stringify({ ...doc, files: [{ ...file, plugins: [p] }] });
+      const r = spawnSync("python3", [join(toolsDir(), "descriptors.py"), "clap", "--descriptor-dir", ctx.settings.descriptorDir], {
+        input: one,
+        encoding: "utf8",
+        timeout: ctx.settings.budgetS * 1000,
+        killSignal: "SIGKILL",
+        env: { ...ctx.env },
+      });
+      if (r.status !== 0) problems.set(id, `${r.error?.message ?? `exit ${String(r.status)}`}: ${(r.stderr ?? "").trim()}`);
+    }
+  }
+  return problems;
 }
 
 function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
@@ -586,7 +607,7 @@ function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
     const hung = /timed out/.test(scanned.error);
     return [{ uri: fileUri, outcome: hung ? "hung" : "crashed", code: hung ? SYNC_CODE.scanHung : SYNC_CODE.scanCrashed, detail: scanned.error }];
   }
-  writeClapDescriptors(ctx, r.stdout);
+  const descriptorProblems = writeClapDescriptors(ctx, r.stdout);
   const out: SyncPlugin[] = [];
   for (const p of scanned.plugins) {
     const uri = `${fileUri}#${p.id}`;
@@ -596,7 +617,8 @@ function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
     }
     const pass = runPass(ctx, { format: "clap", uri: `urn:clap:${p.id}`, bundle: item.root, binary: item.files[0]!, binaryPath: file }, ctx.env);
     for (const f of pass.failures) out.push({ uri, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: f.problem });
-    out.push(...judgedPlugins(ctx, pass.runs));
+    const problem = descriptorProblems.get(p.id) ?? descriptorProblems.get("*");
+    out.push(...judgedPlugins(ctx, pass.runs).map((j): SyncPlugin => (problem === undefined ? j : { ...j, code: SYNC_CODE.descriptorFailed, detail: `descriptor not written: ${problem}` })));
   }
   return out;
 }
@@ -687,7 +709,7 @@ function scanClapDescriptors(ctx: SyncContext, item: SyncItem): void {
     ctx.log(`${file}: descriptors not written: the scan ended ${r.error?.message ?? `with exit ${String(r.status)}`}`);
     return;
   }
-  writeClapDescriptors(ctx, r.stdout);
+  for (const [id, problem] of writeClapDescriptors(ctx, r.stdout)) ctx.log(`${file}#${id}: descriptor not written: ${problem}`);
 }
 
 // --- the outputs ------------------------------------------------------------------------------------------------------
