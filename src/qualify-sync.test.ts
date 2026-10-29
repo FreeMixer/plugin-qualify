@@ -29,7 +29,9 @@ import {
   flagOf,
   parseSyncArgs,
   parseSyncConf,
+  runSync,
   resolveSyncSettings,
+  type SyncSettings,
   type SyncState,
 } from "./qualify-sync.js";
 import { clapQualifyToolPath, lv2MeasureNativePath, rtInterposePath } from "./tool-paths.js";
@@ -505,4 +507,69 @@ describe("plugin-hostd in its default mode, on the pin file the sweep wrote", ()
     },
     180_000,
   );
+});
+
+// --- the lock (#222) --------------------------------------------------------------------------------------------------
+
+describe("the lock", () => {
+  /** Settings over empty plugin directories in a tree of their own; `settle_s` keeps a run in the lock for a while. */
+  function lockedSettings(settleS: string): SyncSettings {
+    const root = mkdtempSync(join(scratch, "lock-"));
+    for (const d of ["clap", "lv2"]) mkdirSync(join(root, d));
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const values = new Map([
+      ["clap_path", join(root, "clap")], ["clap_extra", ""], ["lv2_path", join(root, "lv2")], ["lv2_extra", ""],
+      ["pin_file", join(root, "q.pins")], ["qualification_dir", join(root, "qualification")], ["descriptor_dir", join(root, "descriptors")],
+      ["state_file", join(root, "state", "qualify-sync.json")], ["hostd_port", "0"], ["host_class", ""], ["settle_s", settleS],
+    ]);
+    const r = resolveSyncSettings(values, args.args, {}, root);
+    if (!r.ok) throw new Error(r.error);
+    return r.settings;
+  }
+
+  /** Runs recorded as they begin and end, on one clock. */
+  function traced(settings: SyncSettings, name: string, events: string[], options: { wait?: boolean } = {}): Promise<unknown> {
+    return runSync(settings, { ...options, log: (line) => line === "sync run begins" && events.push(`${name} begins`) }).then((r) => {
+      events.push(`${name} ends`);
+      return r;
+    });
+  }
+
+  it("a second run waits for the first: they never measure at once", async () => {
+    const settings = lockedSettings("1");
+    const events: string[] = [];
+    const a = traced(settings, "a", events);
+    await new Promise((r) => setTimeout(r, 300));
+    const b = traced(settings, "b", events);
+    await Promise.all([a, b]);
+    expect(events).toEqual(["a begins", "a ends", "b begins", "b ends"]);
+  }, 30_000);
+
+  it("--no-wait returns at once, and the holder runs once more at its end", async () => {
+    const settings = lockedSettings("1");
+    const events: string[] = [];
+    const a = traced(settings, "a", events);
+    await new Promise((r) => setTimeout(r, 300));
+    const b = await traced(settings, "b", events, { wait: false });
+    expect(b).toBeUndefined();
+    expect(events).toEqual(["a begins", "b ends"]);
+    await a;
+    expect(events).toEqual(["a begins", "b ends", "a begins", "a ends"]);
+    expect(existsSync(`${settings.stateFile}.again`)).toBe(false);
+  }, 30_000);
+
+  it("a lone --no-wait run takes the lock and runs once, leaving no marker", async () => {
+    const settings = lockedSettings("0");
+    const events: string[] = [];
+    expect(await traced(settings, "a", events, { wait: false })).toBeDefined();
+    expect(events).toEqual(["a begins", "a ends"]);
+    expect(existsSync(`${settings.stateFile}.again`)).toBe(false);
+  });
+
+  it("--no-wait is a flag, and the service unit passes it", () => {
+    const a = parseSyncArgs(["--no-wait"]);
+    expect(a.ok && a.args.noWait).toBe(true);
+    expect(readFileSync(join(PKG, "packaging", "systemd", "plugin-qualify-sync.service"), "utf8")).toContain("--no-wait");
+  });
 });
