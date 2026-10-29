@@ -191,3 +191,24 @@ describe("pruneStale", () => {
     expect(existsSync(join(m.d, `${keptStem}.json`))).toBe(true);
   });
 });
+
+describe("pruneStale over records the state never named (#198)", () => {
+  it("removes every record of an installed id made from other bytes, whichever tier, and keeps the installed bytes' records and other ids", () => {
+    const root = mkdtempSync(join(scratch, "n-"));
+    const q = join(root, "q");
+    const d = join(root, "d");
+    mkdirSync(q);
+    mkdirSync(d);
+    const old = "org.openmixer.chorus@unversioned-c9d6503c6c1b";
+    const cur = "org.openmixer.chorus@unversioned-ea807d68956a";
+    const other = "org.openmixer.flanger@unversioned-111111111111";
+    for (const f of [`${old}.custom.qualification.json`, `${old}.default.qualification.json`, `${old}.default.probe.json`, `${cur}.custom.qualification.json`, `${cur}.default.qualification.json`, `${other}.default.qualification.json`, "by-hand.json"])
+      writeFileSync(join(q, f), "{}");
+    const state: SyncState = {
+      schema: SYNC_STATE_SCHEMA,
+      entries: { clap: { format: "clap", root: "/x", files: [], qualifiedAt: "2026-10-28T00:00:00.000Z", seconds: 0, plugins: [{ uri: "org.openmixer.chorus", outcome: "qualified", record: join(q, `${cur}.custom.qualification.json`) }] } },
+    };
+    pruneStale({ qualificationDir: q, descriptorDir: d }, state, state);
+    expect(readdirSync(q).sort()).toEqual([`${cur}.custom.qualification.json`, `${cur}.default.qualification.json`, `${other}.default.qualification.json`, "by-hand.json"].sort());
+  });
+});
