@@ -510,7 +510,7 @@ fails the sweep is pinned `verdict=refused`, and the run goes on to the next. Th
 written whole after every plugin, so a run cut short keeps what it finished. The last line counts the run:
 
 ```
-qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, 4.6 s
+qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, distributed 0, 4.6 s
 ```
 
 A plugin that is no longer found, or whose bytes changed, leaves nothing behind: its pin, its qualification
@@ -539,15 +539,76 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 | `cells_per_plugin_budget` | `0`, every cell of the grid |
 | `memory_limit` | half of the machine's RAM (`off` for none) |
 | `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
+| `host_class` | the board's own, from the device tree (`rpi5`); none elsewhere |
+| `distributed_dir` | `/usr/share/omx/qualification` |
 
 Those are the service's (`--system`); run by a user, the files go under `$XDG_STATE_HOME/omx`. An LV2
 directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
-pinned. `--force` qualifies everything again.
+pinned. `--force` qualifies everything again, and `--no-distributed` reads no distributed record.
 
 The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/usr/local/lib/lv2`,
 `/usr/lib/clap`, `/usr/lib64/clap`). The folders the settings file adds (`lv2_path`, `lv2_extra`, `clap_path`,
 `clap_extra`) are written into a drop-in of the unit by a systemd generator at boot and at every
 `systemctl daemon-reload`, so the file is the one place a machine's extra folders are written.
+
+### Distributed records
+
+A device that ships with a known plugin set need not measure it again at first start. The qualification records
+another device of the same machine class wrote for that set are installed read-only, and the sync takes from them
+every plugin whose files are the bytes that were measured:
+
+```
+/usr/share/omx/qualification/<host class>/<set>/          # system (--system)
+$XDG_DATA_HOME/omx/qualification/<host class>/<set>/      # a user run, then each $XDG_DATA_DIRS/omx/qualification
+```
+
+Each `<set>` directory holds the records (`*.qualification.json`, each with its probe output `*.probe.json`) and a
+`provenance.json` that says where they come from: the set, the host class, the image, the package versions of the
+measuring device, the date and the package that installed them. The host class is a directory name: `host_class`
+in the settings, or, when it is unset, the board's own name read from the device tree (`rpi5` on a Raspberry Pi 5,
+`rpi4` on a Raspberry Pi 4). Where neither gives one, the layer is not read and the run says so.
+
+Before a plugin is measured, the sync looks for a distributed record of it: a CLAP record whose binary is the same
+`.clap` path, or an LV2 record of the same plugin uri. The name only finds the record; a record applies when, and
+only when:
+
+- every file of its `binary.files` is installed at that path relative to the plugin's root, with that SHA-256,
+  computed on the device;
+- its schema is the one this version writes and its probe output is one this version's reader accepts, the copy
+  intact (its SHA-256 the one the record names): the same acceptance the sync gives a record of its own, which it
+  never measures again for a newer tool;
+- it holds a verdict for the sync's `host_profile`, and that verdict ended `qualified`, `refused`, `crashed` or
+  `hung`. One that could not be measured at the source (`unmeasured`) is measured here.
+
+A plugin whose distributed records apply is not measured: the records are copied into `qualification_dir` with the
+set's `provenance` object added, its pin is taken from the probe output the record judged, its descriptor is
+written, and the run says
+
+```
+distributed: http://distrho.sf.net/plugins/3BandEQ: applied (zynthian-vangelis)
+```
+
+A plugin with a distributed record whose files differ is measured as before, and the run says
+`distributed: <uri>: binary differs`; one with no distributed record is measured without a word. The summary counts
+the plugins taken from the layer, `distributed N`, apart from the ones measured and skipped. A later run treats an
+applied plugin like one it measured: skipped while its files are unchanged, measured when they change. `--force`
+measures everything and reads no distributed record; `--no-distributed` keeps the layer out of a run.
+
+The package that installs a set is built from a device's `qualification_dir` by `plugin-qualify-records-package`:
+
+```
+plugin-qualify-records-package /var/lib/omx/qualification --host-class rpi5 --set zynthian-vangelis \
+  --provenance provenance.json --out .
+```
+
+It writes `omx-qualification-<host class>-<set>_<version>_all.deb`, the version the build date
+(`2026.10.29`) unless `--version` names one. The package installs the records under
+`/usr/share/omx/qualification/<host class>/<set>/` with `provenance.json`, depends on the plugin-qualify that reads
+the layer, and is `Architecture: all`. `--provenance` names a JSON file (or holds the JSON itself) with what the tool
+cannot know: the image, the package versions and the source revisions of the device. The tool adds the set, the host
+class, the package and the date. A record whose probe output is missing or does not match its SHA-256 is left out
+and named; a record of a plugin that could not be measured (`*.unmeasured.json`) is left out, since it never
+applies. The tool builds the Debian package only; an RPM of a set is not built yet.
 
 ### The container image
 
