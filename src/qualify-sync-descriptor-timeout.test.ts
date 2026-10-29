@@ -53,7 +53,9 @@ describe("the descriptor writer's time", () => {
       `while [ "$1" != "--out" ]; do shift; done; o="$2"; shift 2; while [ "\${1#--}" != "$1" ]; do shift 2; done; f="$1"; id="$2"
 sed -e "s|\\"id\\": \\"org.example.plate\\"|\\"id\\": \\"$id\\"|" -e "s|/usr/lib64/clap/example-plate.clap|$f|" ${JSON.stringify(join(root, "probe.json"))} > "$o"`,
     );
-    const env = { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}`, OMX_CLAP_QUALIFY: scanner, OMX_RT_INTERPOSE: interposer, OMX_PROBE_RUNNER: runner } as Record<string, string>;
+    // plugin-hostd --pin-files clap:<path>#<id>: the file and its directory, as the daemon's CLAP collector names them
+    const hostd = script(root, "plugin-hostd", `while [ "$1" != "--pin-files" ]; do shift; done; u="$2"; p="\${u#clap:}"; p="\${p%#*}"; echo "root $(dirname "$p")"; echo "file $(basename "$p")"`);
+    const env = { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}`, OMX_CLAP_QUALIFY: scanner, OMX_RT_INTERPOSE: interposer, OMX_PROBE_RUNNER: runner, PLUGIN_HOSTD: hostd } as Record<string, string>;
     const args = parseSyncArgs([
       "--config", "/dev/null", "--clap-path", clap, "--lv2-path", join(root, "lv2"), "--lv2-extra", "",
       "--pin-file", join(out, "qualified.pins"), "--qualification-dir", join(out, "qualification"),

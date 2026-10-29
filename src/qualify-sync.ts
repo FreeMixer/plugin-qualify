@@ -30,6 +30,7 @@ import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
 import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
 import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
+import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
@@ -491,6 +492,23 @@ export interface SyncContext {
   readonly settings: SyncSettings;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly log: (line: string) => void;
+  /** The run of `plugin-hostd --pin-files`, a stand-in in tests. */
+  readonly pinFilesRun?: PinFilesRun;
+}
+
+/**
+ * The pin of a judged run with the files plugin-hostd collects for its plugin (plugin-qualify#228): the probe's list is
+ * the probe's view, and an add checks the daemon's, so a pin holds the daemon's. No pin when plugin-hostd cannot name
+ * them; the plugin is then pinned on its first add (pin_mode first-use), and the log says why.
+ */
+function withHostdFiles(ctx: SyncContext, pin: PinEntry | undefined): PinEntry | undefined {
+  if (pin === undefined || pin.integrity.files === undefined) return pin;
+  const r = hostdPinFiles(pin.uri, ctx.settings.lv2Dirs, ctx.env, ...(ctx.pinFilesRun === undefined ? [] : [ctx.pinFilesRun]));
+  if (!r.ok) {
+    ctx.log(`${pin.uri}: not pinned: ${r.detail}`);
+    return undefined;
+  }
+  return { ...pin, integrity: { ...pin.integrity, files: r.files } };
 }
 
 /** A judged run's outcome for the host: qualified, refused, or why it was not measured. */
@@ -528,7 +546,7 @@ function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgmen
   const host = ctx.settings.hostProfile.id;
   const entries = runs.map(({ bytes, judgment }) => {
     const { recordPath } = writeQualification(ctx.settings.qualificationDir, bytes, judgment, QUICK_NOT_MEASURED);
-    const pin = judgmentPinEntries(judgment, host)[0];
+    const pin = withHostdFiles(ctx, judgmentPinEntries(judgment, host)[0]);
     const { outcome, code } = outcomeOf(judgment, host);
     const plugin: SyncPlugin = { uri: pin?.uri ?? judgment.output.plugin.id, outcome, ...(code === undefined ? {} : { code }), ...(pin === undefined ? {} : { pin }), record: recordPath };
     return { plugin, judgedHere: judgment.hosts.some((h) => h.verdict.host === host) };

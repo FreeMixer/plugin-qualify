@@ -164,6 +164,11 @@ the RPM and DEB require;
 that kills the whole process tree, CPU time, memory, files), and plugin-qualify waits for the runner and reads
 the document it writes, the probe output. Nothing in plugin-qualify times a prober out on its own any more.
 
+The files a pin holds are plugin-hostd's: the sync writes each pin with the files `plugin-hostd --pin-files <uri>`
+prints for the device's LV2 directories (plugin-hostd 0.15.0 or later; `PLUGIN_HOSTD` names the daemon when it is not
+on `PATH`), the list an add checks, and hashes exactly those. When plugin-hostd cannot name them, or is older, the
+plugin gets no pin, the log says why, and the daemon pins it on its first add (`pin_mode first-use`).
+
 `--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
 names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
 distribution and architecture. A plugin id found twice keeps its first place on that path. LV2 plugins
