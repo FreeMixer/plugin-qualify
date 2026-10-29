@@ -737,7 +737,8 @@ function idAndHash(stem: string): string | undefined {
  * output copied beside it and its descriptor. A stem the state before held and the state after does not hold is
  * stale; every record file of that stem is removed, and so is a descriptor of its id and binary hash whichever
  * version suffix it carries — unless that id and hash is still kept under another stem (two copies of one binary, or
- * a record and a descriptor the sync wrote at different version suffixes for the same plugin). A record another
+ * a record and a descriptor the sync wrote at different version suffixes for the same plugin). A record of an id the
+ * state after holds, made from other bytes than it holds, goes too, though no state ever named it (#198). A record another
  * plugin of the state still names (two copies of one binary) is kept, as is a descriptor the sync did not write.
  * Returns the files removed.
  */
@@ -764,6 +765,14 @@ export function pruneStale(settings: Pick<SyncSettings, "qualificationDir" | "de
     // no directory, no record
   }
   for (const stem of stale) for (const f of records) if (f.startsWith(`${stem}.`) && recordStem(f) === stem) drop(settings.qualificationDir, f);
+  // a record of an installed plugin's id made from other bytes, whether or not any state ever named it (the other
+  // tier's record, a lost state entry): the id is kept, the binary hash is not
+  const keptIds = new Set([...keptIdHash].map((k) => k.split("\0")[0]!));
+  for (const f of records) {
+    const s = recordStem(f);
+    const key = s === undefined ? undefined : idAndHash(s);
+    if (key !== undefined && keptIds.has(key.split("\0")[0]!) && !keptIdHash.has(key)) drop(settings.qualificationDir, f);
+  }
   let descriptors: string[] = [];
   try {
     descriptors = readdirSync(settings.descriptorDir);
