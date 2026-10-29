@@ -925,6 +925,39 @@ export interface SyncSummary {
   readonly sent?: number;
 }
 
+/**
+ * Why a reader that is not the sync's user (the console, #221) cannot read the descriptors: the directory or one of its
+ * parent without search permission for others, the directory or a descriptor without read permission for others. One
+ * line each; none when the directory does not exist yet or everything is open.
+ */
+export function descriptorAccessProblems(dir: string): string[] {
+  const problems: string[] = [];
+  const mode = (path: string): number | undefined => {
+    try {
+      return statSync(path).mode & 0o777;
+    } catch {
+      return undefined;
+    }
+  };
+  const octal = (m: number): string => `0${m.toString(8)}`;
+  const top = mode(dir);
+  if (top === undefined) return problems;
+  // the parent too (StateDirectory's /var/lib/omx); not further up, where a private home is a user's own choice
+  const parent = dirname(resolve(dir));
+  const parentMode = mode(parent);
+  if (parentMode !== undefined && (parentMode & 0o001) === 0) problems.push(`${parent} is mode ${octal(parentMode)}: other users, the console among them, cannot enter it to read the descriptors`);
+  if ((top & 0o004) === 0) problems.push(`${dir} is mode ${octal(top)}: other users, the console among them, cannot list the descriptors`);
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return problems;
+  }
+  const closed = files.filter((f) => ((mode(join(dir, f)) ?? 0o004) & 0o004) === 0);
+  if (closed.length > 0) problems.push(`${String(closed.length)} descriptor(s) in ${dir} cannot be read by other users, the console among them (first: ${closed[0]!})`);
+  return problems;
+}
+
 export function summaryLine(s: SyncSummary): string {
   return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}, ${s.seconds.toFixed(1)} s`;
 }
@@ -1096,6 +1129,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     const after = syncPinsText(state);
     if (after !== before) writeFileWhole(settings.pinFile, after);
     writeLv2Descriptors(ctx, lv2Pinned);
+    for (const line of descriptorAccessProblems(settings.descriptorDir)) log(line);
     // the files of a plugin that is gone, or was replaced by other bytes: only when every directory could be read, so
     // an unreadable one is never taken for an uninstall
     if (unreadable) log("a plugin directory could not be read; no record or descriptor is removed this run");

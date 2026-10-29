@@ -138,16 +138,23 @@ class SchemaValidator:
             raise DescriptorRefused(DESCRIPTOR_CODE_SCHEMA, f"{where}: {e.message}")
 
 
+DESCRIPTOR_DIR_MODE = 0o755
+DESCRIPTOR_FILE_MODE = 0o644
+
+
 def write_descriptor(directory, doc, sha256, validator):
     """Hold `doc` to the schema and write it whole into `directory`; the path written, or DescriptorRefused."""
     validator.check(doc)
     name = descriptor_file_name(doc["plugin"]["id"], doc["plugin"].get("version"), sha256)
     try:
-        os.makedirs(directory, mode=0o700, exist_ok=True)
+        # the console reads this directory as another user (#221): published world-readable whatever the umask
+        os.makedirs(directory, mode=DESCRIPTOR_DIR_MODE, exist_ok=True)
+        os.chmod(directory, DESCRIPTOR_DIR_MODE)
         path = os.path.join(directory, name)
         pending = path + ".new"
         with open(pending, "w", encoding="utf-8") as f:
             f.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(pending, DESCRIPTOR_FILE_MODE)
         os.replace(pending, path)
     except OSError as e:
         raise DescriptorRefused(DESCRIPTOR_CODE_DIR_UNWRITABLE, f"{directory}: {e.strerror}") from e

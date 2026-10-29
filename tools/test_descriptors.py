@@ -145,6 +145,22 @@ class Writing(unittest.TestCase):
             self.assertEqual(json.load(f), self.doc)
         self.assertEqual(sorted(os.listdir(self.dir)), [os.path.basename(path)])
 
+    def test_directory_and_descriptor_are_world_readable_under_a_strict_umask(self):
+        # #221: the directory was created 0700, so the console, running as another user, could not read it
+        target = os.path.join(self.dir, "state", "omx", "descriptors")
+        old = os.umask(0o077)
+        try:
+            path = d.write_descriptor(target, self.doc, SHA_A, validator())
+        finally:
+            os.umask(old)
+        self.assertEqual(os.stat(target).st_mode & 0o777, 0o755)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
+
+    def test_an_existing_private_directory_is_opened_on_the_next_write(self):
+        os.chmod(self.dir, 0o700)
+        d.write_descriptor(self.dir, self.doc, SHA_A, validator())
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o755)
+
     def test_a_changed_binary_writes_a_new_file_and_keeps_the_old(self):
         a = d.write_descriptor(self.dir, self.doc, SHA_A, validator())
         b = d.write_descriptor(self.dir, self.doc, SHA_B, validator())
