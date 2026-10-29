@@ -309,7 +309,7 @@ function machine(): { root: string; clap: string; lv2: string; out: string; flag
       "--config", "/dev/null", "--clap-path", clap, "--lv2-path", lv2, "--lv2-extra", "",
       "--pin-file", join(out, "qualified.pins"), "--qualification-dir", join(out, "qualification"),
       "--descriptor-dir", join(out, "descriptors"), "--state-file", join(out, "state.json"),
-      "--budget-s", "4", "--hostd-port", String(port), "--hostd-feedback-port", String(feedbackPort),
+      "--grid-hosts", "--budget-s", "4", "--hostd-port", String(port), "--hostd-feedback-port", String(feedbackPort),
     ],
   };
 }
