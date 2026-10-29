@@ -156,6 +156,18 @@ describe("lv2Loader — the one discovery seam", () => {
   });
 });
 
+describe("resolveTargets keeps CLAP files that carry one id apart (#202)", () => {
+  it("four .clap files with the same plugin id are four targets; one file named twice is one", () => {
+    const file = (n: number) => `/clap/mverb-${String(n)}.clap`;
+    const loader = {
+      format: "clap",
+      resolve: (t: string) => [{ uri: "urn:clap:studio.kx.distrho.MVerb", binary: t.slice(6), binaryPath: t }],
+    };
+    const r = resolveTargets([1, 2, 3, 4, 4].map(file), [loader]);
+    expect(r.ok && r.plugins.map((p) => p.binaryPath)).toEqual([1, 2, 3, 4].map(file));
+  });
+});
+
 /** A plugin with every dimension measured clean at the reference rate and quantum. */
 function knownGood(): QualifiedPlugin {
   const rate = COST_REFERENCE_RATE;

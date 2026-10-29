@@ -175,9 +175,11 @@ export function resolveTargets(targets: readonly string[], loaders: readonly Plu
       continue;
     }
     for (const p of found) {
-      const prior = plugins.get(p.uri);
+      // A CLAP id is only the plugin's name: files that carry the same id are distinct targets, keyed by id and path.
+      const key = p.uri.startsWith("urn:clap:") && p.binaryPath !== undefined ? `${p.uri}\0${p.binaryPath}` : p.uri;
+      const prior = plugins.get(key);
       // A URI and its bundle name the same plugin: keep the richer record (bundle, binary).
-      if (prior === undefined || (prior.binary === undefined && p.binary !== undefined)) plugins.set(p.uri, p);
+      if (prior === undefined || (prior.binary === undefined && p.binary !== undefined)) plugins.set(key, p);
     }
   }
   return refused.length > 0 ? { ok: false, refused } : { ok: true, plugins: [...plugins.values()] };
