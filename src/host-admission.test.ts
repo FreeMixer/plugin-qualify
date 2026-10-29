@@ -15,6 +15,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import {
   admitPlugin,
+  ADAPTER_HOST,
+  classifyProtocolRun,
   SPAWNED_ADMISSIONS,
   classifyJalvRun,
   classifyModHostRun,
@@ -28,7 +30,7 @@ import { judgeProbeOutput } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { writeFileSync } from "node:fs";
 import { fixtureJson, readFixture } from "./probe-output-fixtures.js";
-import { tiersOf } from "./qualification-record.js";
+import { buildQualificationRecord, tiersOf } from "./qualification-record.js";
 
 interface Row {
   readonly run: ModHostRun | JalvRun;
@@ -249,5 +251,65 @@ describe("qualifyTargets starts the admission hosts on the LV2 directories it is
     qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: { LV2_PATH: "/tmp/one-bundle-world" }, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: runs, admissionLv2Path: dirs });
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((p) => p === dirs.join(":"))).toBe(true);
+  });
+});
+
+// plugin-qualify#223: an LV2 record carries its run under plugin-hostd's LV2 adapter, beside the verdicts it leaves alone
+describe("the run under plugin-hostd's LV2 adapter", () => {
+  it("is classified as a mod-host run is, under the adapter's own name", () => {
+    expect(classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -512 }] })).toMatchObject({
+      host: "omx-clap-host", measured: true, admitted: false, code: "omx-clap-host.resp-512",
+    });
+    expect(classifyProtocolRun(ADAPTER_HOST, { installed: false, steps: [] }).code).toBe("omx-clap-host.not-installed");
+  });
+
+  it("is written into an LV2 record beside verdicts it does not change, and a CLAP plugin has none", () => {
+    const uri = "urn:distrho:vitalium";
+    const doc = fixtureJson("success-msi");
+    doc.plugin = { format: "lv2", id: uri };
+    const run: ProbeRun = (_tool, args) => {
+      writeFileSync(args[args.indexOf("--out") + 1]!, JSON.stringify(doc));
+      return { status: 0, signal: null };
+    };
+    const refusing: AdmissionRuns = { ...SKIPPED, adapter: () => ({ installed: true, steps: [{ cmd: "add", resp: -512 }] }) };
+    const base = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: SKIPPED });
+    const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: refusing });
+    const judgment = pass.runs[0]!.judgment;
+    expect(judgment.adapter).toMatchObject({ host: "omx-clap-host", admitted: false, code: "omx-clap-host.resp-512" });
+    expect(pass.verdicts).toEqual(base.verdicts);
+    expect(base.runs[0]!.judgment.adapter).toBeUndefined();
+    const record = buildQualificationRecord(judgment, { file: "x.probe.json", sha256: "c".repeat(64), bytes: 1 });
+    expect(record.adapter).toMatchObject({ host: "omx-clap-host", measured: true, admitted: false, code: "omx-clap-host.resp-512" });
+    const clap = fixtureJson("success-msi");
+    const clapRun: ProbeRun = (_tool, args) => {
+      writeFileSync(args[args.indexOf("--out") + 1]!, JSON.stringify(clap));
+      return { status: 0, signal: null };
+    };
+    const asked: string[] = [];
+    const watching: AdmissionRuns = { ...SKIPPED, adapter: (u) => (asked.push(u), { installed: true, steps: [] }) };
+    qualifyTargets([{ format: "clap", uri: `urn:clap:${clap.plugin.id}` }], { rates: [48000], run: clapRun, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: watching });
+    expect(asked).toEqual([]);
+  });
+
+  it("the spawned run starts omx-clap-host, not mod-host", () => {
+    const dir = mkdtempSync(join(tmpdir(), "adapter-admit-"));
+    try {
+      // a stand-in omx-clap-host that refuses with -512, and a mod-host that would take it
+      const stand = (name: string, resp: number) => {
+        writeFileSync(join(dir, name), `#!${process.execPath}
+const net = require("node:net");
+const port = Number(process.argv[process.argv.indexOf("-p") + 1]);
+net.createServer((c) => c.on("data", () => c.write("resp ${resp}\\0"))).listen(port, "127.0.0.1");
+`);
+        chmodSync(join(dir, name), 0o755);
+      };
+      stand("omx-clap-host", -512);
+      stand("mod-host", 0);
+      const env = { ...process.env, PATH: `${dir}:${process.env["PATH"]}` };
+      expect(classifyProtocolRun(ADAPTER_HOST, SPAWNED_ADMISSIONS.adapter!("urn:x", env)).code).toBe("omx-clap-host.resp-512");
+      expect(classifyModHostRun(SPAWNED_ADMISSIONS.modHost("urn:x", env)).admitted).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
