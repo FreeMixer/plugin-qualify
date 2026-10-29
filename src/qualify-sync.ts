@@ -428,6 +428,8 @@ export interface SyncPlugin {
   /** The code that decided a plugin that is not qualified. */
   readonly code?: string;
   readonly detail?: string;
+  /** Why its descriptor was not written, when the descriptor writer failed or timed out on it. */
+  readonly descriptorProblem?: string;
   /** Its pin, when the run took a whole one. */
   readonly pin?: PinEntry;
   /** The record written for it. */
@@ -551,15 +553,37 @@ function runPass(ctx: SyncContext, target: Parameters<typeof qualifyTargets>[0][
   });
 }
 
-/** The descriptors of a scanned `.clap`, through the one descriptor writer; a failure is named and the run goes on. */
-function writeClapDescriptors(ctx: SyncContext, scan: string): void {
-  const r = spawnSync("python3", [join(toolsDir(), "descriptors.py"), "clap", "--descriptor-dir", ctx.settings.descriptorDir], {
-    input: scan,
-    encoding: "utf8",
-    timeout: ctx.settings.budgetS * 1000,
-    env: { ...ctx.env },
-  });
-  if (r.status !== 0) ctx.log(`descriptors of a .clap not all written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
+/**
+ * The descriptors of a scanned `.clap`, through the one descriptor writer, one plugin to a run so that each has the
+ * budget to itself and a plugin that hangs the writer costs only its own descriptor. What failed is returned by plugin
+ * id, so the outcome of that plugin records it; the run goes on.
+ */
+function writeClapDescriptors(ctx: SyncContext, scan: string): Map<string, string> {
+  const failed = new Map<string, string>();
+  let doc: { files?: { plugins?: { id?: string }[] }[] };
+  try {
+    doc = JSON.parse(scan);
+  } catch (e) {
+    ctx.log(`descriptors of a .clap not written (the scan is not JSON): ${(e as Error).message}`);
+    return failed;
+  }
+  for (const file of doc.files ?? []) {
+    for (const p of file.plugins ?? []) {
+      const id = p.id ?? "";
+      const r = spawnSync("python3", [join(toolsDir(), "descriptors.py"), "clap", "--descriptor-dir", ctx.settings.descriptorDir], {
+        input: JSON.stringify({ ...doc, files: [{ ...file, plugins: [p] }] }),
+        encoding: "utf8",
+        timeout: ctx.settings.budgetS * 1000,
+        killSignal: "SIGKILL",
+        env: { ...ctx.env },
+      });
+      if (r.status === 0) continue;
+      const problem = `descriptor not written (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`;
+      failed.set(id, problem);
+      ctx.log(`${id}: ${problem}`);
+    }
+  }
+  return failed;
 }
 
 function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
@@ -586,7 +610,7 @@ function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
     const hung = /timed out/.test(scanned.error);
     return [{ uri: fileUri, outcome: hung ? "hung" : "crashed", code: hung ? SYNC_CODE.scanHung : SYNC_CODE.scanCrashed, detail: scanned.error }];
   }
-  writeClapDescriptors(ctx, r.stdout);
+  const descriptorFailed = writeClapDescriptors(ctx, r.stdout);
   const out: SyncPlugin[] = [];
   for (const p of scanned.plugins) {
     const uri = `${fileUri}#${p.id}`;
@@ -596,7 +620,8 @@ function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
     }
     const pass = runPass(ctx, { format: "clap", uri: `urn:clap:${p.id}`, bundle: item.root, binary: item.files[0]!, binaryPath: file }, ctx.env);
     for (const f of pass.failures) out.push({ uri, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: f.problem });
-    out.push(...judgedPlugins(ctx, pass.runs));
+    const problem = descriptorFailed.get(p.id);
+    out.push(...judgedPlugins(ctx, pass.runs).map((j) => (problem === undefined ? j : { ...j, descriptorProblem: problem })));
   }
   return out;
 }
