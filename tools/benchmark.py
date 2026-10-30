@@ -172,7 +172,7 @@ COST_TONE_AMP = 0.5
 # whose tail is genuinely fat — the one that xruns mid-show — while being a stable
 # statistic at this sample count.
 COST_PERCENTILE = 95.0
-# Cost is anchored at the rig's canonical rate: the headline figure the operator asked for is
+# Cost is anchored at the rig's canonical rate: the headline figure asked for is
 # "how many of these fit in one core at the rig's rate". `COST_REFERENCE_RATE` is imported above
 # from `_declarations.py` — the same fact `cpu-cost.ts` declares, not a second 96000 literal.
 # A cost probe runs many more blocks than a latency probe; give it room.

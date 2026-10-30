@@ -712,7 +712,7 @@ static const char *rt_kind_name(int k) {
 
 /* The frame that OWNS an event: the first one not inside the interposer, libc, the
  * unwinder or this host. That is the plugin (or a library it calls), which is the fact a
- * ruling needs — "one lock" becomes "one lock from lsp-plugins.so". */
+ * decision needs — "one lock" becomes "one lock from lsp-plugins.so". */
 static void rt_owner(const struct omx_rt_event *e, const char **module, const char **symbol) {
   *module = "?"; *symbol = "?";
   for (int i = 0; i < e->depth; i++) {
