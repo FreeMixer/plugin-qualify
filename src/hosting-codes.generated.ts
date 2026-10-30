@@ -45,6 +45,9 @@ export const HOSTING_CODE = Object.freeze({
   "noRealisation": "hosting.no-realisation",
   "realisedInProcess": "hosting.realised.in-process",
   "unjudged": "hosting.unjudged",
+  "resourceHintsOutOfRange": "hosting.resource-hints.out-of-range",
+  "resourceHintsUnknownHint": "hosting.resource-hints.unknown-hint",
+  "resourceHintsWrongUnit": "hosting.resource-hints.wrong-unit",
   "rtSafetyClean": "hosting.rt-safety.clean-under-sweep",
   "rtSafetyNotReproducible": "hosting.rt-safety.not-reproducible",
   "rtSafetyNotesClean": "hosting.rt-safety.clean-under-notes",
@@ -81,4 +84,7 @@ export const HOSTING_CODE = Object.freeze({
   "topologyWiderThanStrip": "hosting.topology.wider-than-strip",
   "workerNonconforming": "hosting.worker.nonconforming",
   "idleHoldRefused": "hosting.idle.hold-refused",
+  "windowNoDisplay": "hosting.window.no-display",
+  "windowUnsupported": "hosting.window.unsupported",
+  "windowRefused": "hosting.window.refused",
 } as const);
