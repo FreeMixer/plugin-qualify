@@ -78,8 +78,10 @@ export const MEASUREMENT_FORMAT_MAJOR = 1;
  *  {@link RtSafetyMeasurement}, {@link FeaturesMeasurement} — which a 1.0 reader skips.
  *  `1.2` added the verdicts per host profile; `1.3` the {@link IntegrityMeasurement} block; `1.4` the notes
  *  an instrument's cost was measured with ({@link CostAtRate.voices}); `1.5` the note sweep an instrument's
- *  `run()` was counted under ({@link RtSafetyMeasurement.noteSweep}). */
-export const MEASUREMENT_FORMAT_MINOR = 5;
+ *  `run()` was counted under ({@link RtSafetyMeasurement.noteSweep}); `1.6` an instance's memory footprint
+ *  beside the cost reading ({@link CostAtRate.memory}), the soak's readings past warm-up
+ *  ({@link SoakAtRate.rssAfterWarmupKb}), and a host profile's memory budget ({@link HostBudget.memory}). */
+export const MEASUREMENT_FORMAT_MINOR = 6;
 
 /** The version string this build writes, e.g. `"1.0"`. */
 export const MEASUREMENT_FORMAT_VERSION = `${MEASUREMENT_FORMAT_MAJOR}.${MEASUREMENT_FORMAT_MINOR}`;
@@ -285,6 +287,28 @@ export interface VoicesHeld {
   readonly capacity?: number;
 }
 
+/**
+ * 1.6: what one instance holds at this rate: how far the resident set of a process of its own grew from before the
+ * plugin loaded, in KB, at each step of its life. Raw readings, never a conclusion: `memory-budget.ts` reads them against
+ * a budget. `secondInstanceKb` is what a second instance added once it had done the same, so what one instance costs is
+ * told from what every instance shares (a sample library, a wavetable, an IR). `notesHeldKb` and its `basis` are an
+ * instrument's, at the notes the cost arm holds.
+ *
+ * A figure not taken is absent, never 0; `unmeasuredReason` (an {@link ../vocabulary.UNMEASURED_TERMS} code) says why
+ * one that should be there is not, and may stand beside the figures that were taken.
+ */
+export interface MemoryFootprint {
+  readonly afterInstantiateKb?: number;
+  readonly afterActivateKb?: number;
+  /** Activated, after processing: what a long-running host carries. */
+  readonly atRestKb?: number;
+  readonly notesHeldKb?: number;
+  readonly secondInstanceKb?: number;
+  readonly basis?: VoiceBasis;
+  readonly unmeasuredReason?: string;
+  readonly unmeasuredDetail?: string;
+}
+
 /** One rate's cost reading. Per SAMPLE, so it is independent of the block size. */
 export interface CostAtRate {
   readonly nsPerSampleMedian: number;
@@ -303,6 +327,8 @@ export interface CostAtRate {
   readonly silentOutput?: boolean;
   /** 1.4: for an instrument, the notes held while it was timed. Absent for an effect. */
   readonly voices?: VoicesHeld;
+  /** 1.6: this instance's memory footprint at the same rate. */
+  readonly memory?: MemoryFootprint;
 }
 
 /** Everything one run learned about one plugin's CPU cost. */
@@ -368,6 +394,12 @@ export interface SoakAtRate {
   readonly rssStartKb?: number;
   readonly rssMaxKb?: number;
   readonly rssGrowthKb?: number;
+  /** 1.6: the resident set past the settling `firstRmsDbfs` skips, and the audio-seconds to reach it. */
+  readonly rssAfterWarmupKb?: number;
+  readonly warmupSeconds?: number;
+  /** 1.6: the resident set halfway from there to the end, so that growth which stopped is told from growth still climbing. */
+  readonly rssMidKb?: number;
+  readonly midSeconds?: number;
 }
 
 /** A continuous soak, per rate, with whether the controls were swept while it ran. */
@@ -501,6 +533,22 @@ export interface HostBudget {
   readonly coreFractionCeiling: number;
   readonly rate: number;
   readonly quantum: number;
+  /** 1.6: what this host gives its plugins' memory; absent is a host with no budget declared, never a budget of 0. */
+  readonly memory?: HostMemoryBudget;
+}
+
+/**
+ * 1.6: a host's memory budget, and where it is read. `perInstanceKb` bounds what one more instance costs;
+ * `perConsoleKb` bounds all the plugins of the host, so the most one plugin may take with what its instances share.
+ * `provisional` says the numbers were not measured on that kind of host: a verdict that rests on them says so and does
+ * not say the plugin fits. `cells` are the rates and quanta the host runs, each judged, where it runs more than the one
+ * its cost is read at.
+ */
+export interface HostMemoryBudget {
+  readonly perInstanceKb: number;
+  readonly perConsoleKb: number;
+  readonly provisional?: boolean;
+  readonly cells?: readonly { readonly rate: number; readonly quantum: number }[];
 }
 
 /**
@@ -554,6 +602,24 @@ const isPositive = (v: unknown): v is number => typeof v === "number" && Number.
  * typed; a missing or mistyped one is refused by name, and a host the reader was not told about
  * is never filled in from a default.
  */
+/** A budget, `undefined` for none declared, or the words of what is wrong with it. */
+function readHostMemoryBudget(value: unknown): HostMemoryBudget | undefined | string {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return "cost.memory: an object, or absent";
+  if (!isPositive(value.perInstanceKb) || !isPositive(value.perConsoleKb)) return "cost.memory: perInstanceKb and perConsoleKb are positive numbers";
+  if (value.provisional !== undefined && typeof value.provisional !== "boolean") return "cost.memory.provisional: a boolean, or absent";
+  const cells = value.cells;
+  if (cells !== undefined && (!Array.isArray(cells) || cells.length === 0 || !cells.every((c) => isRecord(c) && Number.isInteger(c.rate) && Number.isInteger(c.quantum) && isPositive(c.rate) && isPositive(c.quantum)))) {
+    return "cost.memory.cells: rates and quanta as positive integers, or absent";
+  }
+  return {
+    perInstanceKb: value.perInstanceKb,
+    perConsoleKb: value.perConsoleKb,
+    ...optional("provisional", value.provisional as boolean | undefined),
+    ...optional("cells", (cells as readonly Record<string, number>[] | undefined)?.map((c) => ({ rate: c.rate!, quantum: c.quantum! }))),
+  };
+}
+
 export function readHostProfile(value: unknown): HostProfileRead {
   if (!isRecord(value)) return { ok: false, problem: "a host profile is a JSON object" };
   const { id, lv2Features, clapExtensions, instruments, cost, latency, isolation } = value;
@@ -569,6 +635,8 @@ export function readHostProfile(value: unknown): HostProfileRead {
   if (!Number.isInteger(cost.rate) || !Number.isInteger(cost.quantum)) {
     return { ok: false, problem: "cost: rate and quantum are integers" };
   }
+  const memory = readHostMemoryBudget(cost.memory);
+  if (typeof memory === "string") return { ok: false, problem: memory };
   if (!(HOST_LATENCY_HANDLING as readonly unknown[]).includes(latency)) {
     return { ok: false, problem: `latency: one of ${HOST_LATENCY_HANDLING.join(", ")}` };
   }
@@ -582,7 +650,7 @@ export function readHostProfile(value: unknown): HostProfileRead {
       lv2Features,
       clapExtensions,
       instruments,
-      cost: { coreFractionCeiling: cost.coreFractionCeiling, rate: cost.rate, quantum: cost.quantum },
+      cost: { coreFractionCeiling: cost.coreFractionCeiling, rate: cost.rate, quantum: cost.quantum, ...optional("memory", memory) },
       latency: latency as HostLatencyHandling,
       isolation: isolation as HostIsolation,
     },
@@ -851,6 +919,27 @@ function readLatency(value: unknown): LatencyMeasurement | undefined {
   };
 }
 
+/** A KB figure: finite and never negative. */
+function kilobytes(value: unknown): number | undefined {
+  const n = finiteNumber(value);
+  return n !== undefined && n >= 0 ? n : undefined;
+}
+
+/** A memory footprint, or `undefined` unless it carries at least one figure or a reason. */
+export function readMemoryFootprint(value: unknown): MemoryFootprint | undefined {
+  if (!isRecord(value)) return undefined;
+  const footprint: MemoryFootprint = {
+    ...optional("afterInstantiateKb", kilobytes(value.afterInstantiateKb)),
+    ...optional("afterActivateKb", kilobytes(value.afterActivateKb)),
+    ...optional("atRestKb", kilobytes(value.atRestKb)),
+    ...optional("notesHeldKb", kilobytes(value.notesHeldKb)),
+    ...optional("secondInstanceKb", kilobytes(value.secondInstanceKb)),
+    ...optional("basis", isVoiceBasis(value.basis) ? value.basis : undefined),
+    ...reasonOf(value),
+  };
+  return Object.keys(footprint).length > 0 ? footprint : undefined;
+}
+
 function readCostAtRate(value: unknown): CostAtRate | undefined {
   if (!isRecord(value)) return undefined;
   const nsPerSampleMedian = finiteNumber(value.nsPerSampleMedian);
@@ -875,6 +964,7 @@ function readCostAtRate(value: unknown): CostAtRate | undefined {
     ...optional("warmupNsPerSampleMedian", finiteNumber(value.warmupNsPerSampleMedian)),
     ...optional("silentOutput", booleanValue(value.silentOutput)),
     ...optional("voices", readVoicesHeld(value.voices)),
+    ...optional("memory", readMemoryFootprint(value.memory)),
   };
 }
 
@@ -957,6 +1047,10 @@ export function readSoakAtRate(value: unknown): SoakAtRate | undefined {
     ...optional("rssStartKb", finiteNumber(value.rssStartKb)),
     ...optional("rssMaxKb", finiteNumber(value.rssMaxKb)),
     ...optional("rssGrowthKb", finiteNumber(value.rssGrowthKb)),
+    ...optional("rssAfterWarmupKb", kilobytes(value.rssAfterWarmupKb)),
+    ...optional("warmupSeconds", finiteNumber(value.warmupSeconds)),
+    ...optional("rssMidKb", kilobytes(value.rssMidKb)),
+    ...optional("midSeconds", finiteNumber(value.midSeconds)),
   };
 }
 

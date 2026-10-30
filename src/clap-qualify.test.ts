@@ -47,6 +47,8 @@ import {
   QUALIFY_RATES,
   RT_INTERPOSE_ENV,
   RT_INTERPOSE_NAME,
+  COST_REFERENCE_RATE,
+  QUANTUM_FRAMES,
 } from "./qualify-declarations.js";
 import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
 
@@ -310,7 +312,7 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     chmodSync(stub, 0o755);
     const bin = join(PKG, "bin", "plugin-qualify.mjs");
     const run = (target: string, out: string) =>
-      spawnSync(process.execPath, [bin, "--rates", String(QUALIFY_RATES[0]), "--out", out, target], {
+      spawnSync(process.execPath, [bin, "--rates", String(COST_REFERENCE_RATE), "--quanta", String(QUANTUM_FRAMES), "--out", out, target], {
         encoding: "utf8",
         env: { ...process.env, [CLAP_SCAN_TOOL_ENV]: stub, [PROBE_RUNNER_ENV]: standInRunner() },
       });
@@ -425,7 +427,7 @@ describe("plugin-qualify --all, live — the standard CLAP search path", () => {
     const home = join(scratch, "home");
     mkdirSync(home, { recursive: true });
     const bin = join(PKG, "bin", "plugin-qualify.mjs");
-    const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(QUALIFY_RATES[0])], {
+    const r = spawnSync(process.execPath, [bin, "--all", "--rates", String(COST_REFERENCE_RATE), "--quanta", String(QUANTUM_FRAMES)], {
       encoding: "utf8",
       // the prober is the scanner here too, so the walk reads the real file
       env: {

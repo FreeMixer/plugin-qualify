@@ -178,6 +178,7 @@ function knownGood(): QualifiedPlugin {
     audioOutputs: 1,
     hasMidiIn: false,
     latency: { scalingClass: "constant" },
+    memory: { perRate: { [String(rate)]: { afterInstantiateKb: 600, afterActivateKb: 1200, atRestKb: 1200, secondInstanceKb: 600 } } },
     cpuCost: { perRate: { [String(rate)]: { coreFractionP95: 0.001, nsPerSampleMedian: 10, nsPerSampleP95: 12 } } },
     stability: {
       lifecycle: { cycles: DEFAULT_HOSTING_POLICY.cycleFloor, instantiated: DEFAULT_HOSTING_POLICY.cycleFloor, failed: 0 },
@@ -338,7 +339,7 @@ describe("--host-profile — one verdict per plugin per profile (§3a, §5)", ()
   it("the interchange document carries the profiles and the verdicts with their host id, and reads back", () => {
     const vs = qualifyPlugins([good, synth], { profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], ...opts });
     const doc = judgedDocument(RUN, [], [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], vs);
-    expect(doc.formatVersion).toBe("1.5");
+    expect(doc.formatVersion).toBe("1.6");
     expect(doc.hostProfiles?.map((p) => p.id)).toEqual(["openmixer-console", "jalv"]);
     expect(doc.verdicts).toHaveLength(4);
     expect(doc.verdicts?.[3]).toEqual({ uri: "urn:t:synth", host: "jalv", rating: "suitable", qualified: true });

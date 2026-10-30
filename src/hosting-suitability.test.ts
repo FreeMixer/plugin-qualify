@@ -57,6 +57,7 @@ function descriptor(over: Partial<PluginDescriptor> = {}): PluginDescriptor {
     hasMidiIn: false,
     params: [],
     latency: { measuredFrames: 0, measuredMs: 0, sampleRate: RATE },
+    memory: { perRate: { [String(RATE)]: { afterInstantiateKb: 600, afterActivateKb: 1200, atRestKb: 1200, secondInstanceKb: 600 } } },
     cpuCost: {
       perRate: {
         [String(RATE)]: {
@@ -158,7 +159,7 @@ describe("a fully measured, clean plugin earns the RT thread", () => {
     // Every dimension reported, passes included: a surface that shows only failures cannot
     // show an operator WHY something is trusted.
     expect(new Set(v.reasons.map((r) => r.dimension))).toEqual(
-      new Set(["stability", "rtSafety", "features", "cost", "latency", "topology"]),
+      new Set(["stability", "rtSafety", "features", "cost", "memory", "latency", "topology"]),
     );
   });
 });
@@ -705,7 +706,7 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
     expect(v.rating).toBe("suitable");
     expect(v.path).toBe("in-process");
     expect(new Set(v.reasons.map((r) => r.dimension))).toEqual(
-      new Set(["stability", "rtSafety", "features", "cost", "latency", "topology"]),
+      new Set(["stability", "rtSafety", "features", "cost", "memory", "latency", "topology"]),
     );
     expect(codeOf(v, "topology")).toEqual([HOSTING_CODE.topologyMatched]);
     expect(codeOf(v, "latency")).toEqual([HOSTING_CODE.latencyResolved]);

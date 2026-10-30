@@ -29,7 +29,7 @@ import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOL
 import { judgeProbeOutput } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { writeFileSync } from "node:fs";
-import { fixtureJson, readFixture } from "./probe-output-fixtures.js";
+import { fixtureJson, readFixture, withoutMemoryBudget } from "./probe-output-fixtures.js";
 import { buildQualificationRecord, tiersOf } from "./qualification-record.js";
 
 interface Row {
@@ -120,7 +120,7 @@ describe("what jalv did decides", () => {
 
 describe("the verdict and the tiers", () => {
   const output = readFixture("success-msi");
-  const profiles = [OPENMIXER_CONSOLE_PROFILE, MOD_HOST_PROFILE, JALV_PROFILE];
+  const profiles = [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE), MOD_HOST_PROFILE, JALV_PROFILE];
   const lv2 = (uri: string) => {
     const doc = fixtureJson("success-msi");
     doc.plugin = { format: "lv2", id: uri };
@@ -170,7 +170,7 @@ describe("the verdict and the tiers", () => {
       jalv: (u) => (calls.push(`jalv ${u}`), recorded(uri).jalv(u)),
       adapter: (u) => (calls.push(`omx-clap-host ${u}`), { installed: true, steps: [{ cmd: "add", died: "SIGABRT" }] }),
     };
-    const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: runs });
+    const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE)], admissions: runs });
     // only the asked host is a verdict row; the adapter was run because omx-clap-host is the isolated tier, and
     // mod-host, which no one asked about, was not run at all
     expect(pass.verdicts.map((v) => [v.host, v.qualified])).toEqual([["openmixer-console", true]]);
@@ -278,8 +278,8 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
       return { status: 0, signal: null };
     };
     const refusing: AdmissionRuns = { ...SKIPPED, adapter: () => ({ installed: true, steps: [{ cmd: "add", resp: -512 }] }) };
-    const base = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: SKIPPED });
-    const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: refusing });
+    const base = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE)], admissions: SKIPPED });
+    const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE)], admissions: refusing });
     const judgment = pass.runs[0]!.judgment;
     expect(judgment.adapter).toMatchObject({ host: "omx-clap-host", admitted: false, code: "omx-clap-host.resp-512" });
     expect(pass.verdicts).toEqual(base.verdicts);

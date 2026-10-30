@@ -16,7 +16,7 @@ import { HOSTING_CODE } from "./hosting-codes.js";
 import type { AdmissionRuns } from "./host-admission.js";
 import { JALV_PROFILE, OMX_CLAP_HOST_CONFIGURED_EXTENSIONS, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { ProbeRunnerError, clapRunnerArgs, lv2RunnerArgs, probeRunnerTool, probeTarget, qualifyTargets, type ProbeRun } from "./probe-runner.js";
-import { fixtureJson, fixtureText, clapLineFixture, probeOutputOfLine } from "./probe-output-fixtures.js";
+import { fixtureJson, fixtureText, clapLineFixture, probeOutputOfLine, withoutMemoryBudget } from "./probe-output-fixtures.js";
 import {
   CLAP_QUALIFY_TOOL_ENV,
   CLAP_QUALIFY_TIMEOUT_S,
@@ -178,7 +178,7 @@ describe("qualifyTargets: a pass over the targets", () => {
       run,
       env: TOOLS,
       exists,
-      profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, JALV_PROFILE],
+      profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE), OMX_CLAP_HOST_PROFILE, JALV_PROFILE],
     });
     expect(calls.map((c) => c.args.includes("--offer"))).toEqual([false, true]);
     expect(calls[1]?.args[calls[1].args.indexOf("--offer") + 1]).toBe(OMX_CLAP_HOST_CONFIGURED_EXTENSIONS.join(","));
@@ -205,7 +205,7 @@ describe("qualifyTargets: a pass over the targets", () => {
       run,
       env: TOOLS,
       exists,
-      profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE],
+      profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE), JALV_PROFILE],
     });
     expect(pass.failures).toEqual([{ uri: "urn:clap:org.example.fx", problem: expect.stringContaining("exited 2") }]);
     expect(pass.verdicts.map((v) => [v.host, v.measured, v.rating, v.deciding])).toEqual([
@@ -246,7 +246,7 @@ describe("qualifyTargets: a pass over the targets", () => {
     doc.plugin = { format: "lv2", id: LV2.uri };
     doc.grid[0].rtSafety.locks = 4;
     const { run, calls } = runner(() => JSON.stringify(doc));
-    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE], admissions: HOSTS_ADMIT });
+    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE), JALV_PROFILE], admissions: HOSTS_ADMIT });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args.at(-1)).toBe("lv2:urn:example:zero-path");
     expect(calls[0]?.preload).toBeUndefined();

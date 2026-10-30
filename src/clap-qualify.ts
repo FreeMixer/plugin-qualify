@@ -36,7 +36,7 @@ import {
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import { halfPopulatedRefusal, locateNativeTools } from "./tool-paths.js";
-import { readIntegrity, type IntegrityMeasurement, type VoicesHeld } from "./measurement/format.js";
+import { readIntegrity, readMemoryFootprint, type IntegrityMeasurement, type MemoryFootprint, type VoicesHeld } from "./measurement/format.js";
 import { isVoiceBasis } from "./measurement/vocabulary.js";
 import { coreFraction } from "./cost-fields.js";
 
@@ -103,6 +103,8 @@ export interface ClapCostReading {
   /** The percentile `nsPerSampleP95` is taken at. */
   readonly percentile: number;
   readonly perRate: Readonly<Record<string, ClapCostAtRate>>;
+  /** What one instance held at each rate (`memory` on the prober's per-rate object), read apart from the timing. */
+  readonly memory?: Readonly<Record<string, MemoryFootprint>>;
 }
 
 /** One plugin's line from `clap-qualify`. */
@@ -285,9 +287,12 @@ function readCost(v: unknown): ClapCostReading {
   const perRateIn = v["perRate"];
   if (!isRecord(perRateIn)) return bad("cost has no perRate map");
   const perRate: Record<string, ClapCostAtRate> = {};
+  const memory: Record<string, MemoryFootprint> = {};
   for (const [rate, at] of Object.entries(perRateIn)) {
     if (!/^[1-9]\d*$/.test(rate)) return bad(`cost rate ${rate}`);
     perRate[rate] = readCostAtRate(at, `cost at ${rate}`, stimulus === "notes-held");
+    const footprint = isRecord(at) ? readMemoryFootprint(at["memory"]) : undefined;
+    if (footprint !== undefined) memory[rate] = footprint;
   }
   return {
     stimulus,
@@ -295,6 +300,7 @@ function readCost(v: unknown): ClapCostReading {
     warmupBlocks: count(v, "warmupBlocks", "cost"),
     percentile: figure(v, "percentile", "cost"),
     perRate,
+    ...(Object.keys(memory).length === 0 ? {} : { memory }),
   };
 }
 
@@ -338,6 +344,7 @@ export function qualifiedPluginOfClapLine(line: ClapQualifyLine, stability?: Plu
     clap,
     rtSafety: { ...rtSafety, noteSweep },
     cpuCost: { perRate: clapCostPerRate(line.cost) },
+    ...(line.cost?.memory === undefined ? {} : { memory: { perRate: line.cost.memory } }),
     ...(stability === undefined ? {} : { stability }),
   };
 }

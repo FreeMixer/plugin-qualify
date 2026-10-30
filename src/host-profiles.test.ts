@@ -26,8 +26,8 @@ import * as hosting from "./hosting-suitability.js";
 import { HOST_BUDGETS } from "./qualify-declarations.js";
 
 describe("the shipped profiles", () => {
-  it("are four, by unique id, openmixer-console first", () => {
-    expect(HOST_PROFILES.map((p) => p.id)).toEqual(["openmixer-console", "jalv", "mod-host", "omx-clap-host"]);
+  it("are six, by unique id, openmixer-console first", () => {
+    expect(HOST_PROFILES.map((p) => p.id)).toEqual(["openmixer-console", "jalv", "mod-host", "omx-clap-host", "openmixer-pi-4gb", "openmixer-pi-8gb"]);
     for (const p of HOST_PROFILES) expect(shippedHostProfile(p.id)).toBe(p);
     expect(shippedHostProfile("ardour")).toBeUndefined();
   });
