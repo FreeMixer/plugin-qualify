@@ -1,3 +1,9 @@
+plugin-qualify (0.17.5) unstable; urgency=medium
+
+  * Every sync starts by bringing each pin's files up to the ones plugin-hostd --pin-files names, measuring nothing; --refresh-pins does only that, and the package upgrade runs it. A pin written before 0.17.3 no longer leaves an LV2 with presets refused with -509 until it is qualified again (#239).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Fri, 30 Oct 2026 01:56:19 +0100
+
 plugin-qualify (0.17.4) unstable; urgency=medium
 
   * A package transaction no longer runs a qualification sweep when systemd is not running (an image build took 95 minutes in it): the trigger leaves qualify-pending in /var/lib/omx and the next plugin-qualify-sync run scans and clears it; PLUGIN_QUALIFY_SYNC_INLINE=1 keeps the inline run (#237).
