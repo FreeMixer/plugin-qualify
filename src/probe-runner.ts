@@ -22,7 +22,7 @@ import type { HostProfile } from "./host-profiles.js";
 import { OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
 import { IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST } from "./qualification-record.js";
 import type { PluginTarget } from "./loader.js";
-import { ADAPTER_HOST, SPAWNED_ADMISSIONS, admitPlugin, admitUnderAdapter, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
+import { ADAPTER_RUN_HOSTS, SPAWNED_ADMISSIONS, admitPlugin, admitUnderAdapter, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 import { budgetCells, gridCells, hostCells, runnerInvocations, type GridCell, type GridSpec, type RunnerInvocation } from "./measurement-grid.js";
@@ -299,7 +299,7 @@ export function qualifyTargets(
     // an LV2 plugin is also run once under plugin-hostd's LV2 adapter, recorded beside the verdicts (#223)
     const adapter = target.format === "lv2" ? admitUnderAdapter(target.uri, admissionRuns, admissionEnv) : undefined;
     // and that run decides its omx-clap-host verdict, the isolated tier
-    if (adapter !== undefined) admissions[ADAPTER_HOST] = adapter;
+    if (adapter !== undefined) for (const host of ADAPTER_RUN_HOSTS) admissions[host] = adapter;
     if (target.format === "lv2") {
       for (const profile of judgedProfiles) {
         const host = admittedHostOf(profile);

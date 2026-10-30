@@ -29,13 +29,16 @@ export function admittedHostOf(profile: HostProfile): AdmittedHost | undefined {
  */
 export const ADAPTER_HOST = "omx-clap-host";
 
+/** The profiles whose LV2 plugins run under that adapter: omx-clap-host, and the Pi boards it runs on (`host-profiles.ts`). */
+export const ADAPTER_RUN_HOSTS: readonly string[] = [ADAPTER_HOST, "openmixer-pi-4gb", "openmixer-pi-8gb"];
+
 /**
  * Whether this run decides the profile's verdict for a plugin of this format. A mod-host or jalv run always does, an
  * unmeasured one making the verdict unknown; the adapter's only when it measured, since the omx-clap-host verdict
  * otherwise stands on the measurement.
  */
 export function runDecides(profile: HostProfile, format: string, admission: HostAdmission): boolean {
-  return admittedHostOf(profile) !== undefined || (profile.id === ADAPTER_HOST && format === "lv2" && admission.measured);
+  return admittedHostOf(profile) !== undefined || (ADAPTER_RUN_HOSTS.includes(profile.id) && format === "lv2" && admission.measured);
 }
 
 /** What running the plugin under one host came to. */

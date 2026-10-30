@@ -18,7 +18,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -32,11 +32,12 @@ import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
 import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
 import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
-import { qualifyTargets } from "./probe-runner.js";
+import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { writeQualification, type NotMeasured } from "./qualification-record.js";
-import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
+import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, MEMORY_PASS_PROBE_NOTES, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
 
@@ -73,6 +74,7 @@ export const SYNC_SETTINGS: readonly SyncSetting[] = [
   { key: "grid", meaning: "the cells measured: full (every rate at every block size, 16 cells), hosts (the fast option: the host's and the console tiers' rate/quantum, then 512 at every rate; also --grid-hosts), or <rate>/<quantum>,...", default: "full" },
   { key: "cells_per_plugin_budget", meaning: "measure at most the first n cells of the grid a plugin; 0 is every cell", default: "0" },
   { key: "memory_limit", meaning: "the memory bound of every run: bytes, or with K, M, G; off for none; past it a cell is probe.oom", default: "half of the RAM" },
+  { key: "memory_notes", meaning: "the notes an instrument that declares no voice capacity holds in a --memory-only run, 1 to 128 (basis probe)", default: String(MEMORY_PASS_PROBE_NOTES) },
   { key: "hostd_port", meaning: "plugin-hostd's command port the new pins are sent to; 0 sends none", default: "5555" },
   { key: "hostd_feedback_port", meaning: "plugin-hostd's feedback port, connected before the command port; 0 is the command port's next", default: "0" },
   { key: "settle_s", meaning: "wait until the plugin directories have been quiet this long before a run", default: "0" },
@@ -94,6 +96,8 @@ export interface SyncSettings {
   readonly cellsPerPluginBudget: number;
   /** The memory bound of every run; `undefined` is `off`. */
   readonly memory?: MemoryBound;
+  /** The notes an instrument with no declared capacity holds in a memory-only run. */
+  readonly memoryNotes: number;
   readonly hostdPort: number;
   readonly hostdFeedbackPort: number;
   readonly settleS: number;
@@ -128,6 +132,10 @@ export interface SyncArgs {
   readonly noWait: boolean;
   /** `--refresh-pins`: refresh the pins' files from plugin-hostd and measure nothing (the package's upgrade runs it). */
   readonly refreshPins: boolean;
+  /** `--rejudge`: the verdicts, tiers and pins derived again from the records' figures, measuring nothing. */
+  readonly rejudge: boolean;
+  /** `--memory-only`: the footprint of each recorded plugin at the Pi's cells, merged into its record. */
+  readonly memoryOnly: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -144,6 +152,8 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let noDistributed = false;
   let noWait = false;
   let refreshPinsOnly = false;
+  let rejudge = false;
+  let memoryOnly = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -152,6 +162,8 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--no-distributed") noDistributed = true;
     else if (a === "--no-wait") noWait = true;
     else if (a === "--refresh-pins") refreshPinsOnly = true;
+    else if (a === "--rejudge") rejudge = true;
+    else if (a === "--memory-only") memoryOnly = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -161,7 +173,9 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, help, values } };
+  if (rejudge && (memoryOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --force and --refresh-pins" };
+  if (memoryOnly && refreshPinsOnly) return { ok: false, error: "--memory-only and --refresh-pins are two different runs" };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -175,6 +189,8 @@ export function syncHelpText(): string {
     "  --no-wait                           a run in progress is not waited for: exit 0, and the holder runs once more at its end",
     "  --no-distributed                    read no distributed record: every plugin not recorded is measured",
     "  --refresh-pins                      only bring every pin's files up to the ones plugin-hostd names, measuring nothing",
+    "  --rejudge                           derive every record's verdicts, tiers and pin again from the figures it holds; measures nothing",
+    "  --memory-only                       measure only the footprint of each recorded plugin at the Pi's cells and merge it; with --force, those already merged too",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
     ...rows,
@@ -226,6 +242,8 @@ export function resolveSyncSettings(
   const memoryLimit = memoryText === undefined || memoryText === "" ? undefined : parseMemoryLimit(memoryText);
   if (memoryLimit !== undefined && !memoryLimit.ok) return { ok: false, error: `memory_limit: ${memoryLimit.error}` };
   const memory = memoryBoundOf(memoryLimit?.bytes);
+  const memoryNotes = number("memory_notes", 1);
+  if (memoryNotes === undefined || !Number.isInteger(memoryNotes) || memoryNotes > 128) return { ok: false, error: "memory_notes must be a whole number of notes, 1 to 128" };
   const profileId = get("host_profile") || "omx-clap-host";
   const hostProfile = shippedHostProfile(profileId);
   if (hostProfile === undefined) return { ok: false, error: `host_profile ${profileId} is not a shipped host profile` };
@@ -256,6 +274,7 @@ export function resolveSyncSettings(
       grid: grid.spec,
       cellsPerPluginBudget,
       ...(memory === undefined ? {} : { memory }),
+      memoryNotes,
       hostdPort,
       hostdFeedbackPort: feedbackPort === 0 && hostdPort !== 0 ? hostdPort + 1 : feedbackPort,
       settleS,
@@ -693,14 +712,10 @@ function qualifyClap(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
 
 /** An LV2 plugin, measured in a world of its own bundle only, as plugin-hostd runs a pinned LV2 plugin. */
 function qualifyLv2(ctx: SyncContext, item: SyncItem): SyncPlugin[] {
-  const world = mkdtempSync(join(tmpdir(), "plugin-qualify-sync-world-"));
-  try {
-    symlinkSync(item.root, join(world, basename(item.root)));
+  return lv2World(item.root, (world) => {
     const pass = runPass(ctx, { format: "lv2", uri: item.uri!, bundle: item.root }, { ...ctx.env, LV2_PATH: world });
     return [...pass.failures.map((f): SyncPlugin => ({ uri: item.uri!, outcome: "unmeasured", code: SYNC_CODE.notMeasured, detail: f.problem })), ...judgedPlugins(ctx, pass.runs)];
-  } finally {
-    rmSync(world, { recursive: true, force: true });
-  }
+  });
 }
 
 /** One item qualified, whatever happens to it: an error of the sync's own while measuring it is its outcome, not the run's end. */
@@ -984,6 +999,10 @@ export interface SyncSummary {
   readonly sent?: number;
   /** The pins whose files were refreshed from plugin-hostd without a measurement (plugin-qualify#239). */
   readonly refreshed?: number;
+  /** `--rejudge`: the records whose verdicts changed, the ones that stood, and the ones that owe a measurement. */
+  readonly rejudge?: { readonly changed: number; readonly unchanged: number; readonly owing: number };
+  /** `--memory-only`: the plugins measured, those whose footprints were already merged, and those no run could read. */
+  readonly memoryOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
 }
 
 /**
@@ -1020,7 +1039,7 @@ export function descriptorAccessProblems(dir: string): string[] {
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
@@ -1066,8 +1085,14 @@ export interface SyncRunOptions {
   readonly force?: boolean;
   /** `--refresh-pins`: only refresh the pins' files from plugin-hostd and send the changed ones; measure nothing. */
   readonly refreshOnly?: boolean;
+  /** `--rejudge`: derive the verdicts again from the records' figures; measure nothing. */
+  readonly rejudge?: boolean;
+  /** `--memory-only`: take only the footprints; `force` takes those already merged again. */
+  readonly memoryOnly?: boolean;
   /** The run of `plugin-hostd --pin-files`, a stand-in in tests. */
   readonly pinFilesRun?: PinFilesRun;
+  /** The run of the probe runner in a memory-only pass, a stand-in in tests. */
+  readonly probeRun?: ProbeRun;
   /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
   readonly wait?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -1123,6 +1148,8 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     seconds: a.seconds + b.seconds,
     ...(sent === 0 ? {} : { sent }),
     ...(refreshed === 0 ? {} : { refreshed }),
+    ...(b.rejudge === undefined ? (a.rejudge === undefined ? {} : { rejudge: a.rejudge }) : { rejudge: b.rejudge }),
+    ...(b.memoryOnly === undefined ? (a.memoryOnly === undefined ? {} : { memoryOnly: a.memoryOnly }) : { memoryOnly: b.memoryOnly }),
   };
 }
 
@@ -1143,7 +1170,7 @@ function scannedBy(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">, entry: 
 async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promise<SyncSummary> {
   const log = options.log ?? (() => {});
   const env = options.env ?? process.env;
-  log(options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
+  log(options.rejudge === true ? "re-judge begins: nothing is measured" : options.memoryOnly === true ? "memory-only pass begins" : options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
@@ -1155,6 +1182,17 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       writeFileWhole(settings.stateFile, `${JSON.stringify(fresh.state, null, 1)}\n`);
     }
     if (options.refreshOnly === true) return sendRefreshed(settings, fresh.state, fresh.refreshed.length, started, log);
+    if (options.rejudge === true) {
+      const r: RejudgeResult = rejudgeState(ctx, fresh.state);
+      if (JSON.stringify(r.state) !== JSON.stringify(fresh.state)) writeFileWhole(settings.stateFile, `${JSON.stringify(r.state, null, 1)}\n`);
+      const summary = await sendRefreshed(settings, r.state, fresh.refreshed.length, started, log);
+      return { ...summary, rejudge: { changed: r.changed, unchanged: r.unchanged, owing: r.owing.length } };
+    }
+    if (options.memoryOnly === true) {
+      const r: MemoryPassResult = memoryPass(ctx, fresh.state, { force: options.force === true, ...(options.probeRun === undefined ? {} : { run: options.probeRun }) });
+      const summary = await sendRefreshed(settings, fresh.state, fresh.refreshed.length, started, log);
+      return { ...summary, memoryOnly: { measured: r.measured, already: r.already, failed: r.failed } };
+    }
     await waitQuiet(dirs, settings.settleS, log);
     const count = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0, distributed: 0 };
     const layer = distributedLayerOf(settings, options.force === true, log);

@@ -117,8 +117,11 @@ const word = (key: keyof typeof MEASUREMENT_UNMEASURED_REASONS): string => MEASU
 /** The same, for the test. */
 export const memoryOfCellForTest = (p: ProbeGridPoint): Pick<RecordGridPoint, "memory"> => memoryOfCell(p);
 
+/** The contract's word for a cell whose run ended with this outcome, `probe-error` for one it has no word of. */
+export const unmeasuredWordOf = (outcome: string): string => OUTCOME_WORD[outcome] ?? word("probeError");
+
 /** A cell's footprint with what it comes to; only a footprint with no reason beside it comes to anything a client may add up. */
-function memoryOfCell(p: ProbeGridPoint): Pick<RecordGridPoint, "memory"> {
+export function memoryOfCell(p: ProbeGridPoint): Pick<RecordGridPoint, "memory"> {
   if (p.memory === undefined) return {};
   const first = p.memory.unmeasuredReason === undefined ? firstInstanceKb(p.memory) : undefined;
   const per = p.memory.unmeasuredReason === undefined ? perInstanceKb(p.memory) : undefined;
@@ -181,6 +184,49 @@ export interface HistoryBlock {
   readonly verdicts: readonly ({ readonly host: string } & Adjustment)[];
 }
 
+/** One measurement a record lacks, and what it keeps from being decided. */
+export interface OwedMeasurement {
+  /** `adapter-run`: the plugin under omx-clap-host's LV2 adapter. `host-run`: under the host named. `qualification`: the whole of it. */
+  readonly measurement: "adapter-run" | "host-run" | "qualification";
+  readonly host?: string;
+  readonly code: string;
+  readonly detail?: string;
+}
+
+/**
+ * The verdicts are not the ones of the run that took the figures: `plugin-qualify-sync --rejudge` derived them later, from
+ * those figures, under the rules of `by`. `figures` says who took the figures and when; the verdicts claim nothing more.
+ */
+export interface RejudgedBlock {
+  /** The UTC time the verdicts last changed. */
+  readonly at: string;
+  /** The plugin-qualify whose rules judged them. */
+  readonly by: string;
+  readonly figures: {
+    readonly tool: Readonly<Record<string, string>>;
+    readonly measuredAt: string;
+    readonly runId: string;
+    /** The footprints, when a memory-only pass took them later than the rest. */
+    readonly memory?: { readonly tool: Readonly<Record<string, string>>; readonly measuredAt: string };
+  };
+  /** What these verdicts could not decide and left `unknown`; absent when nothing is owed. */
+  readonly owes?: readonly OwedMeasurement[];
+}
+
+/** The memory-only pass that took this record's footprints: every other figure is older and comes from `tool`. */
+export interface MemoryRunBlock {
+  readonly tool: Readonly<Record<string, string>>;
+  readonly measuredAt: string;
+  readonly runId: string;
+  readonly cells: readonly {
+    readonly rate: number;
+    readonly quantum: number;
+    /** How the cell's run ended; its figures are in the grid's point of that cell. */
+    readonly outcome: string;
+    readonly memoryLimit?: { readonly bytes: number; readonly mechanism: string };
+  }[];
+}
+
 export interface QualificationRecord {
   readonly schema: typeof QUALIFICATION_RECORD_SCHEMA;
   readonly plugin: { readonly format: string; readonly id: string; readonly name?: string };
@@ -223,6 +269,10 @@ export interface QualificationRecord {
   readonly history?: readonly HistoryBlock[];
   /** Where the record came from when it was not measured on this device: the distributed set's provenance, as the set's package wrote it. */
   readonly provenance?: Readonly<Record<string, unknown>>;
+  /** Present when the verdicts were derived later from the figures below, measuring nothing. */
+  readonly rejudged?: RejudgedBlock;
+  /** Present when a memory-only pass merged footprints into the grid. */
+  readonly memoryRun?: MemoryRunBlock;
   /** The probe output this record judged. */
   readonly probe: {
     readonly file: string;
@@ -276,6 +326,19 @@ export function tiersOf(judgment: Judgment): RecordTiers {
   };
 }
 
+/** A judgment's verdicts as the record writes them. */
+export const verdictRows = (judgment: Judgment): RecordVerdict[] =>
+  judgment.hosts.map((h) => ({
+    host: h.verdict.host,
+    measured: h.verdict.measured,
+    rating: h.verdict.rating,
+    qualified: h.verdict.qualified,
+    hosting: h.hosting,
+    arm: h.arm,
+    ...(h.verdict.deciding === undefined ? {} : { deciding: h.verdict.deciding }),
+    reasons: h.reasons,
+  }));
+
 export function buildQualificationRecord(
   judgment: Judgment,
   copy: { file: string; sha256: string; bytes: number },
@@ -287,16 +350,7 @@ export function buildQualificationRecord(
     plugin: { format: o.plugin.format, id: o.plugin.id, ...(o.plugin.name === undefined ? {} : { name: o.plugin.name }) },
     ...(o.plugin.version === undefined ? {} : { testedVersion: o.plugin.version }),
     binary: o.binary,
-    verdicts: judgment.hosts.map((h) => ({
-      host: h.verdict.host,
-      measured: h.verdict.measured,
-      rating: h.verdict.rating,
-      qualified: h.verdict.qualified,
-      hosting: h.hosting,
-      arm: h.arm,
-      ...(h.verdict.deciding === undefined ? {} : { deciding: h.verdict.deciding }),
-      reasons: h.reasons,
-    })),
+    verdicts: verdictRows(judgment),
     ...(judgment.adapter === undefined ? {} : { adapter: judgment.adapter }),
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
