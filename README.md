@@ -180,8 +180,8 @@ be read (permissions, a symlink loop) also refuses with exit 2, naming it.
 The prober runs each plugin headless at every cell of the grid (see "The measurement grid"), under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
 the file's SHA-256 beside what it measured. The verdict is the real-time-safety one: **suitable**
-only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
-`process()` or `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. An instrument is
+only on a clean count, **conditional** (isolated in the pin: it runs in a worker of its own, never refused) on any
+allocation, lock, syscall or main-thread host call from `process()`, **unsuitable** on `CLAP_PROCESS_ERROR`, **unknown** when it could not be counted. An instrument is
 quiet until it is played, so a plugin with a note input is also played, at every rate and under a
 count of its own: a chord, the pitch bent and a controller moved, pressure, the chord let go, a
 burst of 32 note ons in one block and their offs, all notes off, in the dialect its note input
@@ -360,12 +360,12 @@ writer needs Python's `jsonschema` (`python3-jsonschema`).
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own
   process. This is the only verdict that counts as qualified.
-- **conditional**: it works, with a caution (for example a high cost at small quanta). It is
-  run isolated, and the deciding reason names the caution.
+- **conditional**: it works, with a caution (for example a high cost at small quanta, or an
+  allocation, lock or syscall in `run()`). It is run isolated, and the deciding reason names the caution.
 - **unknown**: something was not measured. An unmeasured plugin is never a pass.
-- **unsuitable**: a measured failure: a crash, a memory error in the plugin's own binary, a
-  real-time violation (allocation, locks or syscalls in `run()`), or a required feature the
-  host does not provide.
+- **unsuitable**: a measured failure: a crash, a memory error in the plugin's own binary, or a
+  required feature the host does not provide. An allocation, lock or syscall in `run()` is not
+  one: that plugin is **conditional**, and runs isolated.
 
 The worst dimension decides. The text output prints the plugin, its verdict and the reason that
 decided it.

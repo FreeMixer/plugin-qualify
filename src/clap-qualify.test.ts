@@ -165,11 +165,11 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(Object.keys(doc.measured.clap.latency)).toEqual(QUALIFY_RATES.map(String));
   });
 
-  live("the RT-unsafe plugin is unsuitable on the interposer's count, and the events name the allocation", () => {
+  live("the RT-unsafe plugin is isolated on the interposer's count, and the events name the allocation", () => {
     const [l] = qualifyClap(UNSAFE, UNSAFE_ID, { rates: QUALIFY_RATES });
     const doc = rtSafetyDocument(l!);
     expect(doc.plugin.binary.sha256).toBe(sha256(UNSAFE));
-    expect(doc.verdict).toMatchObject({ rating: "unsuitable", rtSafe: false });
+    expect(doc.verdict).toMatchObject({ rating: "conditional", rtSafe: false });
     expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
     // one malloc and one free per swept block, at every rate
     expect(doc.measured.rtSafety.allocationsInRun).toBe(2 * CLAP_SWEEP_BLOCKS * QUALIFY_RATES.length);
@@ -479,10 +479,10 @@ describe("parseClapQualifyLine — the prober's line, refused when it is not one
 });
 
 describe("rtSafetyDocument — the rtSafety dimension's verdict, and nothing else's", () => {
-  it("a lock or a syscall in process() is as unsuitable as an allocation", () => {
+  it("a lock or a syscall in process() isolates the plugin, as an allocation does (#196)", () => {
     for (const patch of [{ locksInRun: 1 }, { syscallsInRun: 3 }]) {
       const doc = rtSafetyDocument(parseClapQualifyLine(line({ rtSafety: patch })));
-      expect(doc.verdict.rating).toBe("unsuitable");
+      expect(doc.verdict.rating).toBe("conditional");
       expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
     }
   });
