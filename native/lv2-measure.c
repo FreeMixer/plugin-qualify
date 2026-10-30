@@ -1430,6 +1430,25 @@ int main(int argc, char **argv) {
 
   footprint_rate(H, rate, block, &footprint);
 
+  /* OMX_PROBE_MEMORY_ONLY: the footprint is all this run takes: no lifecycles, no sweep, no latency, no cost. A plugin
+   * that would not instantiate reads as it does below; one whose footprint child died keeps the line, with the reason. */
+  if (getenv("OMX_PROBE_MEMORY_ONLY")) {
+    const int refused = footprint.got == 0 && !strcmp(footprint.unmeasured, "refused-instantiation");
+    struct cost_at none;
+    memset(&none, 0, sizeof none);
+    none.unmeasured = "not-attempted";
+    none.detail = "a memory-only run takes the footprint alone";
+    fprintf(jout, "{\"uri\":");
+    json_str(jout, uri);
+    fprintf(jout, ",\"found\":true,\"instantiated\":%s", refused ? "false" : "true");
+    if (!refused) emit_cost(rate, &none, block, n_audio_in == 0 && H->midi_port >= 0, &footprint);
+    emit_feature_options();
+    fprintf(jout, "}\n");
+    fflush(jout);
+    release(H, required, optional, uri_node, world);
+    return refused ? 2 : 0;
+  }
+
   /* ---- lifecycle: instantiate and destroy, counting what does not come back ---- */
   const int threads_before = count_threads();
   int instantiated = 0, failed = 0;
