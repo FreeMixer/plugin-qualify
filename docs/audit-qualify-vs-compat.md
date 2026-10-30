@@ -10,7 +10,7 @@ omx-clap-core's compatibility tests (`tests/lv2_parity.py`, `tests/jack_parity.c
 
 Short answer: **leave them as two products, and share through the three packages that already exist**
 (omx-contract for the vocabulary, omx-clap-core's `omx-clap-scan` for the CLAP scan, plugin-hostd's
-`plugin-hostd-probe` for running a plugin under limits). No new library earns its keep today. The one real
+`plugin-hostd-probe` for running a plugin under limits). No new library earns its keep. The one real
 cross-repo duplicate is clap-qualify's CLAP scan mode, a near copy of `omx-clap-scan`. The larger duplication is
 *inside* omx-clap-core's tests: two copies of the private-PipeWire runner, the host driver and the TSV helpers.
 
@@ -126,7 +126,7 @@ h.runs-clap-qualify` = 5) and `lv2_measure` from `/usr/libexec/plugin-qualify/` 
 
 Each row is one `pair` line of the script.
 
-| Pair | Lines shared / a / b, overlap, diff | strings | Kind | Owner today | Ought to own |
+| Pair | Lines shared / a / b, overlap, diff | strings | Kind | Owner | Ought to own |
 |---|---|---|---|---|---|
 | q.clap-fork / c.clap-fork (fork + alarm per file) | 13/41/43, 31 %, 58 | **5/5/10** | near-duplicate: same steps, same 30 s alarm, all five of qualify's messages are omx-clap-core's; brace style differs | both | omx-clap-core |
 | q.clap-walk / c.clap-walk (directory walk) | 11/44/95, 25 %, 119 | 2/3/7 | near-duplicate; omx-clap-core's adds realpath dedupe | both | omx-clap-core |
@@ -188,7 +188,7 @@ with `mod-host-asan` (kind 3). For both, the replacement is the same and is plug
   what retires the sweep. The probe output is the record, keyed by rate and quantum.
 - What that needs from a shared harness: an ASan build of the probe child (for the crash reproduction), and the
   isolation stage plugin-hostd has declared but not applied (namespaces, cgroups; `PHD_PROBE_LIMIT_*` says
-  `not-implemented` today). Neither is a test directory's code.
+  `not-implemented`). Neither is a test directory's code.
 
 **What qualify would reuse from the parity runner.** Little, measured: the runner's CPU figure is
 `schedstat` over a whole run of a whole host process (per run, not per cycle). Its latency is the host's JACK
@@ -196,7 +196,7 @@ report, not a measurement. qualify's per-`process()` timing with a p95 is the fi
 measures where the parity runner only reads what the host reports. The one piece qualify has no equivalent of is
 the **feeder clock** (`c.clock`, 86 lines: PipeWire with no driver but the feeder, one cycle per trigger). It
 would give "the cost of this plugin inside a real host graph at a fixed quantum", a figure qualify does not take
-today. If qualify ever needs it, it belongs in plugin-hostd's probe child next to the isolation stage, because
+yet. If qualify ever needs it, it belongs in plugin-hostd's probe child next to the isolation stage, because
 qualify must not depend on a test directory.
 
 ## 4. Candidate shared pieces, ranked
@@ -205,7 +205,7 @@ qualify must not depend on a test directory.
 |---|---|---|---|---|---|---|---|
 | 1 | **CLAP scan document** | enum labels and remote-control pages added to `omx-clap-scan --json`; then clap-qualify's scan mode deleted | omx-clap-core (`omx-clap-scan` is a shipped binary, not a test) | C; the JSON document `src/clap-loader.ts` already parses, so no new ABI | (a) omx-clap-core: write labels and pages; (b) plugin-qualify: drop `clap-qualify` from `SCANNER_NAMES`, delete the scan mode; tests stay on `omx-clap-scan` (already on CI via `install-scanners`) | low: one document, both sides already tested against it | **281** lines of `native/clap-qualify.c` |
 | 2 | **omx-clap-core test harness module** | `ns`, `start_pipewire`, `Host`, the TSV helpers, once, in `tests/` | omx-clap-core (internal) | Python, no ABI | `lv2_parity.py` and `clap_coverage.py` import it; the shell e2e scripts keep their `unshare` line | low; both runners have `--self-test` with sabotage | about **177** lines (the smaller copies) |
-| 3 | **Feeder clock and private PipeWire as a probe stage** | `c.clock` + `ns` + `start_pipewire`, as plugin-hostd's in-graph cost stage | plugin-hostd | C (the clock is already C); the probe-output document | plugin-hostd adds the stage; qualify reads its grid points; omx-clap-core's parity runner could call the stage | medium: a new figure, a new namespace dependency | none today; it adds a figure |
+| 3 | **Feeder clock and private PipeWire as a probe stage** | `c.clock` + `ns` + `start_pipewire`, as plugin-hostd's in-graph cost stage | plugin-hostd | C (the clock is already C); the probe-output document | plugin-hostd adds the stage; qualify reads its grid points; omx-clap-core's parity runner could call the stage | medium: a new figure, a new namespace dependency | none yet; it adds a figure |
 | 4 | **One stimulus generator** | the noise, sine, impulse and note sequences | omx-dsp (DSP maths in C) | C header | clap-qualify, lv2_measure, jack_parity | high: every cost and parity figure moves when the stimulus moves; parity needs its own mix to tell hosts apart | about 13 + 18 + 77 + 38 lines, no file |
 | 5 | Records, classifiers, report writers | — | — | — | — | — | none: different jobs (§2) |
 | — | Vocabulary | already shared: omx-contract (TS for qualify, the C header for omx-clap-core) and plugin-hostd's `protocol.h` for `probe.*` | — | — | nothing to build | — | — |
