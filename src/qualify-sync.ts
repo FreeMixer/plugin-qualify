@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { clapQualifyTools } from "./clap-qualify.js";
 import { DISTRIBUTED_DIR_SYSTEM, EMPTY_LAYER, applyDistributed, distributedUri, hostClassOfBoard, matchDistributed, readBoardModel, readDistributedLayer, type DistributedLayer } from "./distributed-records.js";
@@ -1126,6 +1126,15 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
   };
 }
 
+/** Whether this run's scan covers an entry: its root lies under one of the run's directories of its own format. */
+function scannedBy(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">, entry: SyncEntry): boolean {
+  const root = resolve(entry.root);
+  return (entry.format === "clap" ? settings.clapDirs : settings.lv2Dirs).some((d) => {
+    const dir = resolve(d);
+    return root === dir || root.startsWith(dir.endsWith(sep) ? dir : dir + sep);
+  });
+}
+
 /**
  * One run: wait for quiet, qualify what is new or changed, drop what is gone, write the state, the records, the
  * descriptors and the pin file, and send the changed pins to a running daemon. The state and the pin file are written
@@ -1167,8 +1176,14 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       unreadable = problems.length > 0;
       const found = new Set(items.map((i) => i.key));
       const entries: Record<string, SyncEntry> = {};
-      for (const [key, entry] of Object.entries(state.entries)) if (found.has(key)) entries[key] = entry;
-      for (const key of Object.keys(state.entries)) if (!found.has(key)) log(`${key}: gone, its pin is dropped`);
+      for (const [key, entry] of Object.entries(state.entries)) {
+        if (found.has(key)) entries[key] = entry;
+        // a run scoped to some directories keeps what it did not scan: gone means not found where this run looked
+        else if (!scannedBy(settings, entry)) {
+          entries[key] = entry;
+          if (pass === 0) log(`${key}: not under a directory this run scans; its pin is kept`);
+        } else log(`${key}: gone, its pin is dropped`);
+      }
       for (const item of items) {
         const recorded = recordedAsIs(item, entries[item.key]);
         if (recorded.same && options.force !== true) {

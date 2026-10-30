@@ -523,6 +523,8 @@ qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, distributed 
 A plugin that is no longer found, or whose bytes changed, leaves nothing behind: its pin, its qualification
 record (with the probe output copied beside it) and its descriptor are removed. Records the sync did not write
 stay, and nothing is removed in a run that could not read a bundle, so a half-written install is no uninstall.
+A run looks only where its settings point: a plugin outside every directory of its format that the run scans is
+kept as it is (a run scoped to LV2 keeps every CLAP pin), and only one missing from a directory it scans is gone.
 A running plugin-hostd is told with `pin_clear`.
 
 When plugin-hostd answers on `hostd_port`, the changed pins are also sent to it with `pin_set` and apply at
