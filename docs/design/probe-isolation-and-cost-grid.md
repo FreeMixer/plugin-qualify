@@ -80,7 +80,8 @@ so an out-of-memory kill is a recorded outcome, not a lost record.
   the grid does not hold.
 - The memory bound is the runner's data limit (`RLIMIT_DATA` on the child), half of the RAM by default; the
   interposer exits 121 on a refused allocation and that, or a `SIGKILL` the runner did not send, is `probe.oom`.
-  A cgroup bound would also count page cache and shared memory; the runner does not offer one yet.
+  Since memory-footprint-and-budget.md the runner sets `memory.max` on the child where the controller is delegated, which is
+  `probe.memory-limit`; the data limit is what it falls back to.
 
 ## Not decided here
 
