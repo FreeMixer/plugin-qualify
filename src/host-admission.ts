@@ -24,10 +24,15 @@ export function admittedHostOf(profile: HostProfile): AdmittedHost | undefined {
 
 /**
  * plugin-hostd's LV2 adapter, omx-clap-host: an LV2 plugin is run under it once, as under mod-host, and the record
- * carries the outcome as its own step beside the verdicts (plugin-qualify#223), which it does not change: the
- * omx-clap-host verdict of an LV2 plugin stays the in-process measurement. It is what the removal of mod-host counts.
+ * carries the outcome as its own step (plugin-qualify#223). The run decides the omx-clap-host verdict of an LV2
+ * plugin, the isolated tier, as a mod-host run decides mod-host's; a CLAP plugin's stays the measurement.
  */
 export const ADAPTER_HOST = "omx-clap-host";
+
+/** Whether a run under the profile's host decides its verdict for a plugin of this format. */
+export function runDecides(profile: HostProfile, format: string): boolean {
+  return admittedHostOf(profile) !== undefined || (profile.id === ADAPTER_HOST && format === "lv2");
+}
 
 /** What running the plugin under one host came to. */
 export interface HostAdmission {

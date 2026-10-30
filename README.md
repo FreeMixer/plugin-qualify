@@ -417,9 +417,11 @@ death on mod-host the next admission starts a fresh host. `plugin-qualify judge`
 that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"`.
 
 **The console's two tiers.** Every record carries `tiers`: the *in-process* verdict (`openmixer-console`) and the
-*isolated* verdict (`mod-host` for LV2, `omx-clap-host` for CLAP), `offeredOn` (the tiers whose verdict qualified)
-and, when neither did, `dimmed` with the reason. A plugin that kills the isolated host and qualifies in-process is
-offered in-process only. The tiers are judged for every plugin whether or not `--host-profile` names them.
+*isolated* verdict (`omx-clap-host`, an LV2 plugin through plugin-hostd's LV2 adapter), `offeredOn` (the tiers whose
+verdict qualified) and, when neither did, `dimmed` with the reason. An LV2 plugin is run once under the adapter, and
+that run decides its `omx-clap-host` verdict as a mod-host run decides mod-host's. A plugin that kills the isolated
+host and qualifies in-process is offered in-process only. The tiers are judged for every plugin whether or not
+`--host-profile` names them; mod-host and jalv are run only when `--host-profile` asks for them.
 
 `omx-clap-host` offers a CLAP plugin the console's six host extensions and three more,
 `clap.preset-load/2`, `clap.track-info/1` and `clap.remote-controls/2`. A CLAP plugin judged
