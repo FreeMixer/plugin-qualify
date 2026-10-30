@@ -28,6 +28,7 @@ import {
 } from "./clap-qualify.js";
 import { qualifyClap } from "./direct-prober.support.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
+import { pinVerdictOf } from "./pins-file.js";
 import { clapFeatureReasons } from "./hosting-suitability.js";
 import {
   OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
@@ -354,14 +355,14 @@ describe("clap-qualify, live — an instrument is played: the note sweep", () =>
     expect(doc.measured.noteSweep).toEqual(l!.noteSweep);
   });
 
-  live("a synth that allocates on note on is clean at rest and unsuitable once played", () => {
+  live("a synth that allocates on note on is clean at rest and conditional once played", () => {
     const [l] = qualifyClap(SYNTH_ALLOC, undefined, { rates: QUALIFY_RATES });
     // the parameter sweep plays no note: it sees nothing
     expect(l!.rtSafety).toMatchObject({ allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0 });
     expect(l!.noteSweep.allocationsInRun).toBeGreaterThan(0);
     expect(l!.noteSweep.events).toContain("malloc");
     const doc = rtSafetyDocument(l!);
-    expect(doc.verdict).toMatchObject({ rating: "unsuitable", rtSafe: false });
+    expect(doc.verdict).toMatchObject({ rating: "conditional", rtSafe: false });
     expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyNotesViolations);
   });
 
@@ -547,11 +548,13 @@ describe("the note sweep in the line and the document", () => {
     expect(() => parseClapQualifyLine(JSON.stringify({ ...JSON.parse(line()), noteSweep: undefined }))).toThrow(/noteSweep/);
   });
 
-  it("an allocation, a lock or a syscall while played is unsuitable, under its own code", () => {
+  it("an allocation, a lock or a syscall while played is conditional, under its own code", () => {
     for (const patch of [{ allocationsInRun: 2 }, { locksInRun: 1 }, { syscallsInRun: 1 }]) {
       const doc = rtSafetyDocument(parseClapQualifyLine(line({ noteSweep: { ...played, ...patch }, clap: instrument })));
-      expect(doc.verdict.rating).toBe("unsuitable");
+      expect(doc.verdict.rating).toBe("conditional");
       expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyNotesViolations);
+      // the pin says isolated: its own worker, never refused
+      expect(pinVerdictOf(doc.verdict.rating)).toBe("isolated");
     }
     const errors = rtSafetyDocument(parseClapQualifyLine(line({ noteSweep: { ...played, processErrors: 1 }, clap: instrument })));
     expect(errors.verdict.deciding?.code).toBe(HOSTING_CODE.clapProcessError);

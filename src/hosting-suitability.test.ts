@@ -842,11 +842,11 @@ describe("host profiles — the host is a declared input, the measurements are n
     }
   });
 
-  it("an instrument host reads the note sweep: unplayed is unknown, an allocation while played unsuitable", () => {
+  it("an instrument host reads the note sweep: unplayed is unknown, an allocation while played conditional", () => {
     const unplayed = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true });
     expect(onJalv(unplayed)).toMatchObject({ rating: "unknown", deciding: { code: HOSTING_CODE.rtSafetyNotesUnmeasured } });
     const dirty = measured({ audioInputs: 0, audioOutputs: 2, hasMidiIn: true }, { rtSafety: { noteSweep: { ...PLAYED, allocationsInRun: 4608 } } });
-    expect(onJalv(dirty)).toMatchObject({ rating: "unsuitable", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
+    expect(onJalv(dirty)).toMatchObject({ rating: "conditional", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
     // the console plays no note into an insert: it reads no note sweep, so an effect with a MIDI input keeps its verdict
     const midiEffect = measured({ hasMidiIn: true });
     expect(codes(classify(midiEffect))).not.toContain(HOSTING_CODE.rtSafetyNotesUnmeasured);

@@ -207,8 +207,8 @@ allocation, lock, syscall or main-thread host call from `process()`, **unsuitabl
 quiet until it is played, so a plugin with a note input is also played, at every rate and under a
 count of its own: a chord, the pitch bent and a controller moved, pressure, the chord let go, a
 burst of 32 note ons in one block and their offs, all notes off, in the dialect its note input
-reads (CLAP's, else MIDI's). An allocation, lock or syscall while it plays is **unsuitable**
-(`hosting.rt-safety.violations-under-notes`); an instrument that could not be played under the
+reads (CLAP's, else MIDI's). An allocation, lock or syscall while it plays is **conditional**, isolated in the pin like the same
+violation in the run (`hosting.rt-safety.violations-under-notes`); an instrument that could not be played under the
 interposer is **unknown** (`hosting.rt-safety.notes-unmeasured`). `--out` writes the qualification records and the probe outputs they judged (see
 "Judging a probe output" below), one pair per plugin binary and offered host extensions. Each plugin's pin is
 an `integrity` block in the probe output: the `.clap`'s SHA-256 by its file name and the parameter-layout
