@@ -512,6 +512,45 @@ describe("plugin-hostd in its default mode, on the pin file the sweep wrote", ()
 
 // --- the lock (#222) --------------------------------------------------------------------------------------------------
 
+describe("a scoped run (#247)", () => {
+  it("keeps the pins of what it did not scan, and drops one gone from a directory it scans", async () => {
+    const root = mkdtempSync(join(scratch, "scoped-"));
+    for (const d of ["clap-scanned", "clap-elsewhere", "lv2-scanned", "lv2-elsewhere"]) mkdirSync(join(root, d));
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const values = new Map([
+      ["clap_path", join(root, "clap-scanned")], ["clap_extra", ""], ["lv2_path", join(root, "lv2-scanned")], ["lv2_extra", ""],
+      ["pin_file", join(root, "q.pins")], ["qualification_dir", join(root, "qualification")], ["descriptor_dir", join(root, "descriptors")],
+      ["state_file", join(root, "state", "qualify-sync.json")], ["hostd_port", "0"], ["host_class", ""], ["settle_s", "0"],
+    ]);
+    const r = resolveSyncSettings(values, args.args, {}, root);
+    if (!r.ok) throw new Error(r.error);
+    const entry = (format: "clap" | "lv2", entryRoot: string, uri: string) => ({
+      format, root: entryRoot, files: [], plugins: [{ uri, outcome: "qualified" }], qualifiedAt: "2026-10-30T00:00:00Z", seconds: 1,
+    });
+    const elsewhereClap = `clap:${join(root, "clap-elsewhere", "Surge XT.clap")}`;
+    const goneClap = `clap:${join(root, "clap-scanned", "removed.clap")}`;
+    const elsewhereLv2 = "lv2:urn:test:elsewhere";
+    const before: SyncState = {
+      schema: "plugin-qualify.sync-state/1",
+      entries: {
+        [elsewhereClap]: entry("clap", join(root, "clap-elsewhere"), `${elsewhereClap}#surge`),
+        [goneClap]: entry("clap", join(root, "clap-scanned"), `${goneClap}#gone`),
+        [elsewhereLv2]: entry("lv2", join(root, "lv2-elsewhere", "e.lv2"), "urn:test:elsewhere"),
+      },
+    } as unknown as SyncState;
+    mkdirSync(join(root, "state"));
+    writeFileSync(r.settings.stateFile, JSON.stringify(before));
+    const lines: string[] = [];
+    await runSync(r.settings, { log: (l) => lines.push(l) });
+    const after = JSON.parse(readFileSync(r.settings.stateFile, "utf8")) as SyncState;
+    expect(Object.keys(after.entries).sort()).toEqual([elsewhereClap, elsewhereLv2].sort());
+    expect(lines).toContain(`${goneClap}: gone, its pin is dropped`);
+    expect(lines).toContain(`${elsewhereClap}: not under a directory this run scans; its pin is kept`);
+    expect(lines.some((l) => l.startsWith(`${elsewhereLv2}: gone`))).toBe(false);
+  });
+});
+
 describe("the lock", () => {
   /** Settings over empty plugin directories in a tree of their own; `settle_s` keeps a run in the lock for a while. */
   function lockedSettings(settleS: string): SyncSettings {

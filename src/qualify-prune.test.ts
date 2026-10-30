@@ -81,7 +81,8 @@ function machine(extraLv2Dir?: string) {
   });
   const state: SyncState = {
     schema: SYNC_STATE_SCHEMA,
-    entries: { [`lv2:${GONE}`]: entry(GONE, join(root, "gone.lv2"), [], "b"), [item.key]: entry(KEPT, item.root, digestFiles(item.root, item.files)!, "a") },
+    // the uninstalled bundle lived in a directory the run scans (#247: a run drops only what it looked for)
+    entries: { [`lv2:${GONE}`]: entry(GONE, join(lv2, "gone.lv2"), [], "b"), [item.key]: entry(KEPT, item.root, digestFiles(item.root, item.files)!, "a") },
   };
   writeFileSync(join(root, "state.json"), JSON.stringify(state));
   writeFileSync(join(root, "qualified.pins"), `# written by plugin-qualify-sync\n${PIN_GONE}\n`);
