@@ -9,6 +9,12 @@ if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
 	deb-systemd-invoke start plugin-qualify-sync.path >/dev/null || true
 fi
 
+# an upgrade: the pins on disk get the files this plugin-hostd collects, measuring nothing (plugin-qualify#239); a
+# pin written before 0.17.3 lacks an LV2's preset files and its add answers -509 until then
+if [ "$1" = "configure" ] && [ -n "$2" ] && [ -s /var/lib/omx/qualify-sync.json ]; then
+	plugin-qualify-sync --system --refresh-pins --no-wait >/dev/null 2>&1 || true
+fi
+
 # a plugin package was installed, upgraded or removed in a standard folder (debian/triggers): scan once
 if [ "$1" = "triggered" ]; then
 	/usr/lib/plugin-qualify/trigger-scan

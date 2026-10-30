@@ -126,6 +126,8 @@ export interface SyncArgs {
   readonly force: boolean;
   readonly noDistributed: boolean;
   readonly noWait: boolean;
+  /** `--refresh-pins`: refresh the pins' files from plugin-hostd and measure nothing (the package's upgrade runs it). */
+  readonly refreshPins: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -141,6 +143,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let force = false;
   let noDistributed = false;
   let noWait = false;
+  let refreshPinsOnly = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -148,6 +151,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--force") force = true;
     else if (a === "--no-distributed") noDistributed = true;
     else if (a === "--no-wait") noWait = true;
+    else if (a === "--refresh-pins") refreshPinsOnly = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -157,7 +161,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, help, values } };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -170,6 +174,7 @@ export function syncHelpText(): string {
     "  --force                             qualify every plugin again, recorded or not; no distributed record is read",
     "  --no-wait                           a run in progress is not waited for: exit 0, and the holder runs once more at its end",
     "  --no-distributed                    read no distributed record: every plugin not recorded is measured",
+    "  --refresh-pins                      only bring every pin's files up to the ones plugin-hostd names, measuring nothing",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
     ...rows,
@@ -513,6 +518,42 @@ function withHostdFiles(ctx: SyncContext, pin: PinEntry | undefined): PinEntry |
     return undefined;
   }
   return { ...pin, integrity: { ...pin.integrity, files: r.files } };
+}
+
+/**
+ * Every pin of the state with the files plugin-hostd collects for its plugin now, measured again by nothing
+ * (plugin-qualify#239). A pin written before plugin-qualify 0.17.3 holds the probe's view of an LV2 (binary, plugin
+ * TTL, manifest) and not the preset files plugin-hostd 0.15.0 also checks, so its add answers -509 until the plugin
+ * is qualified again: hours on a device with hundreds. The new list replaces the old one when no file both lists
+ * hold changed its hash, so the verdict stands for the same bytes; a changed file is the sync's to measure again,
+ * and that pin is left as it is. A plugin plugin-hostd cannot name the files of keeps its pin.
+ */
+export function refreshPins(ctx: SyncContext, state: SyncState): { state: SyncState; refreshed: string[] } {
+  const refreshed: string[] = [];
+  const entries: Record<string, SyncEntry> = {};
+  for (const [key, entry] of Object.entries(state.entries)) {
+    const plugins = entry.plugins.map((plugin) => {
+      const pin = plugin.pin;
+      if (pin === undefined || pin.integrity.files === undefined) return plugin;
+      const r = hostdPinFiles(pin.uri, ctx.settings.lv2Dirs, ctx.env, ...(ctx.pinFilesRun === undefined ? [] : [ctx.pinFilesRun]));
+      if (!r.ok) return plugin;
+      const old = new Map(pin.integrity.files.map((f) => [f.path, f.sha256]));
+      const changed = r.files.filter((f) => old.has(f.path) && old.get(f.path) !== f.sha256).map((f) => f.path);
+      const same = r.files.length === old.size && r.files.every((f) => old.get(f.path) === f.sha256);
+      if (same) return plugin;
+      if (changed.length > 0) {
+        ctx.log(`${pin.uri}: ${changed.join(", ")} changed since it was qualified; its pin waits for the sync`);
+        return plugin;
+      }
+      const added = r.files.filter((f) => !old.has(f.path)).map((f) => f.path);
+      const gone = [...old.keys()].filter((path) => !r.files.some((f) => f.path === path));
+      ctx.log(`${pin.uri}: pin files refreshed${added.length ? `, ${added.join(", ")} added` : ""}${gone.length ? `, ${gone.join(", ")} gone` : ""}`);
+      refreshed.push(pin.uri);
+      return { ...plugin, pin: { ...pin, integrity: { ...pin.integrity, files: r.files } } };
+    });
+    entries[key] = refreshed.length === 0 ? entry : { ...entry, plugins };
+  }
+  return { state: refreshed.length === 0 ? state : { schema: SYNC_STATE_SCHEMA, entries }, refreshed };
 }
 
 /** A judged run's outcome for the host: qualified, refused, or why it was not measured. */
@@ -941,6 +982,8 @@ export interface SyncSummary {
   readonly seconds: number;
   /** The pins a running daemon took, when one answered. */
   readonly sent?: number;
+  /** The pins whose files were refreshed from plugin-hostd without a measurement (plugin-qualify#239). */
+  readonly refreshed?: number;
 }
 
 /**
@@ -977,7 +1020,7 @@ export function descriptorAccessProblems(dir: string): string[] {
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
@@ -1021,6 +1064,10 @@ export const pendingMarker = (stateFile: string): string => join(dirname(stateFi
 
 export interface SyncRunOptions {
   readonly force?: boolean;
+  /** `--refresh-pins`: only refresh the pins' files from plugin-hostd and send the changed ones; measure nothing. */
+  readonly refreshOnly?: boolean;
+  /** The run of `plugin-hostd --pin-files`, a stand-in in tests. */
+  readonly pinFilesRun?: PinFilesRun;
   /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
   readonly wait?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -1064,6 +1111,7 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
 
 function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
   const sent = (a.sent ?? 0) + (b.sent ?? 0);
+  const refreshed = (a.refreshed ?? 0) + (b.refreshed ?? 0);
   return {
     qualified: a.qualified + b.qualified,
     skipped: a.skipped + b.skipped,
@@ -1074,6 +1122,7 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     distributed: a.distributed + b.distributed,
     seconds: a.seconds + b.seconds,
     ...(sent === 0 ? {} : { sent }),
+    ...(refreshed === 0 ? {} : { refreshed }),
   };
 }
 
@@ -1085,12 +1134,19 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
 async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promise<SyncSummary> {
   const log = options.log ?? (() => {});
   const env = options.env ?? process.env;
-  log("sync run begins");
+  log(options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
+    const ctx: SyncContext = { settings, env, log, ...(options.pinFilesRun === undefined ? {} : { pinFilesRun: options.pinFilesRun }) };
+    // the pins first, before the quiet wait and any measurement: an upgrade of plugin-hostd that collects more files
+    // than the pins on disk hold refuses those plugins until their pins name them (plugin-qualify#239)
+    const fresh = refreshPins(ctx, readSyncState(settings.stateFile, log));
+    if (fresh.refreshed.length > 0) {
+      writeFileWhole(settings.stateFile, `${JSON.stringify(fresh.state, null, 1)}\n`);
+    }
+    if (options.refreshOnly === true) return sendRefreshed(settings, fresh.state, fresh.refreshed.length, started, log);
     await waitQuiet(dirs, settings.settleS, log);
-    const ctx: SyncContext = { settings, env, log };
     const count = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0, distributed: 0 };
     const layer = distributedLayerOf(settings, options.force === true, log);
     let before: string;
@@ -1099,7 +1155,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     } catch {
       before = "";
     }
-    let state = readSyncState(settings.stateFile, log);
+    let state = fresh.state;
     const stateBefore = state;
     let unreadable = false;
     const lv2Pinned: string[] = [];
@@ -1173,8 +1229,31 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     const replies = "replies" in sent ? sent.replies : [];
     for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
     const taken = replies.filter((r) => r === "resp 0").length;
-    return { ...count, seconds: (Date.now() - started) / 1000, ...(taken === 0 ? {} : { sent: taken }) };
+    return {
+      ...count,
+      seconds: (Date.now() - started) / 1000,
+      ...(taken === 0 ? {} : { sent: taken }),
+      ...(fresh.refreshed.length === 0 ? {} : { refreshed: fresh.refreshed.length }),
+    };
   }
+}
+
+/** The end of a `--refresh-pins` run: the pin file from the refreshed state, and its changed pins to a running daemon. */
+async function sendRefreshed(settings: SyncSettings, state: SyncState, refreshed: number, started: number, log: (line: string) => void): Promise<SyncSummary> {
+  let before = "";
+  try {
+    before = readFileSync(settings.pinFile, "utf8");
+  } catch {
+    before = "";
+  }
+  const after = syncPinsText(state);
+  if (after !== before) writeFileWhole(settings.pinFile, after);
+  const changed = changedPinLines(before, after);
+  const sent = await sendPins(settings.hostdPort, settings.hostdFeedbackPort, changed);
+  const taken = "replies" in sent ? sent.replies.filter((r) => r === "resp 0").length : 0;
+  if ("unsent" in sent && changed.length > 0) log(`the ${String(changed.length)} changed pins apply at plugin-hostd's next start, from the pin file`);
+  const zero = { qualified: 0, skipped: 0, refused: 0, crashed: 0, hung: 0, unmeasured: 0, distributed: 0 };
+  return { ...zero, seconds: (Date.now() - started) / 1000, ...(taken === 0 ? {} : { sent: taken }), ...(refreshed === 0 ? {} : { refreshed }) };
 }
 
 /** What a failed descriptor pass says: plainly, once, when the lilv binding is what is missing (a suite without python3-lilv). */

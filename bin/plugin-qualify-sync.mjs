@@ -51,7 +51,7 @@ log(
     `memory ${s.memory === undefined ? "unbounded" : `${String(s.memory.bytes)} bytes`}`,
 );
 try {
-  const summary = await runSync(s, { force: parsed.args.force, wait: !parsed.args.noWait, log });
+  const summary = await runSync(s, { force: parsed.args.force, wait: !parsed.args.noWait, refreshOnly: parsed.args.refreshPins, log });
   if (summary !== undefined) {
     process.stdout.write(`${summaryLine(summary)}\n`);
     log(`pins in ${s.pinFile}${summary.sent ? `, ${String(summary.sent)} sent to plugin-hostd` : ""}`);
