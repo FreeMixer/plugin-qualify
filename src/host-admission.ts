@@ -29,9 +29,13 @@ export function admittedHostOf(profile: HostProfile): AdmittedHost | undefined {
  */
 export const ADAPTER_HOST = "omx-clap-host";
 
-/** Whether a run under the profile's host decides its verdict for a plugin of this format. */
-export function runDecides(profile: HostProfile, format: string): boolean {
-  return admittedHostOf(profile) !== undefined || (profile.id === ADAPTER_HOST && format === "lv2");
+/**
+ * Whether this run decides the profile's verdict for a plugin of this format. A mod-host or jalv run always does, an
+ * unmeasured one making the verdict unknown; the adapter's only when it measured, since the omx-clap-host verdict
+ * otherwise stands on the measurement.
+ */
+export function runDecides(profile: HostProfile, format: string, admission: HostAdmission): boolean {
+  return admittedHostOf(profile) !== undefined || (profile.id === ADAPTER_HOST && format === "lv2" && admission.measured);
 }
 
 /** What running the plugin under one host came to. */
@@ -67,12 +71,16 @@ export interface ModHostStep {
 /** What `tools/mod-host-admit.mjs` printed. */
 export interface ModHostRun {
   readonly installed: boolean;
+  /** False when the host never took a connection (omx-clap-host with no JACK server): no plugin was loaded. */
+  readonly started?: boolean;
   readonly steps: readonly ModHostStep[];
 }
 
 /** The verdict of a run of a host that speaks mod-host's protocol: the first step that did not answer `resp 0` decides. */
 export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAdmission {
   if (!run.installed) return notInstalled(host);
+  // the host never listened, so the plugin was never loaded: nothing was learned about it
+  if (run.started === false) return { host, measured: false, admitted: false, code: `${host}.not-started`, params: {} };
   for (const s of run.steps) {
     if (s.died !== undefined) {
       if (s.died.startsWith("SIG")) return refused(host, `signal-${s.died}`, { step: s.cmd });

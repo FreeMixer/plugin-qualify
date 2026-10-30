@@ -286,7 +286,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       reasons = [...reasons, { dimension: "memory", rating: "unknown", code: PROBE_OOM, params: { rate: cell.rate, quantum: cell.quantum, ...memoryParams(cell) } }];
     }
     const admission = facts.admissions?.[profile.id];
-    const ran = admission !== undefined && runDecides(profile, output.plugin.format);
+    const ran = admission !== undefined && runDecides(profile, output.plugin.format, admission);
     if (ran && admission !== undefined) {
       if (!admission.measured || !admission.admitted) {
         // the host could not be run, or the plugin did not survive it: the run decides, whatever the declaration says

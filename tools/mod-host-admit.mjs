@@ -40,7 +40,8 @@ async function connect() {
 async function main() {
   if ((await Promise.race([spawnFailed, sleep(200).then(() => undefined)])) === "ENOENT") return { installed: false, steps: [] };
   const sock = await connect();
-  if (sock === undefined) return { installed: true, steps: [{ cmd: "add", died: hostEnd ?? "closed" }] };
+  // the host never listened (omx-clap-host with no JACK server): the plugin was never loaded
+  if (sock === undefined) return { installed: true, started: false, steps: [] };
   let buffer = "";
   let closed = false;
   sock.on("data", (d) => (buffer += d.toString()));

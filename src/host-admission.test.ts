@@ -300,6 +300,19 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
     expect(asked).toEqual([]);
   });
 
+  it("a host that never started (no JACK server) is no evidence: the LV2 omx-clap-host verdict stays the measurement's", () => {
+    const run = { installed: true, started: false, steps: [] };
+    expect(classifyProtocolRun(ADAPTER_HOST, run)).toMatchObject({ measured: false, admitted: false, code: "omx-clap-host.not-started" });
+    expect(classifyModHostRun(run)).toMatchObject({ measured: false, code: "mod-host.not-started" });
+    const unstarted = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, run) };
+    const output = readFixture("success-msi");
+    const lv2 = { ...output, plugin: { ...output.plugin, format: "lv2" as const, id: "urn:x:lv2" } };
+    const asIf = judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE]);
+    const j = judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE], { admissions: unstarted });
+    expect(j.hosts[0]!.arm).toBe("declaration");
+    expect(j.hosts[0]!.verdict).toEqual(asIf.hosts[0]!.verdict);
+  });
+
   it("decides an asked omx-clap-host verdict of an LV2 plugin by the run, and never a CLAP plugin's", () => {
     const refused = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -512 }] }) };
     const output = readFixture("success-msi");
