@@ -12,6 +12,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
+import { addressSpaceLimited } from "./direct-limit.js";
 import {
   ClapQualifyError,
   clapQualifyTools,
@@ -47,7 +48,9 @@ export type ClapQualifyRun = (
 ) => ClapQualifyRunResult;
 
 const spawnQualify: ClapQualifyRun = (tool, args, env, timeoutMs) => {
-  const r = spawnSync(tool, [...args], { encoding: "utf8", env: { ...env }, timeout: timeoutMs, maxBuffer: 64 << 20 });
+  // a direct spawn has no runner to give it a cgroup: the address space is its hard limit
+  const limited = addressSpaceLimited(tool, args);
+  const r = spawnSync(limited.command, [...limited.args], { encoding: "utf8", env: { ...env, ...limited.env }, timeout: timeoutMs, maxBuffer: 64 << 20 });
   return {
     status: r.status,
     signal: r.signal,

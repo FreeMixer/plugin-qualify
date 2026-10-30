@@ -42,6 +42,7 @@ Usage:
 import argparse
 import json
 import os
+import resource
 import select
 import shlex
 import subprocess
@@ -53,9 +54,12 @@ from collections import namedtuple
 # declarations (with the rate list and timeouts), generated from `src/qualify-declarations.ts` because this script cannot import
 # a TS module (2026-09-17 declare-derive audit, F8) — see `_declarations.py`'s own header for the
 # regenerate/verify commands.
-from _declarations import (BOOT_TIMEOUT_S, COST_REFERENCE_RATE, COST_TIMEOUT_S,
+from _declarations import (ADDRESS_SPACE_LIMIT_RAM_FRACTION, BOOT_TIMEOUT_S, COST_REFERENCE_RATE, COST_TIMEOUT_S,
                            MEASURE_BASE_RATE, OPERATIONAL_RATE_FLOOR, PLUGIN_TIMEOUT_S,
                            QUALIFY_RATES, QUANTUM_FRAMES)
+
+# the outcome of a worker past its address space, the same word as a direct spawn of plugin-qualify's (src/direct-limit.ts)
+MEMORY_LIMIT_EXCEEDED = "memory-limit-exceeded"
 
 try:  # numpy is only needed by the worker (and as a fast path in the pure helpers)
     import numpy as _np
@@ -1908,6 +1912,8 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
                         host, uri, declared, res["measuredFrames"], job["sweep"])
                     if swept:
                         res["sweep"] = swept
+            except MemoryError:
+                res = {"error": MEMORY_LIMIT_EXCEEDED}
             except Exception as e:  # noqa: BLE001 - report, don't die
                 res = {"error": f"probe error: {e}"}
             if "measuredFrames" in res:
@@ -1924,6 +1930,8 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
         symbol = arg
         try:
             frames, reason = probe_one(host, uri, symbol)
+        except MemoryError:
+            frames, reason = None, MEMORY_LIMIT_EXCEEDED
         except Exception as e:  # noqa: BLE001 - report, don't die, on python-level errors
             frames, reason = None, f"probe error: {e}"
         if frames is None:
@@ -1935,6 +1943,20 @@ def worker_main(rate, block, measure=False, cost=False, cpu=None,
 # --- the parent: batch loop with crash containment -----------------------------
 
 
+def address_space_limit(ram_bytes=None):
+    """What the worker runs under: RLIMIT_AS at ADDRESS_SPACE_LIMIT_RAM_FRACTION of the machine's RAM, since a direct
+    spawn has no runner to give it a cgroup; set between fork and exec. A plugin past it fails its allocation, which the
+    worker reports as `MEMORY_LIMIT_EXCEEDED` when Python sees it and which crash containment takes when the plugin dies."""
+    if ram_bytes is None:
+        ram_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    limit = int(ram_bytes * ADDRESS_SPACE_LIMIT_RAM_FRACTION)
+
+    def apply():
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    return apply
+
+
 class _Worker:
     """Handle on one worker subprocess: spawn, job/reply exchange, kill."""
 
@@ -1942,6 +1964,7 @@ class _Worker:
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            preexec_fn=address_space_limit(),
         )
         ready = self._read_line(boot_timeout)
         parsed = parse_worker_line(ready)

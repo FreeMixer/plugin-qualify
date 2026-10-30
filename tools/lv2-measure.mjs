@@ -60,6 +60,7 @@ import {
   urisFromScan,
 } from "../dist/measurement/index.js";
 import { LV2_HOSTING_TIMEOUT_S, LV2_MEASURE_TOOL_NAME, RT_INTERPOSE_NAME } from "../dist/qualify-declarations.js";
+import { addressSpaceLimited, directOutcome } from "../dist/direct-limit.js";
 import { halfPopulatedRefusal, locateNativeTools } from "../dist/tool-paths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -135,9 +136,10 @@ function runHosting(step, uris, onProgress) {
   const lines = [];
   onProgress(step, { kind: "phase", plugins: uris.length, rate: Number(step.args[0]) });
   for (const uri of uris) {
-    const r = spawnSync(step.command, [uri, ...step.args], {
+    const limited = addressSpaceLimited(step.command, [uri, ...step.args]);
+    const r = spawnSync(limited.command, [...limited.args], {
       encoding: "utf8",
-      env: { ...process.env, ...step.env },
+      env: { ...process.env, ...step.env, ...limited.env },
       stdio: ["ignore", "pipe", "inherit"],
       timeout: LV2_HOSTING_TIMEOUT_S * 1000,
       maxBuffer: 16 << 20,
@@ -149,9 +151,10 @@ function runHosting(step, uris, onProgress) {
       ...(r.error?.code === "ETIMEDOUT" ? { timedOut: true } : {}),
       stdout: r.stdout ?? "",
     });
-    process.stderr.write(`  ${uri}: exit ${line.exit}\n`);
+    const limitHit = directOutcome(r.status, limited);
+    process.stderr.write(`  ${uri}: exit ${line.exit}${limitHit === undefined ? "" : ` (${limitHit.outcome})`}\n`);
     onProgress(step, { kind: "plugin" });
-    lines.push(line);
+    lines.push(limitHit === undefined ? line : { ...line, ...limitHit });
   }
   writeFileSync(step.produces, lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
   return lines;
