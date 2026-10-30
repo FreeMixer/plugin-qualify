@@ -10,7 +10,7 @@
 #
 # Runs in the distribution's container after the package is installed, with an empty environment
 # (no OMX_* setting, no LV2_PATH: the LV2 bundles go in ~/.lv2, where lilv looks). The safe CLAP
-# fixture must qualify (exit 0, suitable), the unsafe one must not (exit 1, unsuitable), and the
+# fixture must qualify (exit 0, suitable), the unsafe one must not (exit 1, rated conditional, its pin verdict=isolated: it runs alone, it is never refused), and the
 # installed prober must print the fixture's integrity pin. The installed lv2-measure.mjs must measure
 # the LV2 fixtures' hosting dimensions through the installed measurer: no allocation in the safe
 # one's run(), some in the unsafe one's, each with its pin. The installed LV2 host probe must run.
@@ -39,11 +39,12 @@ for r in "${records[@]}"; do
 done
 
 set +e
-bare plugin-qualify "$unsafe" | tee "$out/unsafe.txt"
+bare plugin-qualify --pins "$out/unsafe.pins" "$unsafe" | tee "$out/unsafe.txt"
 rc=${PIPESTATUS[0]}
 set -e
 [ "$rc" -eq 1 ] || fail "plugin-qualify $unsafe exited $rc, not 1"
-grep -Eq '^urn:clap:\S+ +unsuitable ' "$out/unsafe.txt" || fail "$unsafe is not unsuitable"
+grep -Eq '^urn:clap:\S+ +conditional +hosting\.rt-safety\.violations-in-run ' "$out/unsafe.txt" || fail "$unsafe is not conditional on its RT-safety violations: $(cat "$out/unsafe.txt")"
+[ "$(grep -c '^pin_set .* verdict=isolated$' "$out/unsafe.pins")" -eq 1 ] || fail "the pin of $unsafe does not say verdict=isolated: $(cat "$out/unsafe.pins")"
 
 # the pin a console hands plugin-hostd: the installed prober prints it beside the measurement
 tool=$( (dpkg -L plugin-qualify 2>/dev/null || rpm -ql plugin-qualify) | grep '/clap-qualify$' || true)
