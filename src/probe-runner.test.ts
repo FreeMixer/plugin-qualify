@@ -251,8 +251,8 @@ describe("qualifyTargets: a pass over the targets", () => {
     expect(calls[0]?.args.at(-1)).toBe("lv2:urn:example:zero-path");
     expect(calls[0]?.preload).toBeUndefined();
     expect(pass.verdicts.map((v) => [v.uri, v.host, v.rating, v.deciding])).toEqual([
-      [LV2.uri, "openmixer-console", "unsuitable", HOSTING_CODE.rtSafetyViolations],
-      [LV2.uri, "jalv", "unsuitable", HOSTING_CODE.rtSafetyViolations],
+      [LV2.uri, "openmixer-console", "conditional", HOSTING_CODE.rtSafetyViolations],
+      [LV2.uri, "jalv", "conditional", HOSTING_CODE.rtSafetyViolations],
     ]);
     expect(pass.documents).toEqual([]);
   });

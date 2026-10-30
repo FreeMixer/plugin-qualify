@@ -250,10 +250,10 @@ describe("a fixture plugin qualified into a pins file", () => {
     expect(pin.verdict).toBe("in-process");
   });
 
-  live("the RT-unsafe fixture is pinned and refused", () => {
+  live("the RT-unsafe fixture is pinned isolated, never refused (#196)", () => {
     const unsafeId = "org.freemixer.plugin-qualify.fixture.rt-unsafe";
     const { text } = pinsOf(UNSAFE, unsafeId);
-    expect(parsePinLine(text.split("\n")[1]!)!.verdict).toBe("refused");
+    expect(parsePinLine(text.split("\n")[1]!)!.verdict).toBe("isolated");
   });
 });
 

@@ -684,9 +684,11 @@ export function rtSafetyReasons(
   if (m.variable === true) {
     return [reason("rtSafety", "objective", "unknown", HOSTING_CODE.rtSafetyNotReproducible)];
   }
+  // RT-unsafe is a hosting mode, never a refusal (#196): the plugin loads and runs in a worker of its own, never
+  // grouped with RT-safe plugins; conditional is isolated in the pin. Crashes, hangs and load failures stay unsuitable.
   if (rtSafetyViolating(m)) {
     return [
-      reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.rtSafetyViolations, {
+      reason("rtSafety", "objective", "conditional", HOSTING_CODE.rtSafetyViolations, {
         allocations: m.allocationsInRun ?? 0,
         syscalls: m.syscallsInRun ?? 0,
         locks: m.locksInRun ?? 0,
@@ -1012,7 +1014,8 @@ export function clapFeatureReasons(
 /**
  * The CLAP additions to `rtSafety` (CLAP spec §3): the interposer's counts are read by
  * `rtSafetyReasons` exactly as for an LV2; these are the two violations only a CLAP can commit
- * — a strict thread-check violation and a `CLAP_PROCESS_ERROR` — each `unsuitable`. A sweep
+ * — a strict thread-check violation (`conditional`: the plugin runs isolated, #196) and a `CLAP_PROCESS_ERROR`
+ * (`unsuitable`). A sweep
  * that made no `process()` call measured nothing.
  */
 export function clapRtReasons(clap: PluginClapMeasurement | undefined): readonly HostingReason[] {
@@ -1021,7 +1024,7 @@ export function clapRtReasons(clap: PluginClapMeasurement | undefined): readonly
   }
   const out: HostingReason[] = [];
   if (clap.threadViolations > 0) {
-    out.push(reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.clapThreadViolation, { violations: clap.threadViolations }));
+    out.push(reason("rtSafety", "objective", "conditional", HOSTING_CODE.clapThreadViolation, { violations: clap.threadViolations }));
   }
   if (clap.processErrors > 0) {
     out.push(reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.clapProcessError, { errors: clap.processErrors }));

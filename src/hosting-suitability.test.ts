@@ -9,6 +9,7 @@
  * desk's audio runs on, so absence of evidence must never read as evidence of safety. Most of
  * this file is therefore about what does NOT earn `in-process`.
  */
+import { pinVerdictOf } from "./pins-file.js";
 import { describe, it, expect } from "vitest";
 import type { QualifiedPlugin as PluginDescriptor } from "./hosting-suitability.js";
 import {
@@ -242,10 +243,20 @@ describe("absence is never a pass — every unmeasured dimension isolates", () =
 });
 
 describe("the disqualifiers", () => {
-  it("one allocation inside run() is unsuitable, not a caution", () => {
+  it("one allocation inside run() isolates the plugin, never refuses it (#196)", () => {
     const v = classify(measured({}, { rtSafety: { allocationsInRun: 1 } }));
-    expect(v.rating).toBe("unsuitable");
+    expect(v.rating).toBe("conditional");
     expect(v.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
+  });
+
+  it("the pin's verdict: clean runs in-process, RT-unsafe is isolated, a crash is refused (#196)", () => {
+    const clean = classify(measured({}, {}));
+    const unsafe = classify(measured({}, { rtSafety: { allocationsInRun: 2, locksInRun: 1 } }));
+    const crashed = classify(measured({}, { stability: { crashes: [{ topFrame: "lilv_instance_instantiate" }] } }));
+    expect([clean, unsafe, crashed].map((v) => pinVerdictOf(v.rating))).toEqual(["in-process", "isolated", "refused"]);
+    // a crash outranks the RT-safety reason: a plugin that crashes and allocates is still refused
+    const both = classify(measured({}, { rtSafety: { allocationsInRun: 2 }, stability: { crashes: [{ topFrame: "lilv_instance_instantiate" }] } }));
+    expect(pinVerdictOf(both.rating)).toBe("refused");
   });
 
   it("a crash attributed to the PLUGIN is unsuitable", () => {
@@ -749,7 +760,7 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
     ["latency that lies at one rate", { latency: { ...cleanClap().latency, "96000": { declaredFrames: 64, measuredFrames: 71 } } }, "unsuitable", HOSTING_CODE.clapLatencyMismatch, { rate: 96000, declared: 64, measured: 71 }],
     ["init or activate failed headless", { headlessOk: false }, "unsuitable", HOSTING_CODE.clapHeadlessFailed, {}],
     ["an instrument: a note input", { noteInputs: 1 }, "unsuitable", HOSTING_CODE.clapNoteInput, { noteInputs: 1 }],
-    ["a thread-check violation", { threadViolations: 2 }, "unsuitable", HOSTING_CODE.clapThreadViolation, { violations: 2 }],
+    ["a thread-check violation", { threadViolations: 2 }, "conditional", HOSTING_CODE.clapThreadViolation, { violations: 2 }],
     ["a CLAP_PROCESS_ERROR under the sweep", { processErrors: 1 }, "unsuitable", HOSTING_CODE.clapProcessError, { errors: 1 }],
     ["a sweep that never called process()", { processCalls: 0 }, "unknown", HOSTING_CODE.clapUnqualified, {}],
   ];
@@ -766,9 +777,9 @@ describe("the CLAP arm — the §3 verdict over CLAP facts", () => {
     });
   }
 
-  it("the interposer's counts refuse a CLAP exactly as they refuse an LV2", () => {
+  it("the interposer's counts isolate a CLAP exactly as they isolate an LV2", () => {
     const v = classify(clapDescriptor({ rtSafety: { ...cleanMeasurements().rtSafety, allocationsInRun: 3 } }));
-    expect(v.rating).toBe("unsuitable");
+    expect(v.rating).toBe("conditional");
     expect(v.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
   });
 
