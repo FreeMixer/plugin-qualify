@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.17.4
+Version:        0.17.5
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -124,6 +124,9 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.5-1
+- Every sync starts by bringing each pin's files up to the ones plugin-hostd --pin-files names, measuring nothing; --refresh-pins does only that, and the package upgrade runs it. A pin written before 0.17.3 no longer leaves an LV2 with presets refused with -509 until it is qualified again (#239).
+
 * Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.4-1
 - A package transaction no longer runs a qualification sweep when systemd is not running (an image build took 95 minutes in it): the trigger leaves qualify-pending in /var/lib/omx and the next plugin-qualify-sync run scans and clears it; PLUGIN_QUALIFY_SYNC_INLINE=1 keeps the inline run (#237).
 
