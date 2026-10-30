@@ -10,7 +10,9 @@
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency}.lv2
+#                            build/fixtures-faulty/synth-voice-memory.clap (apart, its memory fails any budget),
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency}.lv2,
+#                            build/fixtures-faulty/lv2/{leaks,large-activate}.lv2 (apart, as the faulty ones)
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
@@ -99,7 +101,9 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
-	$(BUILD)/fixtures/lv2/latency.lv2/latency.so
+	$(BUILD)/fixtures/lv2/latency.lv2/latency.so \
+	$(BUILD)/fixtures-faulty/synth-voice-memory.clap \
+	$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so $(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so
 
 $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
@@ -109,7 +113,7 @@ $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
-LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h
+LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
@@ -197,6 +201,23 @@ $(BUILD)/fixtures/requires-thread-pool.clap: fixtures/host-ext-gate.c | $(BUILD)
 # the gain taking 64 MiB for every 48000 Hz it is activated at, as a sampler's library grows with the rate: the memory bound's
 $(BUILD)/fixtures-faulty/hogs-memory.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_HOGS_MB=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# the safe synth taking memory for each note struck: a per-voice footprint the rest of the instance does not show
+$(BUILD)/fixtures-faulty/synth-voice-memory.clap: fixtures/synth.c | $(BUILD)/fixtures-faulty
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_VOICE_MB=4 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+
+# the rt-safe bundle under another uri: a gain leaking per block (64 KiB every block), and one taking a large block at activate
+$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-safe.lv2/manifest.ttl fixtures/rt-safe.lv2/gain.ttl
+	mkdir -p $(@D)
+	sed 's/lv2-rt-safe/lv2-leaks/' fixtures/rt-safe.lv2/manifest.ttl > $(@D)/manifest.ttl
+	sed 's/lv2-rt-safe/lv2-leaks/' fixtures/rt-safe.lv2/gain.ttl > $(@D)/gain.ttl
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_LEAKS_KB=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+$(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-safe.lv2/manifest.ttl fixtures/rt-safe.lv2/gain.ttl
+	mkdir -p $(@D)
+	sed 's/lv2-rt-safe/lv2-large-activate/' fixtures/rt-safe.lv2/manifest.ttl > $(@D)/manifest.ttl
+	sed 's/lv2-rt-safe/lv2-large-activate/' fixtures/rt-safe.lv2/gain.ttl > $(@D)/gain.ttl
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ACTIVATE_MB=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # a preload failing one chosen allocation, for the prober's out-of-memory paths
 $(BUILD)/fixtures/fail-alloc.so: fixtures/fail-alloc.c | $(BUILD)/fixtures

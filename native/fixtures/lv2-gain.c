@@ -10,10 +10,17 @@
  * Nothing else differs but the URI, so a measurement that tells them apart is the interposer's count.
  */
 #include <stdlib.h>
+#include <string.h>
 
 #include <lv2/core/lv2.h>
 
-#ifdef FIXTURE_ALLOCATES
+/* leaks.lv2: built with -DFIXTURE_LEAKS_KB, run() also takes that many KB every block and never gives them back.
+ * large-activate.lv2: built with -DFIXTURE_ACTIVATE_MB, activate() takes that many MiB, touched, held until cleanup. */
+#if defined FIXTURE_LEAKS_KB
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-leaks"
+#elif defined FIXTURE_ACTIVATE_MB
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-large-activate"
+#elif defined FIXTURE_ALLOCATES
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-rt-unsafe"
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
 static void *(*volatile fixture_malloc)(size_t) = malloc;
@@ -28,6 +35,9 @@ struct gain {
   const float *gain;
   const float *in;
   float *out;
+#ifdef FIXTURE_ACTIVATE_MB
+  char *held;
+#endif
 };
 
 static LV2_Handle instantiate(const LV2_Descriptor *d, double rate, const char *path, const LV2_Feature *const *features) {
@@ -45,10 +55,22 @@ static void connect_port(LV2_Handle h, uint32_t port, void *data) {
   }
 }
 
-static void activate(LV2_Handle h) { (void)h; }
+static void activate(LV2_Handle h) {
+  (void)h;
+#ifdef FIXTURE_ACTIVATE_MB
+  const size_t bytes = (size_t)FIXTURE_ACTIVATE_MB << 20;
+  char *block = malloc(bytes);
+  if (block != NULL) memset(block, 1, bytes);
+  *(char *volatile *)&((struct gain *)h)->held = block;
+#endif
+}
 
 static void run(LV2_Handle h, uint32_t frames) {
   struct gain *g = h;
+#ifdef FIXTURE_LEAKS_KB
+  char *volatile leak = malloc((size_t)FIXTURE_LEAKS_KB << 10);
+  if (leak != NULL) memset(leak, 1, (size_t)FIXTURE_LEAKS_KB << 10);
+#endif
 #ifdef FIXTURE_ALLOCATES
   fixture_free(fixture_malloc(frames * sizeof(float)));
 #endif
