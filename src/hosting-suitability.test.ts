@@ -41,7 +41,7 @@ import { HOST_BUDGETS } from "./qualify-declarations.js";
 /** The console's per-instance ceiling, read from the declaration it lives in. */
 const DEFAULT_HOSTING_POLICY_CEILING = HOST_BUDGETS["openmixer-console"].coreFractionCeiling;
 
-/** The desk's rate since the operator's 2026-09-14 ruling. The classifier is rate-agnostic —
+/** The desk's rate since the 2026-09-14 decision. The classifier is rate-agnostic —
  *  it reads the figure at the rate it is GIVEN — so this is the fixture's own parameter and
  *  never a rate any code knows; what it must be is the rate the console actually runs. */
 const RATE = 96_000;
@@ -415,7 +415,7 @@ describe("the floor comes from policy, never baked in", () => {
     expect(high.reasons.map((r) => r.code)).toContain(HOSTING_CODE.stabilityBelowFloor);
   });
 
-  it("the operator's ruling of 2026-09-05 is the default floor", () => {
+  it("the decision of 2026-09-05 is the default floor", () => {
     expect(DEFAULT_HOSTING_POLICY.cycleFloor).toBe(1000);
   });
 });

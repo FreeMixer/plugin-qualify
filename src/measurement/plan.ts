@@ -38,7 +38,7 @@ export interface InstallationRates {
   readonly liveRate?: number;
   /** Rates the active device actually offers. Empty/absent = the console has not probed. */
   readonly supportedRates?: readonly number[];
-  /** Rates the operator asked for. Absent = "whatever this installation can use". */
+  /** Rates the caller asked for. Absent = "whatever this installation can use". */
   readonly requestedRates?: readonly number[];
 }
 
@@ -47,7 +47,7 @@ export interface RatePlan {
   /** Rates to measure, ascending. Empty when nothing could be resolved. */
   readonly rates: readonly number[];
   /**
-   * Rates the operator asked for that the installation does not offer. Reported, not
+   * Rates the caller asked for that the installation does not offer. Reported, not
    * measured — a figure at a rate the rig cannot run is a figure nobody will ever use, and
    * quietly measuring it would make the run longer for nothing.
    */
@@ -63,7 +63,7 @@ export interface RatePlan {
  * Resolve the rates a local run should measure at.
  *
  * The live rate is always included when known — a console must have figures for the rate it
- * is running at, whatever else the operator asked for. Beyond that: the requested rates
+ * is running at, whatever else the caller asked for. Beyond that: the requested rates
  * intersected with what the device offers, or, absent a request, the whole supported list.
  */
 export function ratesForInstallation(input: InstallationRates): RatePlan {

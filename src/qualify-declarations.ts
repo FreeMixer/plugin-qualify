@@ -208,7 +208,7 @@ export const DESCRIPTOR_CODE_DIR_UNWRITABLE = "qualify.descriptor.dir-unwritable
 
 /** Every threshold, so none is baked into the code. */
 export interface HostingPolicy {
-  /** Minimum instantiate/destroy lifecycles. The operator's §14.4 ruling: 1000. */
+  /** Minimum instantiate/destroy lifecycles. §14.4 sets it: 1000. */
   readonly cycleFloor: number;
   /** Minimum continuous soak, seconds. Default 3 h — the operator's longest show. */
   readonly soakSeconds: number;
@@ -222,7 +222,7 @@ export interface HostingPolicy {
 }
 
 /**
- * Defaults. The cycle floor is the operator's ruling of 2026-09-05 (§14.4, option c) and the
+ * Defaults. The cycle floor is the decision of 2026-09-05 (§14.4, option c) and the
  * soak is §3's default show length. The per-instance cost ceiling is the HOST's budget and
  * lives in {@link HOST_BUDGETS} (plugin-qualify §3a), not here.
  */
