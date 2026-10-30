@@ -571,6 +571,7 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 | `grid` | `full`: every rate at every block size, 16 cells (`hosts`, or `--grid-hosts`: the cells of `host_profile` and of the console's two tiers, then 512 at every rate; or `<rate>/<quantum>,...`) |
 | `cells_per_plugin_budget` | `0`, every cell of the grid |
 | `memory_limit` | half of the machine's RAM (`off` for none) |
+| `memory_notes` | `16`: the notes an instrument with no declared capacity holds in a `--memory-only` run |
 | `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
 | `host_class` | the board's own, from the device tree (`rpi5`); none elsewhere |
 | `distributed_dir` | `/usr/share/omx/qualification` |
@@ -595,6 +596,66 @@ seen at once, but a package's own files being replaced in place (an upgrade) is 
 itself. A packaged plugin is still caught at once, by the distribution's install triggers over the standard
 folders. An unpackaged bundle replaced in place in an extra folder is caught at the next run of
 plugin-qualify-sync.timer, at most about 15 minutes after the change.
+
+### Keeping the records through an upgrade
+
+An upgrade of plugin-qualify, of the plugins' libraries or of the judge's rules does not call for measuring every plugin
+again. The figures in the records are carried across and judged again:
+
+```bash
+plugin-qualify-sync --system --rejudge
+```
+
+`--rejudge` measures nothing and needs no measuring tool. It reads every record in `qualification_dir` with the probe
+output it names, and passes them through the same judge a measurement goes through, under the rules of the running
+version: a real-time violation under `run()` or under notes is `conditional` and pinned `isolated`, each host's budget is
+read, and a plugin with no footprint is `unknown` on a host with a memory budget, never read as fitting. It also judges
+each record for `omx-clap-host`, `openmixer-console` and the Pi boards `openmixer-pi-4gb` and `openmixer-pi-8gb`. The
+verdicts, the tiers and the plugin's pin word are replaced; the figures, the probe output and who took them stay as they
+were. The record gains a `rejudged` block with `at`, `by` (the version that judged) and `figures` (`tool`, `measuredAt`
+and `runId`, as measured). A run that finds nothing to change writes nothing.
+
+A verdict never says more than the figures do. An LV2 plugin's `omx-clap-host` verdict is decided by its run under the LV2
+adapter (the record's `adapter` block). A record with no measured adapter run reads `unknown`
+(`qualify.sync.adapter-run-owed`), is not offered on the isolated tier, and its pin has no verdict word: plugin-hostd loads
+such a plugin without grouping it. The same goes for a `mod-host` or `jalv` verdict with no run under that host. A record
+whose plugin's bytes changed, or whose probe output is not the copy it names, is left as it is. Everything left owing
+is listed under `owes` in the record and in `qualify-owed.json` beside the state file (`--rejudge` prints each line too),
+with the measurement it needs:
+
+| `measurement` | code | what pays it |
+|---|---|---|
+| `adapter-run` | `qualify.sync.adapter-run-owed` | a run under the LV2 adapter; today, qualifying the plugin again |
+| `host-run` | `qualify.sync.host-run-owed` | a run under that host; today, qualifying the plugin again with `--host-profile` |
+| `qualification` | `qualify.sync.bytes-changed`, `qualify.sync.figures-unreadable`, `qualify.sync.no-figures` | qualifying the plugin again; the next run does so for changed bytes |
+
+A probe that crashed took no figures: its record stays `unknown` with `probe.crashed`, no pin word and the state's
+outcome `crashed`. A crash under a host's run stays `unsuitable` and `refused`.
+
+Footprints older records lack are taken apart from everything else:
+
+```bash
+plugin-qualify-sync --system --memory-only   # the footprints, at the cells a Pi runs
+plugin-qualify-sync --system --rejudge       # the verdicts that read them
+```
+
+`--memory-only` takes the footprint of each plugin the state holds (after instantiate, after activate, at rest, a second
+instance, and notes held for an instrument) at 48 kHz in blocks of 128 and 256 frames, and nothing else: no sweep, no
+cost, no latency, no lifecycle, no soak. It goes through the probe runner under the limits of an ordinary run (`budget_s`,
+`memory_limit`), each plugin in processes of its own, an LV2 plugin in a world of its own bundle. An instrument that
+declares its voice capacity holds that many notes; one that does not holds `memory_notes`, with basis `probe`. Only the
+`memory` of those cells changes in the record, a cell it lacked joins with no other figure, and a `memoryRun` block says
+which runner took them and when. A cell whose run failed holds a reason and no figure. A plugin whose footprints are
+already merged is skipped, so a pass cut short can be run again; `--force` takes them again. The pass judges nothing:
+`--rejudge` afterwards does.
+
+**A leak is not measured.** Growth over time takes a soak, which this pass does not run: every record it writes names
+`memoryGrowth` under `notMeasured`, and the last line says `leaks not measured`.
+
+On a Raspberry Pi 5 a plugin takes under 0.6 s at the median, 5 s at the 90th percentile and 22 s at the 99th; about an
+hour at most for the 1,542 plugins of the Zynthian set. Those are upper bounds: twice the time the 2026-10-28 records say a
+whole pass at one cell took, which also ran 30 lifecycles, the sweep, the latency and the cost. A plugin that hangs
+takes `budget_s` a cell. The test fixtures take 0.1 s each, both cells, on an x86-64 desktop.
 
 ### Distributed records
 

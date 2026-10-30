@@ -1,0 +1,51 @@
+{
+  "format": "plugin-hostd.probe-output",
+  "formatVersion": "1.1",
+  "run": {
+    "id": "20261027T003559Z-14d90-81c48a6b",
+    "startedAt": "2026-10-27T00:35:59+00:00",
+    "elapsedMs": 322,
+    "complete": true,
+    "outcome": "probe.ok",
+    "reason": "on-request",
+    "protocol": {"name": "plugin-hostd.probe-protocol", "version": 1},
+    "tools": {"runner": "plugin-hostd-probe 0.12.0", "child": "lv2_measure", "interposer": "rt_interpose.so"},
+    "via": "runner"
+  },
+  "plugin": {"format": "lv2", "id": "https://github.com/lucianodato/noise-repellent"},
+  "binary": {"path": "nrepel.so", "sha256": "c3b5e21dd9a76cbc84dda3b0d46f5ed860feea854345c5d12af2aa1bdc2466d9", "files": [{"path": "manifest.ttl", "sha256": "be203de993c6df338b38ed2f66e0a4eeca8a38e9f914333cc6f3bc88aa7b5648"}, {"path": "nrepel.so", "sha256": "c3b5e21dd9a76cbc84dda3b0d46f5ed860feea854345c5d12af2aa1bdc2466d9"}, {"path": "nrepel.ttl", "sha256": "273995099bb0576f4a3de0d7b5d8a4f62487b8e377d779f54d9a198cd1740a40"}], "layout": {"scheme": "omx-layout/1", "sha256": "f8736c5e003106dc367de554e12b72241bbfc32cd9d55d2000898fce629cd4df"}},
+  "machine": {
+    "class": {"arch": "aarch64", "family": "arm", "coreBand": "3-4", "clockBand": "1.5-2.5GHz", "preemptRt": false, "cstatesLimited": false},
+    "profile": {"governor": "powersave", "turbo": false, "smt": false, "preempt": "PREEMPT",
+      "cpuidle": [],
+      "meetsProtocol": false, "unmet": ["probe.profile.governor", "probe.profile.not-pinned"]},
+    "pinnedCpus": "0-3"
+  },
+  "offer": {"id": "default", "realtime": "none"},
+  "limits": {"set": "default",
+    "applied": [
+      {"limit": "wall-clock", "value": 60, "unit": "s", "by": "supervisor"},
+      {"limit": "cpu-time", "value": 540, "unit": "s", "by": "rlimit"},
+      {"limit": "memory", "value": 4294967296, "unit": "bytes", "by": "rlimit"},
+      {"limit": "files", "value": 256, "unit": "count", "by": "rlimit"},
+      {"limit": "file-size", "value": 67108864, "unit": "bytes", "by": "rlimit"},
+      {"limit": "core-dump", "value": 0, "unit": "bytes", "by": "rlimit"},
+      {"limit": "rt-priority", "value": 0, "by": "rlimit"},
+      {"limit": "no-new-privs", "by": "prctl"}
+    ],
+    "unavailable": [
+      {"limit": "tasks", "code": "probe.limit.not-implemented"}
+    ]
+  },
+  "steps": [
+    {"step": "hash", "outcome": "probe.ok", "elapsedMs": 42, "exitStatus": 0},
+    {"step": "instantiate", "outcome": "probe.ok", "elapsedMs": 0, "detail": "read from the child's line"},
+    {"step": "rt-safety", "rate": 48000, "quantum": 512, "outcome": "probe.ok", "elapsedMs": 0, "detail": "read from the child's line"},
+    {"step": "lifecycle", "outcome": "probe.ok", "elapsedMs": 280, "exitStatus": 0}
+  ],
+  "grid": [
+    {"rate": 48000, "quantum": 512, "outcome": "probe.ok", "rtSafety": {"interposer": true, "swept": true, "sweepApplicable": true, "blocks": 512, "allocations": 1024, "locks": 0, "syscalls": 0, "events": ["malloc ? ?", "free ? ?"]}, "noteSweep": {"applicable": false}}
+  ],
+  "behaviour": {"lifecycle": {"cycles": 30, "instantiated": 30, "failed": 0}, "threads": {"before": 1, "afterFirstInstantiate": 1, "afterAllFreed": 1}, "features": {"required": ["http://lv2plug.in/ns/ext/urid#map"]}},
+  "logs": [{"name": "stderr", "path": "/tmp/plugin-qualify-probe-yfxq0V/child.stderr.log", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0}]
+}

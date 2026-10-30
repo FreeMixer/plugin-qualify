@@ -1,0 +1,245 @@
+{
+  "schema": "plugin-qualify.qualification-record/1",
+  "plugin": {
+    "format": "lv2",
+    "id": "https://github.com/lucianodato/noise-repellent"
+  },
+  "binary": {
+    "path": "nrepel.so",
+    "sha256": "c3b5e21dd9a76cbc84dda3b0d46f5ed860feea854345c5d12af2aa1bdc2466d9",
+    "files": [
+      {
+        "path": "manifest.ttl",
+        "sha256": "be203de993c6df338b38ed2f66e0a4eeca8a38e9f914333cc6f3bc88aa7b5648"
+      },
+      {
+        "path": "nrepel.so",
+        "sha256": "c3b5e21dd9a76cbc84dda3b0d46f5ed860feea854345c5d12af2aa1bdc2466d9"
+      },
+      {
+        "path": "nrepel.ttl",
+        "sha256": "273995099bb0576f4a3de0d7b5d8a4f62487b8e377d779f54d9a198cd1740a40"
+      }
+    ],
+    "layout": {
+      "scheme": "omx-layout/1",
+      "sha256": "f8736c5e003106dc367de554e12b72241bbfc32cd9d55d2000898fce629cd4df"
+    }
+  },
+  "verdicts": [
+    {
+      "host": "omx-clap-host",
+      "measured": true,
+      "rating": "unsuitable",
+      "qualified": false,
+      "hosting": "isolated",
+      "arm": "declaration",
+      "deciding": "hosting.rt-safety.violations-in-run",
+      "reasons": [
+        {
+          "dimension": "rtSafety",
+          "rating": "unsuitable",
+          "code": "hosting.rt-safety.violations-in-run",
+          "params": {
+            "allocations": 1024,
+            "syscalls": 0,
+            "locks": 0
+          }
+        }
+      ]
+    },
+    {
+      "host": "openmixer-console",
+      "measured": true,
+      "rating": "unsuitable",
+      "qualified": false,
+      "hosting": "isolated",
+      "arm": "declaration",
+      "deciding": "hosting.rt-safety.violations-in-run",
+      "reasons": [
+        {
+          "dimension": "rtSafety",
+          "rating": "unsuitable",
+          "code": "hosting.rt-safety.violations-in-run",
+          "params": {
+            "allocations": 1024,
+            "syscalls": 0,
+            "locks": 0
+          }
+        }
+      ]
+    },
+    {
+      "host": "mod-host",
+      "measured": true,
+      "rating": "unsuitable",
+      "qualified": false,
+      "hosting": "isolated",
+      "arm": "run",
+      "deciding": "mod-host.no-answer",
+      "reasons": [
+        {
+          "dimension": "hostAdmission",
+          "rating": "unsuitable",
+          "code": "mod-host.no-answer",
+          "params": {
+            "step": "activate"
+          }
+        },
+        {
+          "dimension": "rtSafety",
+          "rating": "unsuitable",
+          "code": "hosting.rt-safety.violations-in-run",
+          "params": {
+            "allocations": 1024,
+            "syscalls": 0,
+            "locks": 0
+          }
+        }
+      ]
+    }
+  ],
+  "tiers": {
+    "inProcess": {
+      "host": "openmixer-console",
+      "measured": true,
+      "qualified": false,
+      "rating": "unsuitable",
+      "deciding": "hosting.rt-safety.violations-in-run"
+    },
+    "isolated": {
+      "host": "mod-host",
+      "measured": true,
+      "qualified": false,
+      "rating": "unsuitable",
+      "deciding": "mod-host.no-answer"
+    },
+    "offeredOn": [],
+    "dimmed": "openmixer-console: hosting.rt-safety.violations-in-run; mod-host: mod-host.no-answer"
+  },
+  "cost": [
+    {
+      "host": "omx-clap-host",
+      "rate": 48000,
+      "quantum": 128,
+      "reasons": [
+        {
+          "dimension": "cost",
+          "rating": "unknown",
+          "code": "hosting.cost.unmeasured-at-rate-and-quantum",
+          "params": {
+            "rate": 48000,
+            "quantum": 128
+          }
+        }
+      ]
+    },
+    {
+      "host": "openmixer-console",
+      "rate": 96000,
+      "quantum": 1024,
+      "reasons": [
+        {
+          "dimension": "cost",
+          "rating": "unknown",
+          "code": "hosting.cost.unmeasured-at-rate-and-quantum",
+          "params": {
+            "rate": 96000,
+            "quantum": 1024
+          }
+        }
+      ]
+    },
+    {
+      "host": "mod-host",
+      "rate": 48000,
+      "quantum": 128,
+      "reasons": [
+        {
+          "dimension": "cost",
+          "rating": "unknown",
+          "code": "hosting.cost.unmeasured-at-rate-and-quantum",
+          "params": {
+            "rate": 48000,
+            "quantum": 128
+          }
+        }
+      ]
+    }
+  ],
+  "measurements": {
+    "grid": [
+      {
+        "rate": 48000,
+        "quantum": 512,
+        "outcome": "probe.ok",
+        "rtSafety": {
+          "interposer": true,
+          "swept": true,
+          "sweepApplicable": true,
+          "blocks": 512,
+          "allocations": 1024,
+          "locks": 0,
+          "syscalls": 0,
+          "events": [
+            "malloc ? ?",
+            "free ? ?"
+          ]
+        },
+        "noteSweep": {
+          "applicable": false
+        }
+      }
+    ],
+    "behaviour": {
+      "lifecycle": {
+        "cycles": 30,
+        "instantiated": 30,
+        "failed": 0
+      },
+      "threads": {
+        "before": 1,
+        "afterFirstInstantiate": 1,
+        "afterAllFreed": 1
+      },
+      "features": {
+        "required": [
+          "http://lv2plug.in/ns/ext/urid#map"
+        ]
+      }
+    }
+  },
+  "notMeasured": [
+    {
+      "dimension": "stability",
+      "code": "hosting.stability.unsoaked"
+    }
+  ],
+  "tool": {
+    "runner": "plugin-hostd-probe 0.12.0",
+    "child": "lv2_measure",
+    "interposer": "rt_interpose.so"
+  },
+  "measuredAt": "2026-10-27T00:35:59+00:00",
+  "probe": {
+    "file": "https___github.com_lucianodato_noise-repellent@unversioned-c3b5e21dd9a7.default.probe.json",
+    "sha256": "7520c08b8bfab1159cb221754a94b075887c360080f8db36a7ffbf665ff08251",
+    "bytes": 3390,
+    "protocol": {
+      "name": "plugin-hostd.probe-protocol",
+      "version": 1
+    },
+    "reason": "on-request",
+    "outcome": "probe.ok",
+    "complete": true,
+    "machineClass": {
+      "arch": "aarch64",
+      "family": "arm",
+      "coreBand": "3-4",
+      "clockBand": "1.5-2.5GHz",
+      "preemptRt": false,
+      "cstatesLimited": false
+    },
+    "meetsProtocol": false
+  }
+}

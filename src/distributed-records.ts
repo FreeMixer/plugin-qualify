@@ -153,7 +153,7 @@ export function distributedUri(item: SyncItem, r: DistributedRecord): string {
 }
 
 /** What the sync's own judgment would make of the record's verdict for the host, as `outcomeOf` reads a run. */
-function outcomeOfVerdict(v: RecordVerdict): SyncOutcome {
+export function outcomeOfVerdict(v: Pick<RecordVerdict, "measured" | "rating" | "deciding">): SyncOutcome {
   if (!v.measured) return v.deciding === "probe.crashed" ? "crashed" : v.deciding === "probe.timeout" ? "hung" : "unmeasured";
   if (v.rating === "suitable" || v.rating === "conditional") return "qualified";
   return v.rating === "unsuitable" ? "refused" : "unmeasured";

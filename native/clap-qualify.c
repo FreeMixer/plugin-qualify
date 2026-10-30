@@ -1764,6 +1764,22 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     for (uint32_t r = 0; r < o->n_rates; r++) footprint_rate(factory, d, o->rates[r], o->frames, feature, o, &f.footprint[r]);
   }
 
+  /* OMX_PROBE_MEMORY_ONLY: the footprint is all this run takes. No instance of this process, no sweep, no cost. The runner
+   * makes one grid point per key of clap.latency, so those keys are written, with figures nothing reads: plugin-qualify
+   * takes only `memory` from such a run (src/qualify-rejudge.ts). */
+  if (getenv("OMX_PROBE_MEMORY_ONLY")) {
+    for (uint32_t r = 0; r < o->n_rates; r++) {
+      if (f.footprint[r].got || strcmp(f.footprint[r].unmeasured, "refused-instantiation")) f.headless_ok = 1;
+      f.cost[r].unmeasured = "not-attempted", f.cost[r].detail = "a memory-only run takes the footprint alone";
+    }
+    struct integrity none = { "not-attempted", "a memory-only run takes no pin", "" };
+    put_head(d->id, path, sha256);
+    put_facts(d, &f, o->frames);
+    put_integrity(o->path, d->version, sha256, &none);
+    fprintf(g_out, "}\n");
+    return f.headless_ok ? 0 : 2;
+  }
+
   struct integrity pin = { "refused-instantiation", "create_plugin or init failed", "" };
   const clap_plugin_t *p = factory->create_plugin(factory, &g_clap_host, d->id);
   if (!p || !p->init(p)) {
@@ -1911,6 +1927,9 @@ int main(int argc, char **argv) {
   if (o.n_rates == 0 || a >= argc || argc - a > 2) return usage(argv[0]);
   o.path = argv[a];
   o.id = a + 1 < argc ? argv[a + 1] : NULL;
+  /* the count plugin-qualify's memory-only run gives an instrument that declares none, as lv2_measure reads it */
+  if (getenv("OMX_PROBE_MEMORY_ONLY") && !o.probe_notes && getenv("OMX_PROBE_NOTES") && parse_u32(getenv("OMX_PROBE_NOTES"), &o.probe_notes) != 0) o.probe_notes = 0;
+  if (o.probe_notes > NOTE_KEYS_MAX) o.probe_notes = NOTE_KEYS_MAX;
 
   char path[PATH_MAX];
   if (!realpath(argv[a], path)) {

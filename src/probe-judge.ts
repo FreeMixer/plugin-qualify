@@ -51,6 +51,11 @@ export interface JudgeFacts {
    * judged by it as well as by its declaration; one that has none is judged from its declaration alone.
    */
   readonly admissions?: Readonly<Record<string, HostAdmission>>;
+  /**
+   * The run each profile's verdict needs and the figures do not hold, by profile id (`qualify-rejudge.ts`): an `unknown`
+   * reason in that verdict, so that a verdict never claims a run nobody made.
+   */
+  readonly owed?: Readonly<Record<string, RecordReason>>;
 }
 
 /** A sum of one count over the points, or `undefined` when a point lacks it: a missing count is not zero. */
@@ -244,7 +249,7 @@ function costOf(output: ProbeOutput, profile: HostProfile): HostJudgment["cost"]
  * first word; a grid point that failed under a run that says `probe.ok` is a document that contradicts
  * itself, and is read as the failure it records rather than as a pass that skipped the point.
  */
-function failedOutcome(output: ProbeOutput): string | undefined {
+export function failedOutcome(output: ProbeOutput): string | undefined {
   if (output.run.outcome !== PROBE_OK) return output.run.outcome;
   // a cell that outgrew the memory bound is a recorded outcome of that cell, judged per host below, not the run's end
   return output.grid.find((p) => p.outcome !== PROBE_OK && p.outcome !== PROBE_NOT_ATTEMPTED && !isOutOfMemory(p.outcome))?.outcome;
@@ -313,6 +318,8 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
         };
       }
     }
+    const owed = facts.owed?.[profile.id];
+    if (owed !== undefined) reasons = [owed, ...reasons];
     const rating = worstRating(reasons.map((r) => r.rating));
     const deciding = decidingOf(reasons, rating);
     return {

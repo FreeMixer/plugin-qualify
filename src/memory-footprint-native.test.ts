@@ -136,6 +136,52 @@ describe("a leak per block, over a soak (LV2: the CLAP prober has no continuous 
   });
 });
 
+describe("a memory-only run (plugin-qualify-sync --memory-only)", () => {
+  const ONLY = { OMX_PROBE_MEMORY_ONLY: "1" };
+  const clapLine = (file: string, env: Record<string, string> = {}) => {
+    const r = spawnSync(PROBER, ["--rates", String(RATE), "--block", String(QUANTUM), file], { encoding: "utf8", env: { ...process.env, LD_PRELOAD: INTERPOSER, ...ONLY, ...env } });
+    expect(r.status, r.stderr).toBe(0);
+    return JSON.parse(r.stdout.split("\n")[0]!);
+  };
+  const lv2Only = (uri: string, env: Record<string, string> = {}) => lv2Line(uri, { ...ONLY, ...env }, [String(RATE), String(QUANTUM)]);
+
+  live("CLAP: the footprint as an ordinary run takes it, and nothing else ran: no process call, no cost, no count", () => {
+    const line = clapLine(join(FAULTY, "hogs-memory.clap"));
+    const at = line.cost.perRate[String(RATE)];
+    const m = readMemoryFootprint(at.memory)!;
+    expect(m.afterActivateKb!).toBeGreaterThanOrEqual(64 * MIB);
+    expect(m.secondInstanceKb!).toBeGreaterThanOrEqual(64 * MIB);
+    expect(at.unmeasuredReason).toBe("not-attempted");
+    expect(at.nsPerSampleMedian).toBeUndefined();
+    expect(line.clap.processCalls).toBe(0);
+    expect(line.rtSafety.interposer).toBe(false);
+  });
+
+  live("LV2: the same: no lifecycle, no sweep, no latency", () => {
+    const line = lv2Only("urn:plugin-qualify:fixture:lv2-large-activate");
+    const at = line.cost.perRate[String(RATE)];
+    expect(readMemoryFootprint(at.memory)!.afterActivateKb!).toBeGreaterThanOrEqual(64 * MIB);
+    expect(at.unmeasuredReason).toBe("not-attempted");
+    expect(line.instantiated).toBe(true);
+    expect(line.lifecycle).toBeUndefined();
+    expect(line.rtSafety).toBeUndefined();
+    expect(line.latency).toBeUndefined();
+  });
+
+  live("an instrument holds the count it is given, on both formats, and its notes are read: 16 notes of 4 MiB", () => {
+    const m = readMemoryFootprint(clapLine(join(FAULTY, "synth-voice-memory.clap"), { OMX_PROBE_NOTES: "16" }).cost.perRate[String(RATE)].memory)!;
+    expect(m.basis).toBe("probe");
+    expect(m.notesHeldKb! - m.atRestKb!).toBeGreaterThanOrEqual(16 * 4 * MIB);
+    expect(readMemoryFootprint(lv2Only("urn:plugin-qualify:fixture:lv2-synth", { OMX_PROBE_NOTES: "16" }).cost.perRate[String(RATE)].memory)).toMatchObject({ basis: "probe", notesHeldKb: expect.any(Number) });
+  });
+
+  live("without the variable an ordinary run is untouched: its cost is timed", () => {
+    expect(clapMemory(join(FIXTURES, "rt-safe.clap")).atRestKb).toEqual(expect.any(Number));
+    const r = spawnSync(PROBER, ["--rates", String(RATE), "--block", String(QUANTUM), "--blocks", "16", join(FIXTURES, "rt-safe.clap")], { encoding: "utf8", env: { ...process.env, LD_PRELOAD: INTERPOSER } });
+    expect(JSON.parse(r.stdout.split("\n")[0]!).cost.perRate[String(RATE)].nsPerSampleMedian).toEqual(expect.any(Number));
+  });
+});
+
 describe("the limit on a direct spawn", () => {
   live("past RLIMIT_AS the child ends with the bound's status, and that is the recorded outcome with the limit", () => {
     const limit = 48 * 2 ** 20;

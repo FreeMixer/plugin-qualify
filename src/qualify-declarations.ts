@@ -156,6 +156,16 @@ export const ADDRESS_SPACE_LIMIT_RAM_FRACTION = 1;
 export const MEMORY_BOUND_EXIT_ENV = "OMX_RT_OOM_EXIT";
 export const MEMORY_BOUND_EXIT_STATUS = 121;
 
+/**
+ * The memory-only pass (`plugin-qualify-sync --memory-only`). With `PROBE_MEMORY_ONLY_ENV` set the probers take the
+ * footprint and nothing else; the probe runner passes its environment on, so its limits hold unchanged.
+ * `PROBE_NOTES_ENV` is the count of notes an instrument that declares no voice capacity holds, basis `probe`:
+ * `MEMORY_PASS_PROBE_NOTES` unless `memory_notes` says otherwise.
+ */
+export const PROBE_MEMORY_ONLY_ENV = "OMX_PROBE_MEMORY_ONLY";
+export const PROBE_NOTES_ENV = "OMX_PROBE_NOTES";
+export const MEMORY_PASS_PROBE_NOTES = 16;
+
 /** Seconds one `.clap` may take to qualify at every rate before the prober is killed. */
 export const CLAP_QUALIFY_TIMEOUT_S = 120;
 
@@ -286,7 +296,7 @@ const piMemory = (ramGib: number): NonNullable<HostBudget["memory"]> => ({
  * the other kits, the one a Pi 5 with no kit card also ran its stress and first boot at. The Zynthian benchmark's matrix sweeps
  * more cells; these two are what a Pi is set to.
  */
-const PI_CELLS = [
+export const PI_CELLS = [
   { rate: MEASURE_BASE_RATE, quantum: 128 },
   { rate: MEASURE_BASE_RATE, quantum: 256 },
 ];
