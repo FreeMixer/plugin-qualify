@@ -32,7 +32,8 @@ Requires: python3-lilv
 # the scanned descriptors are held to omx-contract's schema before they are written (tools/descriptors.py)
 Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; --pin-files, which the sync takes its pins from, first released in 0.15.0
-Requires: plugin-hostd >= 0.15.0
+# 0.15.3: the memory footprint in the probe output, without which every host with a budget reads unmeasured (#114)
+Requires: plugin-hostd >= 0.15.3
 Recommends: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
 # remote-control pages (remote_controls), which the descriptors keep
@@ -40,7 +41,8 @@ Requires: omx-clap-host >= 0.23.0
 # the hosting codes' TypeScript modules, which the shipped tools/gen-hosting-codes.mjs reads through
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
 # /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on; the host above brings the same version
-Requires: omx-clap-core >= 0.23.0
+# 0.25.1: the hosting.memory.* codes (#114)
+Requires: omx-clap-core >= 0.25.1
 %{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.

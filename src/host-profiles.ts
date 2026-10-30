@@ -164,8 +164,24 @@ export const OMX_CLAP_HOST_PROFILE: HostProfile = {
   isolation: "shared-process",
 };
 
+/**
+ * A Raspberry Pi with 4 GB, and with 8 GB: what runs a plugin there is omx-clap-host under plugin-hostd, so the same
+ * extensions, instruments and isolation, on the rates, quanta and memory of the board. Its memory budget is provisional
+ * ({@link HOST_BUDGETS}), so a plugin under it is `conditional` until the numbers are measured on a Pi, and the reason says
+ * so. Judged at every cell the board runs.
+ */
+export const PI_4GB_PROFILE: HostProfile = { ...OMX_CLAP_HOST_PROFILE, id: "openmixer-pi-4gb", cost: HOST_BUDGETS["openmixer-pi-4gb"] };
+export const PI_8GB_PROFILE: HostProfile = { ...OMX_CLAP_HOST_PROFILE, id: "openmixer-pi-8gb", cost: HOST_BUDGETS["openmixer-pi-8gb"] };
+
 /** Every profile the tool ships, by id. */
-export const HOST_PROFILES: readonly HostProfile[] = [OPENMIXER_CONSOLE_PROFILE, JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE];
+export const HOST_PROFILES: readonly HostProfile[] = [
+  OPENMIXER_CONSOLE_PROFILE,
+  JALV_PROFILE,
+  MOD_HOST_PROFILE,
+  OMX_CLAP_HOST_PROFILE,
+  PI_4GB_PROFILE,
+  PI_8GB_PROFILE,
+];
 
 /** A shipped profile by id, or `undefined`. */
 export function shippedHostProfile(id: string): HostProfile | undefined {

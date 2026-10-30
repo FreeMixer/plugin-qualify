@@ -24,6 +24,8 @@
  *                          It also has a stepped parameter (a mode, 0 to 3) and aborts on a value between two
  *                          steps, which no host sends.
  *
+ *   synth-voice-memory.clap  built with -DFIXTURE_VOICE_MB=4, the safe one taking that many MiB for each note struck,
+ *                          touched and never given back, as a sampler's voice would.
  * Each voice costs a sine per sample, so the cost grows with the notes held.
  *
  * Nothing else differs, so a verdict that tells them apart is what the note sweep counted.
@@ -34,7 +36,10 @@
 
 #include <clap/clap.h>
 
-#if defined FIXTURE_ALLOCATES_ON_NOTE
+#if defined FIXTURE_VOICE_MB
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-voice-memory"
+#define FIXTURE_NAME "synth that takes memory per voice"
+#elif defined FIXTURE_ALLOCATES_ON_NOTE
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-alloc"
 #define FIXTURE_NAME "synth that allocates on note on"
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
@@ -113,6 +118,13 @@ static void synth_reset(const clap_plugin_t *p) {
 }
 
 static void note_on(struct synth *s, int key) {
+#ifdef FIXTURE_VOICE_MB
+  {
+    const size_t bytes = (size_t)FIXTURE_VOICE_MB << 20;
+    char *volatile held = malloc(bytes);
+    if (held != NULL) memset(held, 1, bytes);
+  }
+#endif
 #ifdef FIXTURE_ALLOCATES_ON_NOTE
   double *scratch = fixture_malloc(256 * sizeof(double));
   if (scratch) {

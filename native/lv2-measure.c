@@ -79,6 +79,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <malloc.h>
+#include <sys/wait.h>
 
 #include <lilv/lilv.h>
 #include "rt-interpose.h"
@@ -689,15 +691,8 @@ static int count_threads(void) {
   return n;
 }
 
-/* Resident set, in kB. A plugin that leaks shows here long before it crashes. */
-static long rss_kb(void) {
-  FILE *f = fopen("/proc/self/statm", "r");
-  if (f == NULL) return -1;
-  long total = 0, res = 0;
-  if (fscanf(f, "%ld %ld", &total, &res) != 2) res = -1;
-  fclose(f);
-  return res > 0 ? res * (sysconf(_SC_PAGESIZE) / 1024) : -1;
-}
+/* A plugin that leaks shows in the resident set long before it crashes. */
+#include "rss-kb.h"
 
 static const char *rt_kind_name(int k) {
   switch (k) {
@@ -1064,8 +1059,115 @@ static void emit_latency(double rate, const struct latency_at *L) {
   fprintf(jout, "}}");
 }
 
+/* one instance's footprint at the rate: what the resident set grew by at each step of its life, in KB, and a second
+ * instance's own part. `got` marks each figure taken; `unmeasured` says why one that should be there is not. */
+enum { FP_INSTANTIATE = 1, FP_ACTIVATE = 2, FP_REST = 4, FP_NOTES = 8, FP_SECOND = 16 };
+struct footprint {
+  unsigned got;
+  long instantiate, activate, rest, notes, second;
+  char unmeasured[32];
+  char detail[96];
+};
+
+static long grew(long from) {
+  const long now = rss_kb();
+  return now < 0 || from < 0 || now < from ? 0 : now - from;
+}
+
+static void footprint_blocks(struct rig *r, uint32_t block, unsigned *seed, int strike, uint32_t held) {
+  for (uint32_t b = 0; b < FOOTPRINT_BLOCKS; b++) {
+    for (uint32_t k = 0; k < r->h->n_audio_in; k++) {
+      float *in = rig_in(r, k);
+      for (uint32_t i = 0; i < block; i++) {
+        *seed = *seed * 1664525u + 1013904223u;
+        in[i] = ((float)(*seed >> 8) / 16777216.0f - 0.5f) * 0.5f;
+      }
+    }
+    r->probe_note = strike && b == 0 ? 3 : 0;
+    r->held = held;
+    rig_prepare(r);
+    lilv_instance_run(r->inst, block);
+    rig_after(r);
+  }
+}
+
+/* One instance through its life, with the readings as it goes, then a second beside it. A figure a step could not reach
+ * stays out. */
+static void footprint_measure(struct host *H, double rate, uint32_t block, struct footprint *fp) {
+  unsigned seed = 0x6d656du;
+  malloc_trim(0);
+  const long base = rss_kb();
+  if (base < 0) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "the resident set could not be read");
+    return;
+  }
+  struct rig *r = rig_open(H, rate, block, 1);
+  if (r == NULL) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "refused-instantiation");
+    snprintf(fp->detail, sizeof fp->detail, "the plugin would not instantiate for the footprint");
+    return;
+  }
+  fp->instantiate = grew(base), fp->got |= FP_INSTANTIATE;
+  lilv_instance_activate(r->inst);
+  fp->activate = grew(base), fp->got |= FP_ACTIVATE;
+  footprint_blocks(r, block, &seed, 0, 0);
+  fp->rest = grew(base), fp->got |= FP_REST;
+  if (H->n_audio_in == 0 && H->midi_port >= 0) {
+    const char *n = getenv("OMX_PROBE_NOTES");
+    const long held = n ? atol(n) : 0;
+    if (held > 0) {
+      footprint_blocks(r, block, &seed, 1, held > (long)MIDI_KEYS ? MIDI_KEYS : (uint32_t)held);
+      fp->notes = grew(base), fp->got |= FP_NOTES;
+    } else {
+      snprintf(fp->unmeasured, sizeof fp->unmeasured, "voices-unknown");
+      snprintf(fp->detail, sizeof fp->detail, "no probe count (OMX_PROBE_NOTES) of notes to hold");
+    }
+  }
+  const long before = rss_kb();
+  struct rig *q = rig_open(H, rate, block, 1);
+  if (q != NULL) {
+    lilv_instance_activate(q->inst);
+    footprint_blocks(q, block, &seed, 0, 0);
+    fp->second = grew(before), fp->got |= FP_SECOND;
+  }
+}
+
+/* the footprint, from a child of its own: the measure starts from a process no earlier instance grew, and a plugin that
+ * dies here costs the rate its figure and nothing else */
+static void footprint_rate(struct host *H, double rate, uint32_t block, struct footprint *fp) {
+  int fds[2];
+  memset(fp, 0, sizeof *fp);
+  fflush(NULL);
+  if (pipe(fds) != 0) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "no pipe for the footprint");
+    return;
+  }
+  const pid_t child = fork();
+  if (child == 0) {
+    struct footprint got;
+    close(fds[0]);
+    alarm(FOOTPRINT_TIMEOUT_S);
+    memset(&got, 0, sizeof got);
+    footprint_measure(H, rate, block, &got);
+    const ssize_t wrote = write(fds[1], &got, sizeof got);
+    _exit(wrote == (ssize_t)sizeof got ? 0 : 1);
+  }
+  close(fds[1]);
+  int status = 0;
+  const ssize_t got = child > 0 ? read(fds[0], fp, sizeof *fp) : -1;
+  close(fds[0]);
+  if (child > 0) waitpid(child, &status, 0);
+  if (got != (ssize_t)sizeof *fp) {
+    memset(fp, 0, sizeof *fp);
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, child > 0 && WIFSIGNALED(status) ? "probe-crashed" : "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "the footprint's child gave no figure (status %d)", status);
+  }
+}
+
 /* the cost object, in the shape the CLAP prober's line has */
-static void emit_cost(double rate, const struct cost_at *C, uint32_t block, int instrument) {
+static void emit_cost(double rate, const struct cost_at *C, uint32_t block, int instrument, const struct footprint *fp) {
   fprintf(jout, ",\"cost\":{\"stimulus\":\"%s\",\"blockFrames\":%u,\"warmupBlocks\":%u,\"percentile\":%.0f,\"perRate\":{\"%.0f\":{",
           instrument ? "notes-held" : "noise", block, COST_WARMUP_BLOCKS, COST_PERCENTILE, rate);
   if (C->unmeasured) {
@@ -1079,7 +1181,22 @@ static void emit_cost(double rate, const struct cost_at *C, uint32_t block, int 
             C->median, C->p95, C->min, C->max, C->warmup_median, C->blocks);
   }
   if (instrument && C->held) fprintf(jout, ",\"voices\":{\"held\":%u,\"basis\":\"probe\"}", C->held);
-  fprintf(jout, "}}}");
+  fprintf(jout, ",\"memory\":{");
+  const char *sep = "";
+  if (fp->got & FP_INSTANTIATE) fprintf(jout, "%s\"afterInstantiateKb\":%ld", sep, fp->instantiate), sep = ",";
+  if (fp->got & FP_ACTIVATE) fprintf(jout, "%s\"afterActivateKb\":%ld", sep, fp->activate), sep = ",";
+  if (fp->got & FP_REST) fprintf(jout, "%s\"atRestKb\":%ld", sep, fp->rest), sep = ",";
+  if (fp->got & FP_NOTES) fprintf(jout, "%s\"notesHeldKb\":%ld,\"basis\":\"probe\"", sep, fp->notes), sep = ",";
+  if (fp->got & FP_SECOND) fprintf(jout, "%s\"secondInstanceKb\":%ld", sep, fp->second), sep = ",";
+  if (fp->unmeasured[0]) {
+    fprintf(jout, "%s\"unmeasuredReason\":", sep);
+    json_str(jout, fp->unmeasured);
+    if (fp->detail[0]) {
+      fprintf(jout, ",\"unmeasuredDetail\":");
+      json_str(jout, fp->detail);
+    }
+  }
+  fprintf(jout, "}}}}");
 }
 
 static void usage(FILE *out, const char *self) {
@@ -1221,6 +1338,8 @@ int main(int argc, char **argv) {
    * It short-circuits the rest of the program: a soak is a long measurement of one
    * thing, not an addendum to the quick ones.
    */
+  /* the footprint comes first and from a child of its own: no instance before it has grown this process */
+  struct footprint footprint;
   const char *soak_env = getenv("OMX_SOAK_SECONDS");
   if (soak_env != NULL && atoi(soak_env) > 0) {
     const double soak_s = atof(soak_env);
@@ -1241,7 +1360,8 @@ int main(int argc, char **argv) {
     const long win_blocks = (long)(rate / block); /* ~1 s */
     long b = 0, windows = 0, nonfinite_windows = 0, silent_windows = 0;
     double first_rms = -1.0, last_rms = -1.0, min_rms = 1e30, max_rms = 0.0;
-    long rss_start = rss_kb(), rss_max = rss_start;
+    long rss_start = rss_kb(), rss_max = rss_start, rss_warm = -1, rss_mid = -1;
+    double warm_s = 0.0, mid_s = 0.0;
     double win_sum = 0.0;
     long win_n = 0;
     for (b = 0; b < total_blocks; b++) {
@@ -1273,6 +1393,11 @@ int main(int argc, char **argv) {
         else if (first_rms > 0 && rms == 0.0) silent_windows++;
         const long r = rss_kb();
         if (r > rss_max) rss_max = r;
+        /* raw readings for the growth a judge reads: past the same settling the first level skips, and halfway from
+         * there to the end, so that growth which stopped is told from growth still climbing */
+        const double at_s = (double)(b + 1) * block / rate;
+        if (rss_warm < 0 && windows >= 1) rss_warm = r, warm_s = at_s;
+        if (rss_mid < 0 && rss_warm >= 0 && at_s >= (warm_s + soak_s) / 2.0 && at_s > warm_s) rss_mid = r, mid_s = at_s;
         windows++;
         win_sum = 0.0;
         win_n = 0;
@@ -1285,13 +1410,16 @@ int main(int argc, char **argv) {
     fprintf(jout, ",\"soak\":{\"instantiated\":true,\"seconds\":%.0f,\"rate\":%.0f,\"block\":%u"
            ",\"windows\":%ld,\"nonFiniteWindows\":%ld,\"silentWindows\":%ld"
            ",\"firstRmsDbfs\":%.2f,\"lastRmsDbfs\":%.2f,\"minRmsDbfs\":%.2f,\"maxRmsDbfs\":%.2f"
-           ",\"rssStartKb\":%ld,\"rssMaxKb\":%ld,\"rssGrowthKb\":%ld}",
+           ",\"rssStartKb\":%ld,\"rssMaxKb\":%ld,\"rssGrowthKb\":%ld",
            soak_s, rate, block, windows, nonfinite_windows, silent_windows,
            first_rms > 0 ? omx_lin_to_db_d(first_rms, 0.0) : -999.0,
            last_rms > 0 ? omx_lin_to_db_d(last_rms, 0.0) : -999.0,
            min_rms < 1e29 && min_rms > 0 ? omx_lin_to_db_d(min_rms, 0.0) : -999.0,
            max_rms > 0 ? omx_lin_to_db_d(max_rms, 0.0) : -999.0,
            rss_start, rss_max, rss_max - rss_start);
+    if (rss_warm >= 0) fprintf(jout, ",\"rssAfterWarmupKb\":%ld,\"warmupSeconds\":%.3f", rss_warm, warm_s);
+    if (rss_mid >= 0) fprintf(jout, ",\"rssMidKb\":%ld,\"midSeconds\":%.3f", rss_mid, mid_s);
+    fprintf(jout, "}");
     emit_host_facts(H);
     emit_feature_options();
     fprintf(jout, "}\n");
@@ -1299,6 +1427,8 @@ int main(int argc, char **argv) {
     release(H, required, optional, uri_node, world);
     return 0;
   }
+
+  footprint_rate(H, rate, block, &footprint);
 
   /* ---- lifecycle: instantiate and destroy, counting what does not come back ---- */
   const int threads_before = count_threads();
@@ -1553,7 +1683,7 @@ int main(int argc, char **argv) {
     measure_latency(H, rate, block, &lat);
     measure_cost(H, rate, block, &cost);
     emit_latency(rate, &lat);
-    emit_cost(rate, &cost, block, n_audio_in == 0 && H->midi_port >= 0);
+    emit_cost(rate, &cost, block, n_audio_in == 0 && H->midi_port >= 0, &footprint);
   }
   emit_host_facts(H);
   emit_feature_options();

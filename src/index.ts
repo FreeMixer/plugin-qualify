@@ -10,6 +10,7 @@ export * from "./tool-paths.js";
 export * from "./rating.js";
 export * from "./host-profiles.js";
 export * from "./hosting-suitability.js";
+export * from "./memory-budget.js";
 export * from "./hosting-codes.js";
 export * from "./loader.js";
 export * from "./lv2-loader.js";

@@ -90,6 +90,19 @@ else:
 
 
 class ParseWorkerLine(unittest.TestCase):
+    def test_a_worker_runs_under_its_address_space_limit(self):
+        import subprocess
+        import sys
+
+        import benchmark
+
+        limit = 1 << 30
+        out = subprocess.run(
+            [sys.executable, "-c", "import resource; print(resource.getrlimit(resource.RLIMIT_AS)[0])"],
+            capture_output=True, text=True, preexec_fn=benchmark.address_space_limit(limit),
+        )
+        self.assertEqual(int(out.stdout), limit)
+
     def test_ready_and_result_lines(self):
         self.assertEqual(b.parse_worker_line('{"ready": true}'), {"ready": True})
         self.assertEqual(b.parse_worker_line('{"uri": "u", "frames": 64.0}'),

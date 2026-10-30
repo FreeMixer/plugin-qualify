@@ -50,7 +50,7 @@ if (dataBytes !== undefined && need > dataBytes) {
   ];
   doc.grid = [];
 } else {
-  doc.grid = measured.map((rate) => ({ ...structuredClone(template), rate, quantum }));
+  doc.grid = measured.map((rate) => ({ ...structuredClone(template), rate, quantum, memory: { afterInstantiateKb: 600, afterActivateKb: 1200, atRestKb: 1200, secondInstanceKb: 600 } }));
   doc.steps = doc.steps.filter((s) => s.rate === undefined).concat(measured.map((rate) => ({ step: "cost", rate, quantum, outcome: "probe.ok", elapsedMs: 1 })));
 }
 writeFileSync(`${opts["--out"]}.new`, JSON.stringify(doc));

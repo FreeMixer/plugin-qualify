@@ -14,7 +14,7 @@
  *
  * One run that ended well and needs nothing added is kept as the runner wrote it, byte for byte.
  */
-import { outOfMemory, PROBE_OOM, type MemoryBound } from "./memory-bound.js";
+import { isOutOfMemory, MEMORY_CGROUP_MECHANISM, outOfMemory, PROBE_MEMORY_LIMIT, PROBE_OOM, type MemoryBound } from "./memory-bound.js";
 import { cellKey, type RunnerInvocation } from "./measurement-grid.js";
 import { PROBE_OK, readProbeOutput, type ProbeOutput } from "./probe-output.js";
 
@@ -36,7 +36,8 @@ type Json = Record<string, unknown>;
 
 export function mergeProbeRuns(parts: readonly ProbeRunPart[], bound: MemoryBound | undefined): { bytes: Buffer; output: ProbeOutput } {
   if (parts.length === 0) throw new ProbeMergeError("no run to merge");
-  const outcomes = parts.map((p) => (outOfMemory(p.output, bound) ? PROBE_OOM : p.output.run.outcome));
+  // the runner's own outcome when it says it (the kernel killed the child at memory.max), else what its exit means under the data limit
+  const outcomes = parts.map((p) => (p.output.run.outcome === PROBE_MEMORY_LIMIT ? PROBE_MEMORY_LIMIT : outOfMemory(p.output, bound) ? PROBE_OOM : p.output.run.outcome));
   const first = parts[0]!;
   for (const p of parts.slice(1)) {
     if (p.output.plugin.id !== first.output.plugin.id || p.output.binary.sha256 !== first.output.binary.sha256 || p.output.offer.id !== first.output.offer.id) {
@@ -66,18 +67,18 @@ export function mergeProbeRuns(parts: readonly ProbeRunPart[], bound: MemoryBoun
       for (const c of p.invocation.cells) {
         if (seen.has(cellKey(c))) continue;
         seen.add(cellKey(c));
-        grid.push({ rate: c.rate, quantum: c.quantum, outcome: outcomes[i], ...(outcomes[i] === PROBE_OOM && bound !== undefined ? { memoryLimit: { bytes: bound.bytes, mechanism: bound.mechanism } } : {}) });
+        grid.push({ rate: c.rate, quantum: c.quantum, outcome: outcomes[i], ...(isOutOfMemory(outcomes[i]!) && bound !== undefined ? { memoryLimit: { bytes: bound.bytes, mechanism: outcomes[i] === PROBE_MEMORY_LIMIT ? MEMORY_CGROUP_MECHANISM : bound.mechanism } } : {}) });
       }
     }
     steps.push(...((docs[i]!["steps"] as unknown[] | undefined) ?? []));
   });
-  const judged = outcomes.filter((o) => o !== PROBE_OOM);
+  const judged = outcomes.filter((o) => !isOutOfMemory(o));
   const run = merged["run"] as Json;
   merged["run"] = {
     ...run,
     elapsedMs: parts.reduce((sum, p) => sum + p.output.run.elapsedMs, 0),
     complete: parts.every((p, i) => p.output.run.complete && outcomes[i] === PROBE_OK),
-    outcome: judged.length === 0 ? PROBE_OOM : (judged.find((o) => o !== PROBE_OK) ?? PROBE_OK),
+    outcome: judged.length === 0 ? outcomes[0]! : (judged.find((o) => o !== PROBE_OK) ?? PROBE_OK),
     parts: parts.map((p, i) => ({ id: p.output.run.id, outcome: outcomes[i], rates: p.invocation.rates, quantum: p.invocation.quantum, elapsedMs: p.output.run.elapsedMs })),
   };
   merged["steps"] = steps;

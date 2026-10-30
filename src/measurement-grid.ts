@@ -72,6 +72,11 @@ export function gridCells(
   return unique([...lead.filter((c) => inProduct.has(cellKey(c))), ...product]);
 }
 
+/** The cells a host is judged at: the one its cost is read at, then the others its memory budget says it runs. */
+export function hostCells(profile: { readonly cost: GridCell & { readonly memory?: { readonly cells?: readonly GridCell[] } } }): GridCell[] {
+  return unique([{ rate: profile.cost.rate, quantum: profile.cost.quantum }, ...(profile.cost.memory?.cells ?? [])]);
+}
+
 /** The first `budget` cells, or every one when the budget is absent or 0. */
 export function budgetCells(cells: readonly GridCell[], budget: number | undefined): GridCell[] {
   return budget === undefined || budget === 0 ? [...cells] : cells.slice(0, budget);

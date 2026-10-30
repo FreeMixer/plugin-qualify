@@ -106,7 +106,7 @@ describe("the hosting dimensions through the format and the merge", () => {
 
   it("a v1.1 document round-trips its three blocks through the reader", () => {
     const written = doc("shipped", swept);
-    expect(written.formatVersion).toBe("1.5");
+    expect(written.formatVersion).toBe("1.6");
     const read = readMeasurementDocument(JSON.parse(serialiseMeasurementDocument(written)));
     expect(read.ok).toBe(true);
     if (!read.ok) return;

@@ -62,6 +62,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <malloc.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -422,6 +423,8 @@ struct port_set {
   int main_port; /* -1 when none is main */
 };
 
+#include "rss-kb.h"
+
 /* how the cost arm chose how many notes to hold */
 enum voice_basis { BASIS_NONE, BASIS_DECLARED, BASIS_PROBE };
 
@@ -436,6 +439,17 @@ struct cost_at {
   enum voice_basis basis;
   int has_capacity;
   uint32_t capacity;
+};
+
+/* one rate of the footprint: what the resident set grew by at each step of one instance's life, in KB, and a second
+ * instance's own part. `got` marks each figure taken; `unmeasured` says why one that should be there is not. */
+enum { FP_INSTANTIATE = 1, FP_ACTIVATE = 2, FP_REST = 4, FP_NOTES = 8, FP_SECOND = 16 };
+struct footprint {
+  unsigned got;
+  long instantiate, activate, rest, notes, second;
+  enum voice_basis basis;
+  char unmeasured[32];
+  char detail[96];
 };
 
 struct facts {
@@ -466,6 +480,7 @@ struct facts {
   /* the cost arm, per rate; `cost_notes` is whether it played notes (an instrument) or noise */
   int cost_notes;
   struct cost_at cost[MAX_RATES];
+  struct footprint footprint[MAX_RATES];
 };
 
 static int ports_open(const clap_plugin_t *p, const clap_plugin_audio_ports_t *ext, bool input, uint32_t frames,
@@ -953,6 +968,137 @@ static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint
   free(ns);
 }
 
+/* ---- the footprint ---- */
+
+/* what loading the .clap itself took, in KB: it belongs to the first instance, since nothing else loads it */
+static long g_load_kb;
+
+static long grew(long from) {
+  const long now = rss_kb();
+  return now < 0 || from < 0 || now < from ? 0 : now - from;
+}
+
+static void footprint_blocks(const clap_plugin_t *p, struct port_set *ins, struct port_set *outs, uint32_t frames, uint32_t *seed) {
+  int64_t steady = 0;
+  for (uint32_t b = 0; b < FOOTPRINT_BLOCKS; b++) {
+    for (uint32_t k = 0; k < ins->count; k++)
+      for (uint32_t ch = 0; ch < ins->buf[k].channel_count; ch++)
+        for (uint32_t i = 0; i < frames; i++) {
+          *seed = *seed * 1664525u + 1013904223u;
+          ins->chan[k][ch][i] = ((float)(*seed >> 8) / 16777216.0f - 0.5f) * 0.5f;
+        }
+    run_block(p, ins, outs, frames, &steady, NULL);
+  }
+}
+
+/* One instance through its life, with the readings as it goes, then a second beside it. Runs in a child of its own: the
+ * measure must start from a process no earlier instance grew, and a plugin that dies here costs the rate its figure and
+ * nothing else. A figure a step could not reach stays out. */
+static void footprint_measure(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d, double rate, uint32_t frames,
+                              int instrument_feature, const struct options *o, struct footprint *fp) {
+  uint32_t seed = 0x6d656du;
+  struct port_set ins, outs, ins2, outs2;
+  uint32_t main_in, main_out, others;
+  malloc_trim(0);
+  const long base = rss_kb();
+  if (base < 0) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "the resident set could not be read");
+    return;
+  }
+  const clap_plugin_t *p = factory->create_plugin(factory, &g_clap_host, d->id);
+  if (!p || !p->init(p)) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "refused-instantiation");
+    snprintf(fp->detail, sizeof fp->detail, "create_plugin or init failed for the footprint");
+    return;
+  }
+  g_host.plugin = p;
+  g_host.plugin_thread_pool = p->get_extension(p, CLAP_EXT_THREAD_POOL);
+  fp->instantiate = grew(base) + g_load_kb, fp->got |= FP_INSTANTIATE;
+  const clap_plugin_audio_ports_t *ports = p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
+  if (ports_open(p, ports, true, frames, &ins, &main_in, &others) != 0 || ports_open(p, ports, false, frames, &outs, &main_out, &others) != 0 ||
+      !p->activate(p, rate, frames, frames)) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "refused-instantiation");
+    snprintf(fp->detail, sizeof fp->detail, "activate failed for the footprint");
+    return;
+  }
+  fp->activate = grew(base) + g_load_kb, fp->got |= FP_ACTIVATE;
+  if (p->start_processing && !p->start_processing(p)) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "refused-instantiation");
+    snprintf(fp->detail, sizeof fp->detail, "start_processing failed for the footprint");
+    return;
+  }
+  footprint_blocks(p, &ins, &outs, frames, &seed);
+  fp->rest = grew(base) + g_load_kb, fp->got |= FP_REST;
+  /* an instrument at the same notes the cost arm holds; one it cannot say a count for has no figure, and says so */
+  const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
+  int clap_dialect = 0, midi_too = 0;
+  const char *dialect = note_dialect(p, &clap_dialect, &midi_too);
+  if (notes && notes->count(p, true) > 0 && (main_in == 0 || instrument_feature)) {
+    int has_capacity = 0;
+    const uint32_t capacity = dialect ? voice_capacity(p, &has_capacity) : 0;
+    uint32_t held = 0;
+    if (!dialect) snprintf(fp->unmeasured, sizeof fp->unmeasured, "notes-unplayable");
+    else if (o->hold) held = o->hold, fp->basis = BASIS_PROBE;
+    else if (has_capacity && capacity == 0) snprintf(fp->unmeasured, sizeof fp->unmeasured, "no-voices");
+    else if (has_capacity) held = capacity, fp->basis = BASIS_DECLARED;
+    else if (o->probe_notes) held = o->probe_notes, fp->basis = BASIS_PROBE;
+    else snprintf(fp->unmeasured, sizeof fp->unmeasured, "voices-unknown");
+    if (held > NOTE_KEYS_MAX) held = NOTE_KEYS_MAX;
+    if (held) {
+      for (uint32_t k = 0; k < held; k++) note_key(clap_dialect, 0, 1, held_key(k, held), HELD_VELOCITY);
+      footprint_blocks(p, &ins, &outs, frames, &seed);
+      fp->notes = grew(base) + g_load_kb, fp->got |= FP_NOTES;
+    } else {
+      snprintf(fp->detail, sizeof fp->detail, "no count of notes to hold for the footprint");
+    }
+  }
+  /* the second instance's own part: what it adds once the first is there, which is what any further one costs */
+  const long before = rss_kb();
+  const clap_plugin_t *q = factory->create_plugin(factory, &g_clap_host, d->id);
+  if (q && q->init(q)) {
+    const clap_plugin_audio_ports_t *qports = q->get_extension(q, CLAP_EXT_AUDIO_PORTS);
+    if (ports_open(q, qports, true, frames, &ins2, &main_in, &others) == 0 && ports_open(q, qports, false, frames, &outs2, &main_out, &others) == 0 &&
+        q->activate(q, rate, frames, frames) && (!q->start_processing || q->start_processing(q))) {
+      footprint_blocks(q, &ins2, &outs2, frames, &seed);
+      fp->second = grew(before), fp->got |= FP_SECOND;
+    }
+  }
+}
+
+/* the footprint at one rate, from a child of its own */
+static void footprint_rate(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d, double rate, uint32_t frames,
+                           int instrument_feature, const struct options *o, struct footprint *fp) {
+  int fds[2];
+  memset(fp, 0, sizeof *fp);
+  fflush(NULL);
+  if (pipe(fds) != 0) {
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "no pipe for the footprint");
+    return;
+  }
+  const pid_t child = fork();
+  if (child == 0) {
+    struct footprint got;
+    close(fds[0]);
+    alarm(FOOTPRINT_TIMEOUT_S);
+    memset(&got, 0, sizeof got);
+    footprint_measure(factory, d, rate, frames, instrument_feature, o, &got);
+    const ssize_t wrote = write(fds[1], &got, sizeof got);
+    _exit(wrote == (ssize_t)sizeof got ? 0 : 1);
+  }
+  close(fds[1]);
+  int status = 0;
+  const ssize_t got = child > 0 ? read(fds[0], fp, sizeof *fp) : -1;
+  close(fds[0]);
+  if (child > 0) waitpid(child, &status, 0);
+  if (got != (ssize_t)sizeof *fp) {
+    memset(fp, 0, sizeof *fp);
+    snprintf(fp->unmeasured, sizeof fp->unmeasured, child > 0 && WIFSIGNALED(status) ? "probe-crashed" : "probe-error");
+    snprintf(fp->detail, sizeof fp->detail, "the footprint's child gave no figure (status %d)", status);
+  }
+}
+
 /* ---- JSON ---- */
 
 /* where the JSON goes: stdout, or a scan child's pipe */
@@ -1075,7 +1221,23 @@ static void put_cost(const struct facts *f, uint32_t frames) {
       if (c->has_capacity) fprintf(g_out, "\"capacity\":%u", c->capacity);
       fputc_out('}');
     }
-    fputc_out('}');
+    const struct footprint *fp = &f->footprint[r];
+    fprintf(g_out, ",\"memory\":{");
+    const char *sep = "";
+    if (fp->got & FP_INSTANTIATE) fprintf(g_out, "%s\"afterInstantiateKb\":%ld", sep, fp->instantiate), sep = ",";
+    if (fp->got & FP_ACTIVATE) fprintf(g_out, "%s\"afterActivateKb\":%ld", sep, fp->activate), sep = ",";
+    if (fp->got & FP_REST) fprintf(g_out, "%s\"atRestKb\":%ld", sep, fp->rest), sep = ",";
+    if (fp->got & FP_NOTES) fprintf(g_out, "%s\"notesHeldKb\":%ld,\"basis\":\"%s\"", sep, fp->notes, BASIS_NAME[fp->basis]), sep = ",";
+    if (fp->got & FP_SECOND) fprintf(g_out, "%s\"secondInstanceKb\":%ld", sep, fp->second), sep = ",";
+    if (fp->unmeasured[0]) {
+      fprintf(g_out, "%s\"unmeasuredReason\":", sep);
+      put_string(fp->unmeasured);
+      if (fp->detail[0]) {
+        fprintf(g_out, ",\"unmeasuredDetail\":");
+        put_string(fp->detail);
+      }
+    }
+    fprintf(g_out, "}}");
   }
   fprintf(g_out, "}}");
 }
@@ -1594,6 +1756,14 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   for (const char *const *ft = d->features; ft && *ft; ft++)
     if (!strcmp(*ft, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT)) f.is_audio_effect = 1;
 
+  /* the footprint comes first and from children of their own, so no instance before it has grown this process */
+  {
+    int feature = 0;
+    for (const char *const *ft = d->features; ft && *ft; ft++)
+      if (!strcmp(*ft, CLAP_PLUGIN_FEATURE_INSTRUMENT)) feature = 1;
+    for (uint32_t r = 0; r < o->n_rates; r++) footprint_rate(factory, d, o->rates[r], o->frames, feature, o, &f.footprint[r]);
+  }
+
   struct integrity pin = { "refused-instantiation", "create_plugin or init failed", "" };
   const clap_plugin_t *p = factory->create_plugin(factory, &g_clap_host, d->id);
   if (!p || !p->init(p)) {
@@ -1764,6 +1934,7 @@ int main(int argc, char **argv) {
     if (lines) g_out = lines;
   }
 
+  const long before_load = rss_kb();
   void *so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (!so) {
     fprintf(stderr, "%s: %s\n", argv[0], dlerror());
@@ -1775,6 +1946,7 @@ int main(int argc, char **argv) {
     dlclose(so);
     return 2;
   }
+  g_load_kb = grew(before_load);
   const clap_plugin_factory_t *factory = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
   int status = 0, found = 0;
   const uint32_t n = factory ? factory->get_plugin_count(factory) : 0;

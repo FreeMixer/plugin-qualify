@@ -20,6 +20,7 @@ import type { AdmissionRuns } from "./host-admission.js";
 import { GRID_FULL, GRID_HOSTS, cellKey, gridCells } from "./measurement-grid.js";
 import { MEMORY_BOUND_MECHANISM, PROBE_OOM, memoryBoundOf, outOfMemory, parseMemoryLimit, defaultMemoryLimit } from "./memory-bound.js";
 import { judgeProbeOutput } from "./probe-judge.js";
+import { mergeProbeRuns } from "./probe-merge.js";
 import { fixtureJson } from "./probe-output-fixtures.js";
 import { readProbeOutput } from "./probe-output.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
@@ -140,6 +141,41 @@ describe("the verdict reads the host's own cell", () => {
   it("an absent cell is named: openmixer-console at 96000/1024, with 96000/512 measured beside it", () => {
     const [h] = judgeProbeOutput(doc(), [OPENMIXER_CONSOLE_PROFILE]).hosts;
     expect(h!.cost.reasons).toEqual([{ dimension: "cost", rating: "unknown", code: HOSTING_CODE.costUnmeasured, params: { rate: 96000, quantum: 1024 } }]);
+  });
+
+  it("a child the kernel killed at memory.max is a cell of the runner's own outcome, with the mechanism, and the others are judged", () => {
+    const d = fixtureJson("success-msi");
+    const point = d.grid[0];
+    delete point.cost.samples;
+    const ok = (o: Record<string, unknown>) => {
+      const r = readProbeOutput(JSON.stringify(o));
+      if (!r.ok) throw new Error(r.problem);
+      return { bytes: Buffer.from(JSON.stringify(o)), output: r.output };
+    };
+    const good = ok({ ...structuredClone(d), grid: [{ ...structuredClone(point), rate: 48000, quantum: 128 }] });
+    const killed = ok({ ...structuredClone(d), run: { ...d.run, outcome: "probe.memory-limit", complete: false }, grid: [], steps: [{ step: "lifecycle", outcome: "probe.memory-limit", elapsedMs: 3, signal: "SIGKILL" }] });
+    const bound = memoryBoundOf(2 ** 31)!;
+    const { output } = mergeProbeRuns(
+      [
+        { ...good, invocation: { rates: [48000], quantum: 128, cells: [{ rate: 48000, quantum: 128 }] } },
+        { ...killed, invocation: { rates: [48000], quantum: 256, cells: [{ rate: 48000, quantum: 256 }] } },
+      ],
+      bound,
+    );
+    expect(output.grid.find((p) => p.quantum === 256)).toMatchObject({ outcome: "probe.memory-limit", memoryLimit: { bytes: 2 ** 31, mechanism: "cgroup-memory-max" } });
+    const jalv = judgeProbeOutput(output, [JALV_PROFILE]).hosts[0]!;
+    expect(jalv.verdict.rating).toBe("unknown");
+    expect(jalv.reasons.some((r) => r.dimension === "memory" && r.code === "probe.memory-limit")).toBe(true);
+    expect(judgeProbeOutput(output, [OMX_CLAP_HOST_PROFILE]).hosts[0]!.reasons.some((r) => r.code === "probe.memory-limit")).toBe(false);
+  });
+
+  it("a record carries the footprint of a cell with what it comes to, and a footprint with a reason beside it comes to nothing", async () => {
+    const { memoryOfCellForTest } = await import("./qualification-record.js");
+    expect(memoryOfCellForTest({ rate: 48000, quantum: 128, outcome: "probe.ok", memory: { afterActivateKb: 900, atRestKb: 1000, notesHeldKb: 1500, secondInstanceKb: 100 } }).memory).toMatchObject({ firstInstanceKb: 1500, perInstanceKb: 600 });
+    const partial = memoryOfCellForTest({ rate: 48000, quantum: 128, outcome: "probe.ok", memory: { atRestKb: 1000, unmeasuredReason: "voices-unknown" } }).memory!;
+    expect(partial.firstInstanceKb).toBeUndefined();
+    expect(partial.perInstanceKb).toBeUndefined();
+    expect(partial.atRestKb).toBe(1000);
   });
 
   it("a cell that outgrew the bound is named by its outcome, with the limit, and leaves the other hosts judged", () => {

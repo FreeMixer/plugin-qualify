@@ -25,7 +25,7 @@ import type { PluginTarget } from "./loader.js";
 import { ADAPTER_HOST, SPAWNED_ADMISSIONS, admitPlugin, admitUnderAdapter, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
-import { budgetCells, gridCells, runnerInvocations, type GridCell, type GridSpec, type RunnerInvocation } from "./measurement-grid.js";
+import { budgetCells, gridCells, hostCells, runnerInvocations, type GridCell, type GridSpec, type RunnerInvocation } from "./measurement-grid.js";
 import type { MemoryBound } from "./memory-bound.js";
 import { mergeProbeRuns, ProbeMergeError } from "./probe-merge.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
@@ -292,7 +292,7 @@ export function qualifyTargets(
     const cells =
       options.grid === undefined
         ? options.cells
-        : gridCells(options.grid, { rates: options.rates, quanta: options.quanta ?? QUALIFY_QUANTA, hosts: judgedProfiles.map((p) => ({ rate: p.cost.rate, quantum: p.cost.quantum })) });
+        : gridCells(options.grid, { rates: options.rates, quanta: options.quanta ?? QUALIFY_QUANTA, hosts: judgedProfiles.flatMap(hostCells) });
     const measured = cells === undefined ? {} : { cells: budgetCells(cells, options.cellsPerPluginBudget) };
     // an LV2 plugin is run under each measured host once, whichever probe output it is judged with
     const admissions: Record<string, HostAdmission> = {};

@@ -147,6 +147,12 @@ export const GRID_CONTINUITY_QUANTUM = CLAP_SWEEP_FRAMES;
  * same two (src/memory-bound.test.ts holds them together).
  */
 export const MEMORY_LIMIT_RAM_FRACTION = 0.5;
+/**
+ * The address space (`RLIMIT_AS`) of a process plugin-qualify spawns directly, with no runner to give it a cgroup: all the
+ * machine's RAM. Address space is what a plugin reserves, not what it touches, so this is the far bound of a direct
+ * run, not its budget. Off for a sanitizer build, which reserves far more address space than it uses.
+ */
+export const ADDRESS_SPACE_LIMIT_RAM_FRACTION = 1;
 export const MEMORY_BOUND_EXIT_ENV = "OMX_RT_OOM_EXIT";
 export const MEMORY_BOUND_EXIT_STATUS = 121;
 
@@ -212,6 +218,12 @@ export interface HostingPolicy {
   readonly cycleFloor: number;
   /** Minimum continuous soak, seconds. Default 3 h — the operator's longest show. */
   readonly soakSeconds: number;
+  /**
+   * The memory growth a soak may show past warm-up, in KB per minute of audio. 10 MB/min ships provisional and is
+   * tightened from measurements; a verdict that rests on it says so.
+   */
+  readonly memoryGrowthKbPerMinCeiling: number;
+  readonly memoryGrowthCeilingProvisional: boolean;
   /** Above this ratio a plugin is spiky: in-process a spike is the whole desk's xrun. */
   readonly costTailRatioCeiling: number;
   /** A soak rate whose settled output sits this far under the plugin's own best rate is
@@ -231,6 +243,8 @@ export const DEFAULT_HOSTING_POLICY: HostingPolicy = {
   soakSeconds: 3 * 60 * 60,
   costTailRatioCeiling: 4,
   soakDeadDropDb: 40,
+  memoryGrowthKbPerMinCeiling: 10240,
+  memoryGrowthCeilingProvisional: true,
 };
 
 /** What a host spends on one plugin instance — the
@@ -247,10 +261,42 @@ export type { HostBudget };
  * `omx-clap-host` runs its plugins one JACK client each, called in turn on the server's one cycle,
  * so it gets mod-host's share and pair.
  */
+const GIB_KB = 1024 * 1024;
+
+/**
+ * The desk's memory budget: half of its 30 GiB for the plugins of a console, the rest the engine's and the system's;
+ * one instance's share is what the probe bounds a run by, 4 GiB.
+ */
+const DESK_MEMORY = { perInstanceKb: 4 * GIB_KB, perConsoleKb: 16 * GIB_KB };
+
+/**
+ * What a Raspberry Pi gives its plugins' memory, by the board's RAM: all but 1 GiB for the system and Zynthian's own
+ * UI, and an instance's share an eighth of that. Provisional until measured on a Pi: the stress runs show a 4 GiB Pi 5 stopping
+ * at 400 MB free, and no plugin's footprint has been read there yet.
+ */
+const piMemory = (ramGib: number): NonNullable<HostBudget["memory"]> => ({
+  perInstanceKb: ((ramGib - 1) * GIB_KB) / 8,
+  perConsoleKb: (ramGib - 1) * GIB_KB,
+  provisional: true,
+  cells: PI_CELLS,
+});
+
+/**
+ * The cells a Raspberry Pi runs: zynthian-sys's JACK settings, 48000/128 on a Pi 5 with the V5 kit and 48000/256 on a Pi 4 and
+ * the other kits, the one a Pi 5 with no kit card also ran its stress and first boot at. The Zynthian benchmark's matrix sweeps
+ * more cells; these two are what a Pi is set to.
+ */
+const PI_CELLS = [
+  { rate: MEASURE_BASE_RATE, quantum: 128 },
+  { rate: MEASURE_BASE_RATE, quantum: 256 },
+];
+
 export const HOST_BUDGETS = {
-  "openmixer-console": { coreFractionCeiling: 0.05, rate: COST_REFERENCE_RATE, quantum: QUANTUM_FRAMES },
+  "openmixer-console": { coreFractionCeiling: 0.05, rate: COST_REFERENCE_RATE, quantum: QUANTUM_FRAMES, memory: DESK_MEMORY },
   jalv: { coreFractionCeiling: 0.25, rate: MEASURE_BASE_RATE, quantum: 256 },
   "mod-host": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128 },
   "omx-clap-host": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128 },
+  "openmixer-pi-4gb": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128, memory: piMemory(4) },
+  "openmixer-pi-8gb": { coreFractionCeiling: 0.05, rate: MEASURE_BASE_RATE, quantum: 128, memory: piMemory(8) },
 } as const satisfies Readonly<Record<string, HostBudget>>;
 

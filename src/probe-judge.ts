@@ -24,9 +24,10 @@ import {
   type ClapRtSafetyReading,
   type RtSafetyDocument,
 } from "./clap-qualify.js";
-import { gridCostReadings } from "./cost-fields.js";
+import { costPointKey, gridCostReadings } from "./cost-fields.js";
 import {
   hostingCostReasons,
+  hostingMemoryReasons,
   noteSweepReasons,
   rtSafetyReasons,
   contributedHostingRating,
@@ -38,7 +39,8 @@ import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } 
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import type { IntegrityMeasurement, VoicesHeld } from "./measurement/format.js";
-import { PROBE_OOM } from "./memory-bound.js";
+import { isOutOfMemory } from "./memory-bound.js";
+import type { MemoryFootprint } from "./measurement/format.js";
 
 /** Facts of the descriptor, which the probe output repeats none of. */
 export interface JudgeFacts {
@@ -202,6 +204,13 @@ function decidingOf(reasons: readonly RecordReason[], rating: SuitabilityRating)
   return [...reasons].sort((a, b) => RATING_SEVERITY[b.rating] - RATING_SEVERITY[a.rating]).find((r) => r.rating === rating);
 }
 
+/** The footprints of the cells that ran to their end, as the verdict reads them. */
+function gridMemoryReadings(output: ProbeOutput): Record<string, MemoryFootprint> {
+  const out: Record<string, MemoryFootprint> = {};
+  for (const p of output.grid) if (p.outcome === PROBE_OK && p.memory !== undefined) out[costPointKey(p.rate, p.quantum)] = p.memory;
+  return out;
+}
+
 /** The grid point at a host's own cell, whatever its outcome; `undefined` when the grid does not hold that cell. */
 function cellOf(output: ProbeOutput, profile: HostProfile): ProbeGridPoint | undefined {
   return output.grid.find((p) => p.rate === profile.cost.rate && p.quantum === profile.cost.quantum);
@@ -238,7 +247,7 @@ function costOf(output: ProbeOutput, profile: HostProfile): HostJudgment["cost"]
 function failedOutcome(output: ProbeOutput): string | undefined {
   if (output.run.outcome !== PROBE_OK) return output.run.outcome;
   // a cell that outgrew the memory bound is a recorded outcome of that cell, judged per host below, not the run's end
-  return output.grid.find((p) => p.outcome !== PROBE_OK && p.outcome !== PROBE_NOT_ATTEMPTED && p.outcome !== PROBE_OOM)?.outcome;
+  return output.grid.find((p) => p.outcome !== PROBE_OK && p.outcome !== PROBE_NOT_ATTEMPTED && !isOutOfMemory(p.outcome))?.outcome;
 }
 
 /**
@@ -282,8 +291,11 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
     }
     // the plugin did not run within the memory bound at this host's own rate and quantum: not hostable there as measured
     const cell = cellOf(output, profile);
-    if (cell?.outcome === PROBE_OOM) {
-      reasons = [...reasons, { dimension: "memory", rating: "unknown", code: PROBE_OOM, params: { rate: cell.rate, quantum: cell.quantum, ...memoryParams(cell) } }];
+    if (cell !== undefined && isOutOfMemory(cell.outcome)) {
+      reasons = [...reasons, { dimension: "memory", rating: "unknown", code: cell.outcome, params: { rate: cell.rate, quantum: cell.quantum, ...memoryParams(cell) } }];
+    } else {
+      // what this host's budget makes of the footprint, every cell it runs: part of the verdict, unlike the cost beside it
+      reasons = [...reasons, ...hostingMemoryReasons({ perRateQuantum: gridMemoryReadings(output) }, profile).map(asRecordReason)];
     }
     const admission = facts.admissions?.[profile.id];
     const ran = admission !== undefined && runDecides(profile, output.plugin.format, admission);

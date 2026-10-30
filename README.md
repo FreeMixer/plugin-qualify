@@ -119,6 +119,28 @@ judged as usual. A plugin whose every run ended `probe.oom` is `unknown` under e
 A host whose own cell ended `probe.oom` is `unknown` there as well (`memory`, `probe.oom`): the plugin did not
 run within the bound at that host's rate and quantum.
 
+Where the machine delegates the memory controller, the runner sets the bound as `memory.max` of a cgroup instead: a run the
+kernel kills at it is `probe.memory-limit`, read the same way, and the document's `limits` says which it was. A process
+plugin-qualify spawns itself, with no runner (`tools/lv2-measure.mjs`, `tools/benchmark.py`), runs under `RLIMIT_AS` at the
+machine's RAM, off for a sanitizer build; hitting it is `memory-limit-exceeded`, with the limit.
+
+### Memory
+
+Each cell carries a footprint: how far the resident set of a process of its own grew, in KB, after instantiate, after
+activate, at rest after processing, with notes held for an instrument, and what a second instance added. A record adds what
+they come to: `firstInstanceKb`, the most one instance held with everything its instances share, and `perInstanceKb`, what
+one more costs.
+
+A host with a memory budget reads them, at every cell it runs, and the verdict follows:
+`hosting.memory.within-ceiling`, `hosting.memory.above-ceiling` (`unsuitable`), or `hosting.memory.unmeasured` (`unknown`,
+since a missing figure never reads as fitting). `openmixer-console` has one, sized for the desk, and the Raspberry Pi hosts
+`openmixer-pi-4gb` and `openmixer-pi-8gb`, at 48000/128 and 48000/256, have one each. The Pi budgets are not measured on a Pi
+yet, so a plugin under them is `conditional`, `hosting.memory.within-provisional-ceiling`: that gives the figure and the
+ceiling and does not say the plugin fits. The other hosts have no budget, and read nothing.
+
+A soak (LV2; the CLAP prober has no continuous render yet) also reads the growth: past 10 MB per minute of audio over its
+second half, provisional, the rate fails as `leaks`.
+
 ### How long a run takes
 
 The default grid is the full one, so the expected time of a run with no grid option is the `full` row: about 65 hours on a Raspberry Pi 5 for the vangelis set (1823 records). `--grid-hosts` is the fast option, about 30 hours there.
@@ -462,7 +484,7 @@ With several profiles, the exit code is `0` only if every plugin qualifies under
 
 ### The JSON document
 
-`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.5,
+`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.6,
 the same format the OpenMixer console reads). The
 `plugins` array holds the raw, host-free measurements. Beside it, `hostProfiles` holds each
 profile the run judged against, in full, and `verdicts` holds one entry per plugin per profile:

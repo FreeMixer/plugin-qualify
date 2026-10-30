@@ -40,5 +40,7 @@ if (r.status !== 0) {
   process.exit(r.status === 3 ? 3 : 2);
 }
 const line = JSON.parse(r.stdout.split("\n").find((l) => l.trim() !== ""));
-writeFileSync(`${opts["--out"]}.new`, JSON.stringify(probeOutputOfLine(line)));
+const doc = probeOutputOfLine(line);
+for (const point of doc.grid) point.memory = { afterInstantiateKb: 600, afterActivateKb: 1200, atRestKb: 1200, secondInstanceKb: 600 };
+writeFileSync(`${opts["--out"]}.new`, JSON.stringify(doc));
 renameSync(`${opts["--out"]}.new`, opts["--out"]);

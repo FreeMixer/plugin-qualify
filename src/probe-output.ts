@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 
 import { finiteNumber, isRecord, nonEmptyString, optional } from "./measurement/guards.js";
-import { readVoicesHeld, type VoicesHeld } from "./measurement/format.js";
+import { readMemoryFootprint, readVoicesHeld, type MemoryFootprint, type VoicesHeld } from "./measurement/format.js";
 
 export const PROBE_OUTPUT_FORMAT = "plugin-hostd.probe-output";
 /** The one major this reader knows. A minor of it only adds fields. */
@@ -96,7 +96,9 @@ export interface ProbeGridPoint {
   readonly cost?: ProbeCost;
   readonly rtSafety?: ProbeRtSafety;
   readonly noteSweep?: ProbeNoteSweep;
-  /** A cell whose run outgrew the memory bound (`probe.oom`): the bound it ran under. */
+  /** What one instance holds at this rate and quantum, as the prober read it; absent when it took none. */
+  readonly memory?: MemoryFootprint;
+  /** A cell whose run outgrew the memory bound (`probe.oom`, `probe.memory-limit`): the bound it ran under. */
   readonly memoryLimit?: { readonly bytes: number; readonly mechanism: string };
 }
 
@@ -310,6 +312,7 @@ function readPoint(v: unknown, i: number): ProbeGridPoint {
     ...(o["cost"] === undefined ? {} : { cost: readCost(o["cost"], `${where} cost`) }),
     ...(o["rtSafety"] === undefined ? {} : { rtSafety: readRtSafety(o["rtSafety"], `${where} rtSafety`) }),
     ...(o["noteSweep"] === undefined ? {} : { noteSweep: readNoteSweep(o["noteSweep"], `${where} noteSweep`) }),
+    ...optional("memory", readMemoryFootprint(o["memory"])),
     ...(o["memoryLimit"] === undefined ? {} : { memoryLimit: readMemoryLimit(o["memoryLimit"], `${where} memoryLimit`) }),
   };
 }

@@ -19,7 +19,10 @@ import {
 import { clapLineFromProbeOutput, judgeProbeOutput } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 import { buildQualificationRecord } from "./qualification-record.js";
-import { clapLineFixture, fixtureJson, probeOutputOfLine, readFixture } from "./probe-output-fixtures.js";
+import { clapLineFixture, fixtureJson, probeOutputOfLine, readFixture, withoutMemoryBudget } from "./probe-output-fixtures.js";
+
+/** The console, for what a document says about everything but memory. */
+const CONSOLE_RT = withoutMemoryBudget(OPENMIXER_CONSOLE_PROFILE);
 
 const withGui = [...OMX_CLAP_HOST_EXTENSIONS, "clap.gui"];
 const OWN_GUI: HostProfile = { ...OPENMIXER_CONSOLE_PROFILE, id: "own-gui", clapExtensions: withGui };
@@ -27,15 +30,15 @@ const OWN_GUI: HostProfile = { ...OPENMIXER_CONSOLE_PROFILE, id: "own-gui", clap
 /** Every shape of line the existing tests of the CLAP arm exercise, each with the profiles it is judged under. */
 const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; expected: string }[] = [
   { name: "a clean effect", line: clapLineFixture(), profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, JALV_PROFILE, OWN_GUI], expected: "suitable" },
-  { name: "an allocation", line: clapLineFixture({ rtSafety: { allocationsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
-  { name: "a lock", line: clapLineFixture({ rtSafety: { locksInRun: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
-  { name: "a syscall", line: clapLineFixture({ rtSafety: { syscallsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
-  { name: "a thread violation", line: clapLineFixture({ clap: { threadViolations: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
-  { name: "a process error", line: clapLineFixture({ clap: { processErrors: 2 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a sweep that ran nothing", line: clapLineFixture({ clap: { processCalls: 0 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "no interposer", line: clapLineFixture({ rtSafety: { interposer: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "controls not swept", line: clapLineFixture({ rtSafety: { swept: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
-  { name: "a plugin with no parameter", line: clapLineFixture({ rtSafety: { swept: false, sweepApplicable: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "suitable" },
+  { name: "an allocation", line: clapLineFixture({ rtSafety: { allocationsInRun: 3 } }), profiles: [CONSOLE_RT], expected: "conditional" },
+  { name: "a lock", line: clapLineFixture({ rtSafety: { locksInRun: 1 } }), profiles: [CONSOLE_RT], expected: "conditional" },
+  { name: "a syscall", line: clapLineFixture({ rtSafety: { syscallsInRun: 3 } }), profiles: [CONSOLE_RT], expected: "conditional" },
+  { name: "a thread violation", line: clapLineFixture({ clap: { threadViolations: 1 } }), profiles: [CONSOLE_RT], expected: "conditional" },
+  { name: "a process error", line: clapLineFixture({ clap: { processErrors: 2 } }), profiles: [CONSOLE_RT], expected: "unsuitable" },
+  { name: "a sweep that ran nothing", line: clapLineFixture({ clap: { processCalls: 0 } }), profiles: [CONSOLE_RT], expected: "unknown" },
+  { name: "no interposer", line: clapLineFixture({ rtSafety: { interposer: false } }), profiles: [CONSOLE_RT], expected: "unknown" },
+  { name: "controls not swept", line: clapLineFixture({ rtSafety: { swept: false } }), profiles: [CONSOLE_RT], expected: "unknown" },
+  { name: "a plugin with no parameter", line: clapLineFixture({ rtSafety: { swept: false, sweepApplicable: false } }), profiles: [CONSOLE_RT], expected: "suitable" },
   {
     name: "other host extensions than the profile's",
     line: clapLineFixture({ hostExtensions: withGui }),
@@ -48,7 +51,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 0, events: [] },
     }),
-    profiles: [OPENMIXER_CONSOLE_PROFILE],
+    profiles: [CONSOLE_RT],
     expected: "suitable",
   },
   {
@@ -57,7 +60,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 5, locksInRun: 0, syscallsInRun: 0, events: [] },
     }),
-    profiles: [OPENMIXER_CONSOLE_PROFILE],
+    profiles: [CONSOLE_RT],
     expected: "unsuitable",
   },
   {
@@ -66,13 +69,13 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       clap: { noteInputs: 1 },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 2, events: [] },
     }),
-    profiles: [OPENMIXER_CONSOLE_PROFILE],
+    profiles: [CONSOLE_RT],
     expected: "unsuitable",
   },
   {
     name: "an instrument that could not be played",
     line: clapLineFixture({ clap: { noteInputs: 1 }, noteSweep: { applicable: false } }),
-    profiles: [OPENMIXER_CONSOLE_PROFILE],
+    profiles: [CONSOLE_RT],
     expected: "unknown",
   },
   {
@@ -82,7 +85,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       rtSafety: { interposer: false },
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: false },
     }),
-    profiles: [OPENMIXER_CONSOLE_PROFILE],
+    profiles: [CONSOLE_RT],
     expected: "unknown",
   },
 ];
@@ -90,7 +93,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
 function judged(line: ClapQualifyLine, profile: HostProfile) {
   const read = readProbeOutput(JSON.stringify(probeOutputOfLine(line)));
   if (!read.ok) throw new Error(`${read.code}: ${read.problem}`);
-  return judgeProbeOutput(read.output, [profile], { noteInputs: line.clap.noteInputs });
+  return judgeProbeOutput(read.output, [withoutMemoryBudget(profile)], { noteInputs: line.clap.noteInputs });
 }
 
 describe("verdicts from a probe output equal verdicts from today's documents", () => {
@@ -122,7 +125,7 @@ describe("verdicts from a probe output equal verdicts from today's documents", (
     doc["grid"][0]["rtSafety"]["allocations"] = 1;
     const read = readProbeOutput(JSON.stringify(doc));
     if (!read.ok) throw new Error(read.problem);
-    const j = judgeProbeOutput(read.output, [OPENMIXER_CONSOLE_PROFILE]);
+    const j = judgeProbeOutput(read.output, [CONSOLE_RT]);
     expect(j.hosts[0]?.verdict).toMatchObject({ rating: "conditional", deciding: HOSTING_CODE.rtSafetyViolations });
     expect(j.hosts[0]?.verdict).not.toEqual(rtSafetyVerdict(rtSafetyDocument(line)));
   });
@@ -142,7 +145,7 @@ describe("the line a probe output stands for", () => {
     const again = readProbeOutput(JSON.stringify(doc));
     if (!again.ok) throw new Error(again.problem);
     expect(clapLineFromProbeOutput(again.output).rtSafety.locksInRun).toBeUndefined();
-    expect(judgeProbeOutput(again.output, [OPENMIXER_CONSOLE_PROFILE]).hosts[0]?.verdict).toMatchObject({ rating: "unknown", deciding: HOSTING_CODE.rtSafetyUnmeasured });
+    expect(judgeProbeOutput(again.output, [CONSOLE_RT]).hosts[0]?.verdict).toMatchObject({ rating: "unknown", deciding: HOSTING_CODE.rtSafetyUnmeasured });
   });
 
   it("reads the interposer as absent when any counting point ran without it", () => {
@@ -167,7 +170,7 @@ describe("the line a probe output stands for", () => {
 describe("the fixtures of plugin-hostd", () => {
   it("the success on the reference rig is suitable for omx-clap-host, and unknown for a console it did not offer to", () => {
     const o = readFixture("success-msi");
-    const j = judgeProbeOutput(o, [OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE]);
+    const j = judgeProbeOutput(o, [OMX_CLAP_HOST_PROFILE, CONSOLE_RT]);
     expect(j.hosts.map((h) => [h.verdict.host, h.verdict.rating, h.hosting])).toEqual([
       ["omx-clap-host", "suitable", "isolated"],
       ["openmixer-console", "unknown", "isolated"],
@@ -179,13 +182,13 @@ describe("the fixtures of plugin-hostd", () => {
 
   it("a run that crashed is unknown under every profile, the run's outcome the reason, and unmeasured for the exit code", () => {
     const o = readFixture("plugin-crash");
-    const j = judgeProbeOutput(o, [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE]);
+    const j = judgeProbeOutput(o, [CONSOLE_RT, OMX_CLAP_HOST_PROFILE]);
     expect(j.hosts.map((h) => h.verdict)).toEqual([
       { uri: "urn:example:zero-path", host: "openmixer-console", measured: false, rating: "unknown", qualified: false, deciding: "probe.crashed" },
       { uri: "urn:example:zero-path", host: "omx-clap-host", measured: false, rating: "unknown", qualified: false, deciding: "probe.crashed" },
     ]);
     expect(j.documents).toEqual([]);
-    const refused = judgeProbeOutput(readFixture("memory-limit-refused"), [OPENMIXER_CONSOLE_PROFILE]);
+    const refused = judgeProbeOutput(readFixture("memory-limit-refused"), [CONSOLE_RT]);
     expect(refused.hosts[0]?.verdict.deciding).toBe("probe.memory-limit");
   });
 
@@ -209,14 +212,14 @@ describe("the fixtures of plugin-hostd", () => {
     delete doc["offer"]["clapExtensions"];
     const read = readProbeOutput(JSON.stringify(doc));
     if (!read.ok) throw new Error(read.problem);
-    const clean = judgeProbeOutput(read.output, [OPENMIXER_CONSOLE_PROFILE]);
+    const clean = judgeProbeOutput(read.output, [CONSOLE_RT]);
     expect(clean.hosts[0]?.verdict).toEqual({ uri: "urn:example:plate", host: "openmixer-console", measured: true, rating: "suitable", qualified: true });
     expect(clean.hosts[0]?.hosting).toBe("in-process");
     expect(clean.documents).toEqual([]);
     doc["grid"][1]["rtSafety"]["syscalls"] = 7;
     const dirty = readProbeOutput(JSON.stringify(doc));
     if (!dirty.ok) throw new Error(dirty.problem);
-    const j = judgeProbeOutput(dirty.output, [OPENMIXER_CONSOLE_PROFILE]);
+    const j = judgeProbeOutput(dirty.output, [CONSOLE_RT]);
     expect(j.hosts[0]?.verdict).toMatchObject({ rating: "conditional", deciding: HOSTING_CODE.rtSafetyViolations });
     expect(j.hosts[0]?.hosting).toBe("isolated");
     expect(j.hosts[0]?.reasons[0]?.params).toEqual({ allocations: 0, syscalls: 7, locks: 0 });
@@ -230,7 +233,7 @@ describe("the fixtures of plugin-hostd", () => {
       for (const point of doc["grid"]) point["noteSweep"] = sweep;
       const read = readProbeOutput(JSON.stringify(doc));
       if (!read.ok) throw new Error(read.problem);
-      return judgeProbeOutput(read.output, [OPENMIXER_CONSOLE_PROFILE]).hosts[0]!;
+      return judgeProbeOutput(read.output, [CONSOLE_RT]).hosts[0]!;
     };
     const clean = judged({ applicable: true, dialect: "midi", allocations: 0, locks: 0, syscalls: 0 });
     expect(clean.verdict.rating).toBe("suitable");

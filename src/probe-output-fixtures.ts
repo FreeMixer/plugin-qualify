@@ -11,10 +11,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ClapQualifyLine } from "./clap-qualify.js";
-import { OMX_CLAP_HOST_EXTENSIONS } from "./host-profiles.js";
+import { OMX_CLAP_HOST_EXTENSIONS, type HostProfile } from "./host-profiles.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "probe-output");
+
+/**
+ * The same host with no memory budget: for the tests of what a probe output says about everything else, on documents
+ * that do not hold a footprint at the host's own cell.
+ */
+export function withoutMemoryBudget<T extends HostProfile>(profile: T): T {
+  const { memory: _memory, ...cost } = profile.cost;
+  return { ...profile, cost };
+}
 
 export function fixtureText(name: string): string {
   return readFileSync(join(FIXTURES, `${name}.json`), "utf8");

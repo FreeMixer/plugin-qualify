@@ -30,6 +30,7 @@ import type {
   SoakReading,
   ThreadReading,
 } from "./measurement/format.js";
+import { memoryWithinBudget, type MemoryReadings } from "./memory-budget.js";
 
 /**
  * What a reason may interpolate: wire-serialisable scalars only. Structurally the same record as
@@ -71,6 +72,8 @@ export interface QualifiedPlugin {
   readonly lv2Features?: PluginLv2Features;
   /** The plugin's binary format, the scan's declared fact (CLAP spec §6); absent reads `lv2`. */
   readonly format?: "lv2" | "clap";
+  /** What one instance holds: per rate, or per rate AND quantum as {@link cpuCost} has it. A missing cell is unmeasured. */
+  readonly memory?: MemoryReadings;
   /** What the CLAP prober (`native/clap-qualify`) measured, for a `clap` plugin (CLAP spec §3). */
   readonly clap?: PluginClapMeasurement;
 }
@@ -78,14 +81,15 @@ export interface QualifiedPlugin {
 /** Where a plugin's audio is actually processed. */
 export type HostingPath = "in-process" | "isolated";
 
-/** The dimensions that decide a host. Six, folded worst-wins. */
+/** The dimensions that decide a host, folded worst-wins. */
 export type HostingDimension =
   | "stability"
   | "rtSafety"
   | "features"
   | "cost"
   | "latency"
-  | "topology";
+  | "topology"
+  | "memory";
 
 // The in-process feature list and the CLAP host extensions are the `openmixer-console` host
 // profile's; they live with the profiles (`host-profiles.ts`) and are re-exported here, where the
@@ -446,13 +450,15 @@ export function deadAgainstBest(levelDbfs: number, bestDbfs: number, policy: Hos
 }
 
 /** The classes of soak failure, as the strings `failures` is built from. */
-export type SoakFailureKind = "died" | "non-finite" | "dead" | "mostly-silent" | "startup-blast" | "timed-out";
+export type SoakFailureKind = "died" | "non-finite" | "dead" | "mostly-silent" | "startup-blast" | "timed-out" | "leaks";
 
 export interface SoakFailure {
   readonly rate: number;
   readonly kind: SoakFailureKind;
   /** Extra words for the string form, e.g. `20dBFS`. */
   readonly detail?: string;
+  /** For `leaks`: what the growth was and the ceiling it passed, which the reason carries. */
+  readonly params?: CodedRefusalParams;
 }
 
 /** A soak's reading: what voided it, if anything, and what it proved when nothing did. */
@@ -465,13 +471,24 @@ export interface SoakFindings {
    *  cut, a fact about the harness: it voids the soak but is never a failure of the plugin. */
   readonly failed: readonly SoakFailure[];
   readonly ratesTested: number;
-  /** The largest RSS growth across rates, for the record; not judged. */
+  /** The largest RSS growth across rates, warm-up included, for the record; `leaks` is what is judged. */
   readonly rssGrowthKb: number;
 }
 
 /** A soak rate that settled or opened ABOVE this is blasting: it voids the soak, and a rate
  *  settled above it cannot be the reference, or every sane rate reads dead against it. */
 const BLAST_DBFS = 6;
+
+/**
+ * The growth a rate's soak is still showing, in KB per minute of audio: from halfway past warm-up to its highest reading,
+ * so that a library that finishes loading a little late is not a leak and a leak of any size is. `undefined` when the soak
+ * did not reach those readings: not read as flat.
+ */
+export function soakGrowthKbPerMin(v: SoakAtRate): number | undefined {
+  const { rssMidKb, midSeconds, rssMaxKb, seconds } = v;
+  if (rssMidKb === undefined || midSeconds === undefined || rssMaxKb === undefined || seconds === undefined || seconds <= midSeconds) return undefined;
+  return (Math.max(rssMaxKb - rssMidKb, 0) * 60) / (seconds - midSeconds);
+}
 
 /**
  * Read a soak, rate by rate. A rate voids it if the plugin did not instantiate or died there,
@@ -516,7 +533,23 @@ export function soakFindings(soak: SoakReading | undefined, policy: HostingPolic
       continue;
     }
     const first = v.firstRmsDbfs ?? -99;
-    if (first > BLAST_DBFS) failed.push({ rate, kind: "startup-blast", detail: `${first.toFixed(0)}dBFS` });
+    if (first > BLAST_DBFS) {
+      failed.push({ rate, kind: "startup-blast", detail: `${first.toFixed(0)}dBFS` });
+      continue;
+    }
+    const growth = soakGrowthKbPerMin(v);
+    if (growth !== undefined && growth > policy.memoryGrowthKbPerMinCeiling) {
+      failed.push({
+        rate,
+        kind: "leaks",
+        detail: `${growth.toFixed(0)}KB/min`,
+        params: {
+          growthKbPerMin: Math.round(growth),
+          ceilingKbPerMin: policy.memoryGrowthKbPerMinCeiling,
+          ...(policy.memoryGrowthCeilingProvisional ? { provisional: "yes" as const } : {}),
+        },
+      });
+    }
   }
   const failures = failed.map((f) => `${f.kind}@${f.rate}${f.detail === undefined ? "" : `(${f.detail})`}`);
   return {
@@ -592,6 +625,7 @@ export function stabilityReasons(
       reason("stability", "objective", "unsuitable", HOSTING_CODE.stabilitySoakFailedAtRate, {
         failure: f.kind,
         rate: f.rate,
+        ...f.params,
       }),
     );
   }
@@ -777,6 +811,60 @@ export function hostingCostReasons(
     );
   }
   return out;
+}
+
+/**
+ * What a host's memory budget makes of a plugin. A host with no budget declared reads nothing here. Every cell the host
+ * runs is read; the worst stands, so a plugin is never read as fitting on the cell that happened to be measured. A missing
+ * figure is `unknown`, never a fit. Under a provisional budget a plugin below the ceiling is `conditional` with a code of its
+ * own, since the number it was held to was not measured on that kind of host; one above it is `unsuitable` and says the
+ * ceiling is provisional.
+ */
+export function hostingMemoryReasons(
+  memory: MemoryReadings | undefined,
+  profile: HostProfile,
+  /** The live rate and quantum, for a host whose budget names no cells of its own; absent, the cell its cost is read at. */
+  live?: { readonly rate: number; readonly quantum?: number },
+): readonly HostingReason[] {
+  const budget = profile.cost.memory;
+  if (budget === undefined) return [];
+  const provisional: CodedRefusalParams = budget.provisional === true ? { provisional: "yes" } : {};
+  const cells = budget.cells ?? [{ rate: live?.rate ?? profile.cost.rate, quantum: live?.quantum ?? profile.cost.quantum }];
+  const reads = cells.map((c) => ({ ...c, read: memoryWithinBudget(memoryAt(memory, c.rate, c.quantum), budget) }));
+  const above = reads.find((r) => r.read.outcome === "above");
+  if (above !== undefined && above.read.outcome === "above") {
+    return [
+      reason("memory", "objective", "unsuitable", HOSTING_CODE.memoryAboveCeiling, {
+        rate: above.rate,
+        quantum: above.quantum,
+        figure: above.read.figure,
+        kb: above.read.kb,
+        ceilingKb: above.read.ceilingKb,
+        ...provisional,
+      }),
+    ];
+  }
+  const unmeasured = reads.find((r) => r.read.outcome === "unmeasured");
+  if (unmeasured !== undefined && unmeasured.read.outcome === "unmeasured") {
+    return [
+      reason("memory", "objective", "unknown", HOSTING_CODE.memoryUnmeasured, {
+        rate: unmeasured.rate,
+        quantum: unmeasured.quantum,
+        ...(unmeasured.read.unmeasuredReason === undefined ? {} : { unmeasuredReason: unmeasured.read.unmeasuredReason }),
+      }),
+    ];
+  }
+  const first = reads[0]!.read;
+  const params: CodedRefusalParams = first.outcome === "within" ? { perInstanceKb: first.perInstanceKb, firstInstanceKb: first.firstInstanceKb, ceilingKb: budget.perInstanceKb, consoleCeilingKb: budget.perConsoleKb } : {};
+  return budget.provisional === true
+    ? [reason("memory", "objective", "conditional", HOSTING_CODE.memoryWithinProvisionalCeiling, { ...params, ...provisional })]
+    : [reason("memory", "objective", "suitable", HOSTING_CODE.memoryWithinCeiling, params)];
+}
+
+/** The footprint at a rate and quantum: a grid's cell when the plugin has a grid, else its rate's. */
+function memoryAt(memory: MemoryReadings | undefined, rate: number, quantum: number) {
+  if (memory?.perRateQuantum !== undefined) return memory.perRateQuantum[costPointKey(rate, quantum)];
+  return memory?.perRate?.[String(rate)];
 }
 
 export function hostingLatencyReasons(
@@ -1005,6 +1093,7 @@ export function classifyPluginHosting(
         ...(profile.instruments ? noteSweepReasons(descriptor.rtSafety?.noteSweep, descriptor.clap?.noteInputs ?? (descriptor.hasMidiIn ? 1 : 0)) : []),
         ...clapFeatureReasons(descriptor.clap, profile, descriptor.hasMidiIn),
         ...hostingCostReasons(descriptor, options, policy),
+        ...hostingMemoryReasons(descriptor.memory, profile, options),
         ...clapLatencyReasons(descriptor.clap),
         ...clapTopologyReasons(descriptor.clap, profile.instruments),
       ]
@@ -1014,6 +1103,7 @@ export function classifyPluginHosting(
         ...(profile.instruments ? noteSweepReasons(descriptor.rtSafety?.noteSweep, descriptor.hasMidiIn ? 1 : 0) : []),
         ...featureReasons(descriptor.lv2Features, descriptor, profile.lv2Features, options.quantum !== undefined, profile.instruments),
         ...hostingCostReasons(descriptor, options, policy),
+        ...hostingMemoryReasons(descriptor.memory, profile, options),
         ...hostingLatencyReasons(descriptor, profile.latency),
         ...hostingTopologyReasons(descriptor, profile.instruments),
       ];

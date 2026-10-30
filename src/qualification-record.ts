@@ -13,6 +13,8 @@
  * Not yet in the record: the fingerprint of the descriptor's controls, since the descriptor is
  * written by the scan (stage 5) and plugin-qualify does not read one yet.
  */
+import type { MemoryFootprint } from "./measurement/format.js";
+import { firstInstanceKb, perInstanceKb } from "./memory-budget.js";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -103,12 +105,25 @@ export interface UnmeasuredLatency {
 }
 
 /** A grid point as the record writes it: every cell carries `latency`, the figures or why there are none (#201). */
-export type RecordGridPoint = Omit<ProbeGridPoint, "latency"> & {
+export type RecordGridPoint = Omit<ProbeGridPoint, "latency" | "memory"> & {
+  /** The footprint as measured, with what it comes to: what a client adding the plugin reads (`memory-budget.ts`). */
+  readonly memory?: MemoryFootprint & { readonly firstInstanceKb?: number; readonly perInstanceKb?: number };
   readonly latency: (Omit<NonNullable<ProbeGridPoint["latency"]>, "measuredFrames"> & { readonly measuredFrames: number }) | UnmeasuredLatency;
 };
 
 const UNMEASURED_WORDS: ReadonlySet<string> = new Set(Object.values(MEASUREMENT_UNMEASURED_REASONS).map((r) => r.word));
 const word = (key: keyof typeof MEASUREMENT_UNMEASURED_REASONS): string => MEASUREMENT_UNMEASURED_REASONS[key].word;
+
+/** The same, for the test. */
+export const memoryOfCellForTest = (p: ProbeGridPoint): Pick<RecordGridPoint, "memory"> => memoryOfCell(p);
+
+/** A cell's footprint with what it comes to; only a footprint with no reason beside it comes to anything a client may add up. */
+function memoryOfCell(p: ProbeGridPoint): Pick<RecordGridPoint, "memory"> {
+  if (p.memory === undefined) return {};
+  const first = p.memory.unmeasuredReason === undefined ? firstInstanceKb(p.memory) : undefined;
+  const per = p.memory.unmeasuredReason === undefined ? perInstanceKb(p.memory) : undefined;
+  return { memory: { ...p.memory, ...(first === undefined ? {} : { firstInstanceKb: first }), ...(per === undefined ? {} : { perInstanceKb: per }) } };
+}
 
 /** The unmeasured word of a cell whose run did not end well, by its outcome code. */
 const OUTCOME_WORD: Readonly<Record<string, string>> = {
@@ -286,7 +301,7 @@ export function buildQualificationRecord(
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
     measurements: {
-      grid: o.grid.map((p) => ({ ...p, latency: latencyOfCell(o, p) })),
+      grid: o.grid.map((p) => ({ ...p, ...memoryOfCell(p), latency: latencyOfCell(o, p) })),
       ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }),
       ...(unmeasuredFigures(o).length === 0 ? {} : { unmeasured: unmeasuredFigures(o) }),
     },
