@@ -10,7 +10,7 @@ plugin-qualify \- find out whether an audio plugin is safe to run in a real-time
 .SH DESCRIPTION
 Scans each plugin, measures its latency and CPU cost per sample rate and buffer size, runs it under
 a real host with memory checking, and prints one verdict per plugin: suitable, conditional, unknown
-or unsuitable. A plugin that was not measured is never rated suitable.
+or unsuitable. A plugin that is not real-time safe is conditional, run isolated. A plugin that was not measured is never rated suitable.
 A target is a plugin URI or an LV2 bundle (every plugin in it).
 .SH OPTIONS
 .TP
