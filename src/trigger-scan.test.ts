@@ -19,7 +19,7 @@ const scratch = mkdtempSync(join(tmpdir(), "trigger-scan-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** Run the script with stubs first on PATH; `fail` names the stubs that exit 1. */
-function run(opts: { systemd: boolean; fail?: string[] }): { status: number | null; stderr: string; calls: string[] } {
+function run(opts: { systemd: boolean; inline?: boolean; fail?: string[] }): { status: number | null; stdout: string; stderr: string; calls: string[]; marker: string } {
   const dir = mkdtempSync(join(scratch, "run-"));
   const bin = join(dir, "bin");
   const log = join(dir, "calls");
@@ -33,8 +33,8 @@ function run(opts: { systemd: boolean; fail?: string[] }): { status: number | nu
   chmodSync(join(bin, "nice"), 0o755);
   const run = join(dir, "run-systemd");
   if (opts.systemd) mkdirSync(run);
-  const r = spawnSync("sh", [SCRIPT], { encoding: "utf8", input: "/usr/lib/lv2/x.lv2/manifest.ttl\n", env: { PATH: `${bin}:/usr/bin:/bin`, PLUGIN_QUALIFY_SYSTEMD_RUN: run } });
-  return { status: r.status, stderr: r.stderr, calls: existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [] };
+  const r = spawnSync("sh", [SCRIPT], { encoding: "utf8", input: "/usr/lib/lv2/x.lv2/manifest.ttl\n", env: { PATH: `${bin}:/usr/bin:/bin`, PLUGIN_QUALIFY_SYSTEMD_RUN: run, PLUGIN_QUALIFY_STATE_DIR: join(dir, "state"), ...(opts.inline === true ? { PLUGIN_QUALIFY_SYNC_INLINE: "1" } : {}) } });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, marker: join(dir, "state", "qualify-pending"), calls: existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [] };
 }
 
 describe("trigger-scan.sh", () => {
@@ -44,10 +44,19 @@ describe("trigger-scan.sh", () => {
     expect(r.calls).toEqual(["systemctl start --no-block plugin-qualify-sync.service"]);
   });
 
-  it("runs the sync directly at the lowest priority when systemd is not running", () => {
+  it("leaves the pending marker and runs nothing without systemd", () => {
     const r = run({ systemd: false });
     expect(r.status).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(existsSync(r.marker)).toBe(true);
+    expect(r.stdout).toContain("the next plugin-qualify-sync run scans");
+  });
+
+  it("runs the sync directly at the lowest priority without systemd when PLUGIN_QUALIFY_SYNC_INLINE=1", () => {
+    const r = run({ systemd: false, inline: true });
+    expect(r.status).toBe(0);
     expect(r.calls).toEqual(["nice -n 19", "plugin-qualify-sync --system"]);
+    expect(existsSync(r.marker)).toBe(false);
   });
 
   it("never fails the transaction when the service cannot be started", () => {
@@ -56,8 +65,8 @@ describe("trigger-scan.sh", () => {
     expect(r.stderr).toContain("could not start plugin-qualify-sync.service");
   });
 
-  it("never fails the transaction when the direct sync fails", () => {
-    const r = run({ systemd: false, fail: ["plugin-qualify-sync"] });
+  it("never fails the transaction when the inline sync fails", () => {
+    const r = run({ systemd: false, inline: true, fail: ["plugin-qualify-sync"] });
     expect(r.status).toBe(0);
     expect(r.stderr).toContain("plugin-qualify-sync --system failed");
   });

@@ -29,6 +29,7 @@ import {
   flagOf,
   parseSyncArgs,
   parseSyncConf,
+  pendingMarker,
   runSync,
   resolveSyncSettings,
   type SyncSettings,
@@ -565,6 +566,16 @@ describe("the lock", () => {
     expect(await traced(settings, "a", events, { wait: false })).toBeDefined();
     expect(events).toEqual(["a begins", "a ends"]);
     expect(existsSync(`${settings.stateFile}.again`)).toBe(false);
+  });
+
+  it("a pass that went through clears the pending marker a package trigger left (#237)", async () => {
+    const settings = lockedSettings("0");
+    mkdirSync(dirname(settings.stateFile), { recursive: true });
+    const marker = join(dirname(settings.stateFile), "qualify-pending");
+    expect(pendingMarker(settings.stateFile)).toBe(marker);
+    writeFileSync(marker, "");
+    expect(await runSync(settings, {})).toBeDefined();
+    expect(existsSync(marker)).toBe(false);
   });
 
   it("--no-wait is a flag, and the service unit passes it", () => {
