@@ -29,7 +29,10 @@ import {
   flagOf,
   parseSyncArgs,
   parseSyncConf,
+  pendingMarker,
+  runSync,
   resolveSyncSettings,
+  type SyncSettings,
   type SyncState,
 } from "./qualify-sync.js";
 import { clapQualifyToolPath, lv2MeasureNativePath, rtInterposePath } from "./tool-paths.js";
@@ -110,6 +113,31 @@ describe("the settings", () => {
     expect(r.settings.pinFile).toBe("/home/u/.local/state/omx/qualified.pins");
   });
 
+  it("the grid is the full one by default, hosts (also --grid-hosts) or named cells when set, with a cell budget and a memory bound (#193)", () => {
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const d = resolveSyncSettings(new Map(), args.args, {}, "/home/u");
+    if (!d.ok) throw new Error(d.error);
+    expect(d.settings.grid).toEqual({ kind: "full" });
+    const fast = parseSyncArgs(["--grid-hosts"]);
+    if (!fast.ok) throw new Error(fast.error);
+    const h = resolveSyncSettings(new Map(), fast.args, {}, "/home/u");
+    expect(h.ok && h.settings.grid).toEqual({ kind: "hosts" });
+    expect(d.settings.cellsPerPluginBudget).toBe(0);
+    expect(d.settings.memory?.bytes).toBeGreaterThan(0);
+    const set = resolveSyncSettings(new Map([["grid", "48000/128,96000/1024"], ["cells_per_plugin_budget", "2"], ["memory_limit", "1G"]]), args.args, {}, "/home/u");
+    if (!set.ok) throw new Error(set.error);
+    expect(set.settings.grid).toEqual({ kind: "cells", cells: [{ rate: 48000, quantum: 128 }, { rate: 96000, quantum: 1024 }] });
+    expect(set.settings.cellsPerPluginBudget).toBe(2);
+    expect(set.settings.memory).toEqual({ bytes: 2 ** 30, mechanism: "rlimit-data" });
+    const off = resolveSyncSettings(new Map([["memory_limit", "off"], ["grid", "full"]]), args.args, {}, "/home/u");
+    expect(off.ok && off.settings.memory).toBeUndefined();
+    expect(off.ok && off.settings.grid).toEqual({ kind: "full" });
+    for (const [k, v] of [["grid", "48000"], ["cells_per_plugin_budget", "1.5"], ["memory_limit", "much"]] as const) {
+      expect(resolveSyncSettings(new Map([[k, v]]), args.args, {}).ok, k).toBe(false);
+    }
+  });
+
   it("a budget, a port or a host that is not one is refused, never defaulted", () => {
     const args = parseSyncArgs([]);
     if (!args.ok) throw new Error(args.error);
@@ -124,10 +152,13 @@ describe("the units the packages ship", () => {
 
   it("the service runs the sync as a system service, with flags the sync takes, and never in the audio's way", () => {
     const service = unit("plugin-qualify-sync.service");
-    const exec = /^ExecStart=(\S+) (.*)$/m.exec(service)!;
-    expect(exec[1]).toBe("/usr/bin/plugin-qualify-sync");
-    expect(parseSyncArgs(exec[2]!.split(" ")).ok).toBe(true);
-    expect(exec[2]).toContain("--system");
+    const exec = /^ExecStart=(\S+) (\S+) (.*)$/m.exec(service)!;
+    // the interpreter first, the script as its argument: a service that executes the node script itself stays in
+    // systemd's own SELinux domain on Fedora, which has no executable memory for V8 and no /tmp, and dies at start (#188)
+    expect(exec[1]).toBe("/usr/bin/node");
+    expect(exec[2]).toBe("/usr/bin/plugin-qualify-sync");
+    expect(parseSyncArgs(exec[3]!.split(" ")).ok).toBe(true);
+    expect(exec[3]).toContain("--system");
     for (const line of ["Type=oneshot", "Nice=19", "IOSchedulingClass=idle", "StateDirectory=omx"]) expect(service).toContain(line);
     expect(service).toMatch(/^CPUQuota=\d+%$/m);
     expect(service).toMatch(/^TimeoutStartSec=\S+$/m);
@@ -285,7 +316,7 @@ function machine(): { root: string; clap: string; lv2: string; out: string; flag
       "--config", "/dev/null", "--clap-path", clap, "--lv2-path", lv2, "--lv2-extra", "",
       "--pin-file", join(out, "qualified.pins"), "--qualification-dir", join(out, "qualification"),
       "--descriptor-dir", join(out, "descriptors"), "--state-file", join(out, "state.json"),
-      "--budget-s", "4", "--hostd-port", String(port), "--hostd-feedback-port", String(feedbackPort),
+      "--grid-hosts", "--budget-s", "4", "--hostd-port", String(port), "--hostd-feedback-port", String(feedbackPort),
     ],
   };
 }
@@ -481,4 +512,118 @@ describe("plugin-hostd in its default mode, on the pin file the sweep wrote", ()
     },
     180_000,
   );
+});
+
+// --- the lock (#222) --------------------------------------------------------------------------------------------------
+
+describe("a scoped run (#247)", () => {
+  it("keeps the pins of what it did not scan, and drops one gone from a directory it scans", async () => {
+    const root = mkdtempSync(join(scratch, "scoped-"));
+    for (const d of ["clap-scanned", "clap-elsewhere", "lv2-scanned", "lv2-elsewhere"]) mkdirSync(join(root, d));
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const values = new Map([
+      ["clap_path", join(root, "clap-scanned")], ["clap_extra", ""], ["lv2_path", join(root, "lv2-scanned")], ["lv2_extra", ""],
+      ["pin_file", join(root, "q.pins")], ["qualification_dir", join(root, "qualification")], ["descriptor_dir", join(root, "descriptors")],
+      ["state_file", join(root, "state", "qualify-sync.json")], ["hostd_port", "0"], ["host_class", ""], ["settle_s", "0"],
+    ]);
+    const r = resolveSyncSettings(values, args.args, {}, root);
+    if (!r.ok) throw new Error(r.error);
+    const entry = (format: "clap" | "lv2", entryRoot: string, uri: string) => ({
+      format, root: entryRoot, files: [], plugins: [{ uri, outcome: "qualified" }], qualifiedAt: "2026-10-30T00:00:00Z", seconds: 1,
+    });
+    const elsewhereClap = `clap:${join(root, "clap-elsewhere", "Surge XT.clap")}`;
+    const goneClap = `clap:${join(root, "clap-scanned", "removed.clap")}`;
+    const elsewhereLv2 = "lv2:urn:test:elsewhere";
+    const before: SyncState = {
+      schema: "plugin-qualify.sync-state/1",
+      entries: {
+        [elsewhereClap]: entry("clap", join(root, "clap-elsewhere"), `${elsewhereClap}#surge`),
+        [goneClap]: entry("clap", join(root, "clap-scanned"), `${goneClap}#gone`),
+        [elsewhereLv2]: entry("lv2", join(root, "lv2-elsewhere", "e.lv2"), "urn:test:elsewhere"),
+      },
+    } as unknown as SyncState;
+    mkdirSync(join(root, "state"));
+    writeFileSync(r.settings.stateFile, JSON.stringify(before));
+    const lines: string[] = [];
+    await runSync(r.settings, { log: (l) => lines.push(l) });
+    const after = JSON.parse(readFileSync(r.settings.stateFile, "utf8")) as SyncState;
+    expect(Object.keys(after.entries).sort()).toEqual([elsewhereClap, elsewhereLv2].sort());
+    expect(lines).toContain(`${goneClap}: gone, its pin is dropped`);
+    expect(lines).toContain(`${elsewhereClap}: not under a directory this run scans; its pin is kept`);
+    expect(lines.some((l) => l.startsWith(`${elsewhereLv2}: gone`))).toBe(false);
+  });
+});
+
+describe("the lock", () => {
+  /** Settings over empty plugin directories in a tree of their own; `settle_s` keeps a run in the lock for a while. */
+  function lockedSettings(settleS: string): SyncSettings {
+    const root = mkdtempSync(join(scratch, "lock-"));
+    for (const d of ["clap", "lv2"]) mkdirSync(join(root, d));
+    const args = parseSyncArgs([]);
+    if (!args.ok) throw new Error(args.error);
+    const values = new Map([
+      ["clap_path", join(root, "clap")], ["clap_extra", ""], ["lv2_path", join(root, "lv2")], ["lv2_extra", ""],
+      ["pin_file", join(root, "q.pins")], ["qualification_dir", join(root, "qualification")], ["descriptor_dir", join(root, "descriptors")],
+      ["state_file", join(root, "state", "qualify-sync.json")], ["hostd_port", "0"], ["host_class", ""], ["settle_s", settleS],
+    ]);
+    const r = resolveSyncSettings(values, args.args, {}, root);
+    if (!r.ok) throw new Error(r.error);
+    return r.settings;
+  }
+
+  /** Runs recorded as they begin and end, on one clock. */
+  function traced(settings: SyncSettings, name: string, events: string[], options: { wait?: boolean } = {}): Promise<unknown> {
+    return runSync(settings, { ...options, log: (line) => line === "sync run begins" && events.push(`${name} begins`) }).then((r) => {
+      events.push(`${name} ends`);
+      return r;
+    });
+  }
+
+  it("a second run waits for the first: they never measure at once", async () => {
+    const settings = lockedSettings("1");
+    const events: string[] = [];
+    const a = traced(settings, "a", events);
+    await new Promise((r) => setTimeout(r, 300));
+    const b = traced(settings, "b", events);
+    await Promise.all([a, b]);
+    expect(events).toEqual(["a begins", "a ends", "b begins", "b ends"]);
+  }, 30_000);
+
+  it("--no-wait returns at once, and the holder runs once more at its end", async () => {
+    const settings = lockedSettings("1");
+    const events: string[] = [];
+    const a = traced(settings, "a", events);
+    await new Promise((r) => setTimeout(r, 300));
+    const b = await traced(settings, "b", events, { wait: false });
+    expect(b).toBeUndefined();
+    expect(events).toEqual(["a begins", "b ends"]);
+    await a;
+    expect(events).toEqual(["a begins", "b ends", "a begins", "a ends"]);
+    expect(existsSync(`${settings.stateFile}.again`)).toBe(false);
+  }, 30_000);
+
+  it("a lone --no-wait run takes the lock and runs once, leaving no marker", async () => {
+    const settings = lockedSettings("0");
+    const events: string[] = [];
+    expect(await traced(settings, "a", events, { wait: false })).toBeDefined();
+    expect(events).toEqual(["a begins", "a ends"]);
+    expect(existsSync(`${settings.stateFile}.again`)).toBe(false);
+  });
+
+  it("a pass that went through clears the pending marker a package trigger left (#237)", async () => {
+    const settings = lockedSettings("0");
+    mkdirSync(dirname(settings.stateFile), { recursive: true });
+    const marker = join(dirname(settings.stateFile), "qualify-pending");
+    expect(pendingMarker(settings.stateFile)).toBe(marker);
+    writeFileSync(marker, "");
+    expect(await runSync(settings, {})).toBeDefined();
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("--no-wait is a flag, and the service unit passes it", () => {
+    const a = parseSyncArgs(["--no-wait"]);
+    expect(a.ok && a.args.noWait).toBe(true);
+    expect(readFileSync(join(PKG, "packaging", "systemd", "plugin-qualify-sync.service"), "utf8")).toContain("--no-wait");
+  });
 });

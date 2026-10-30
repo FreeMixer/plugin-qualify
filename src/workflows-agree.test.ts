@@ -52,7 +52,7 @@ describe('ci.yml and publish.yml prepare the runner alike', () => {
     for (const variable of ['PLUGIN_HOSTD', 'PLUGIN_HOSTD_FAKE_HOST']) {
       expect(action).toContain(`echo "${variable}=`);
     }
-    expect(action).toMatch(/dpkg --compare-versions .* ge 0\.2\.0/);
+    expect(action).toMatch(/dpkg --compare-versions .* ge 0\.15\.0/);
   });
 
   it('the scanners action sets what the live scan tests ask for', () => {

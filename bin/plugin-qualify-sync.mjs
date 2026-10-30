@@ -44,9 +44,14 @@ if (!resolved.ok) {
   process.exit(2);
 }
 const s = resolved.settings;
-log(`CLAP ${s.clapDirs.join(":")}; LV2 ${s.lv2Dirs.join(":")}; host ${s.hostProfile.id}; ${String(s.budgetS)} s a plugin`);
+const grid = s.grid.kind === "cells" ? s.grid.cells.map((c) => `${String(c.rate)}/${String(c.quantum)}`).join(",") : s.grid.kind;
+log(
+  `CLAP ${s.clapDirs.join(":")}; LV2 ${s.lv2Dirs.join(":")}; host ${s.hostProfile.id}; grid ${grid}` +
+    `${s.cellsPerPluginBudget > 0 ? ` (first ${String(s.cellsPerPluginBudget)} cells)` : ""}; ${String(s.budgetS)} s a run; ` +
+    `memory ${s.memory === undefined ? "unbounded" : `${String(s.memory.bytes)} bytes`}`,
+);
 try {
-  const summary = await runSync(s, { force: parsed.args.force, log });
+  const summary = await runSync(s, { force: parsed.args.force, wait: !parsed.args.noWait, refreshOnly: parsed.args.refreshPins, log });
   if (summary !== undefined) {
     process.stdout.write(`${summaryLine(summary)}\n`);
     log(`pins in ${s.pinFile}${summary.sent ? `, ${String(summary.sent)} sent to plugin-hostd` : ""}`);

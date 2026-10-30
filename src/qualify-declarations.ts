@@ -133,6 +133,23 @@ export const NATIVE_TOOL_DIRS: readonly string[] = ["/usr/libexec/plugin-qualify
 export const CLAP_SWEEP_BLOCKS = 512;
 export const CLAP_SWEEP_FRAMES = 512;
 
+/**
+ * The measurement grid (#193). Every record written before the grid was measured at `GRID_CONTINUITY_QUANTUM`, so
+ * the hosts' grid also takes that quantum at every rate: a new record stays comparable with an old one.
+ */
+export const GRID_CONTINUITY_QUANTUM = CLAP_SWEEP_FRAMES;
+
+/**
+ * The memory bound of a run (#193). The runner's data limit (`--data-bytes`, `RLIMIT_DATA` on the measuring child) is
+ * `MEMORY_LIMIT_RAM_FRACTION` of the machine's RAM unless `--memory-limit` says otherwise. With `MEMORY_BOUND_EXIT_ENV`
+ * set, the interposer ends the child with `MEMORY_BOUND_EXIT_STATUS` the moment an allocation is refused, so a run
+ * that outgrew the bound is told from a crash by an exit status, never by words; `native/rt-interpose.h` holds the
+ * same two (src/memory-bound.test.ts holds them together).
+ */
+export const MEMORY_LIMIT_RAM_FRACTION = 0.5;
+export const MEMORY_BOUND_EXIT_ENV = "OMX_RT_OOM_EXIT";
+export const MEMORY_BOUND_EXIT_STATUS = 121;
+
 /** Seconds one `.clap` may take to qualify at every rate before the prober is killed. */
 export const CLAP_QUALIFY_TIMEOUT_S = 120;
 
@@ -191,7 +208,7 @@ export const DESCRIPTOR_CODE_DIR_UNWRITABLE = "qualify.descriptor.dir-unwritable
 
 /** Every threshold, so none is baked into the code. */
 export interface HostingPolicy {
-  /** Minimum instantiate/destroy lifecycles. The operator's §14.4 ruling: 1000. */
+  /** Minimum instantiate/destroy lifecycles. §14.4 sets it: 1000. */
   readonly cycleFloor: number;
   /** Minimum continuous soak, seconds. Default 3 h — the operator's longest show. */
   readonly soakSeconds: number;
@@ -205,7 +222,7 @@ export interface HostingPolicy {
 }
 
 /**
- * Defaults. The cycle floor is the operator's ruling of 2026-09-05 (§14.4, option c) and the
+ * Defaults. The cycle floor is the decision of 2026-09-05 (§14.4, option c) and the
  * soak is §3's default show length. The per-instance cost ceiling is the HOST's budget and
  * lives in {@link HOST_BUDGETS} (plugin-qualify §3a), not here.
  */

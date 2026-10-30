@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version: 0.16.0
+Version:        0.17.5
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -31,8 +31,8 @@ Requires: python3
 Requires: python3-lilv
 # the scanned descriptors are held to omx-contract's schema before they are written (tools/descriptors.py)
 Requires: python3-jsonschema
-# plugin-hostd-probe, the runner every CLAP plugin is measured through; first released in 0.4.0
-Requires: plugin-hostd >= 0.4.0
+# plugin-hostd-probe, the runner every CLAP plugin is measured through; --pin-files, which the sync takes its pins from, first released in 0.15.0
+Requires: plugin-hostd >= 0.15.0
 Recommends: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
 # remote-control pages (remote_controls), which the descriptors keep
@@ -72,16 +72,22 @@ install -m 0755 packaging/systemd/plugin-qualify-sync-generator %{buildroot}%{_s
 install -m 0644 packaging/systemd/plugin-qualify-sync.service packaging/systemd/plugin-qualify-sync.timer \
   packaging/systemd/plugin-qualify-sync.path %{buildroot}%{_unitdir}/
 install -m 0644 packaging/systemd/80-plugin-qualify.preset %{buildroot}%{_presetdir}/
+install -D -m 0644 packaging/systemd/plugin-qualify.tmpfiles.conf %{buildroot}%{_tmpfilesdir}/plugin-qualify.conf
 install -m 0755 packaging/trigger-scan.sh %{buildroot}%{_libexecdir}/%{name}/trigger-scan
 
 # the preset enables the timer and the path unit; nothing here runs a sweep: the timer fires at the next boot,
 # and the path unit, armed once the transaction is over, waits for a minute of quiet before its first run
 %post
+systemd-tmpfiles --create %{_tmpfilesdir}/plugin-qualify.conf >/dev/null 2>&1 || :
 %systemd_post plugin-qualify-sync.timer plugin-qualify-sync.path
 
 %posttrans
 if [ -d /run/systemd/system ] && systemctl -q is-enabled plugin-qualify-sync.path 2>/dev/null; then
   systemctl start plugin-qualify-sync.path >/dev/null 2>&1 || :
+fi
+# an upgrade: the pins on disk get the files this plugin-hostd collects, measuring nothing (plugin-qualify#239)
+if [ -s /var/lib/omx/qualify-sync.json ]; then
+  %{_bindir}/plugin-qualify-sync --system --refresh-pins --no-wait >/dev/null 2>&1 || :
 fi
 
 # a plugin package installed, upgraded or removed in a standard folder: one scan per transaction
@@ -102,8 +108,10 @@ fi
 %doc README.md
 %{_bindir}/plugin-qualify
 %{_bindir}/plugin-qualify-sync
+%{_bindir}/plugin-qualify-records-package
 %{_mandir}/man1/plugin-qualify.1*
 %{_mandir}/man1/plugin-qualify-sync.1*
+%{_mandir}/man1/plugin-qualify-records-package.1*
 %dir %{_sysconfdir}/omx
 %config(noreplace) %{_sysconfdir}/omx/qualify.conf
 %{_unitdir}/plugin-qualify-sync.service
@@ -111,10 +119,36 @@ fi
 %{_unitdir}/plugin-qualify-sync.path
 %{_systemdgeneratordir}/plugin-qualify-sync-generator
 %{_presetdir}/80-plugin-qualify.preset
+%{_tmpfilesdir}/plugin-qualify.conf
 %{_prefix}/lib/node_modules/@openmixer/
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.5-1
+- Every sync starts by bringing each pin's files up to the ones plugin-hostd --pin-files names, measuring nothing; --refresh-pins does only that, and the package upgrade runs it. A pin written before 0.17.3 no longer leaves an LV2 with presets refused with -509 until it is qualified again (#239).
+
+* Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.4-1
+- A package transaction no longer runs a qualification sweep when systemd is not running (an image build took 95 minutes in it): the trigger leaves qualify-pending in /var/lib/omx and the next plugin-qualify-sync run scans and clears it; PLUGIN_QUALIFY_SYNC_INLINE=1 keeps the inline run (#237).
+
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.3-1
+- The sync takes a pin's files from plugin-hostd --pin-files, preset files included (#228); records carry the LV2 adapter's admission (#223) and the latency object on every cell (#201); the mod-host probe uses the device's LV2_PATH (#224); the sync takes a lock (#222); published descriptors are readable by the console (#221). Needs plugin-hostd 0.15.0.
+
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.2-1
+- The sync writes CLAP descriptors one plugin per run with its own timeout, keys CLAP targets by file, and removes the records of a plugin's other bytes (#218, #219).
+
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.1-1
+- The Debian release build installs python3 for the changelog step; no code change.
+* Thu Oct 29 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.0-1
+- The distributed records layer: the sync reads the records a device ships before it measures, and takes a plugin
+  only on a binary checksum match; plugin-qualify-records-package builds the Debian package of a device's
+  qualification records (#195).
+- The measurement grid covers every declared host rate and quantum, for LV2 as for CLAP, with the runs merged into
+  one probe output and a bounded memory: a run past the bound is probe.oom (#193).
+- A record cell without latency figures says why, by the contract's reason code (#201).
+- The commit-message check is named for what it checks.
+* Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.1-1
+- The sync service names the interpreter first in ExecStart: executed as a script it stayed in systemd's own
+  SELinux domain on Fedora, with no executable memory for V8 and no /tmp, and died at start (#188).
 * Wed Oct 28 2026 Pau Aliagas <linuxnow@gmail.com> - 0.16.0-1
 - A package transaction in a plugin folder scans once: debian triggers and rpm file triggers on the standard
   LV2 and CLAP folders (#169).

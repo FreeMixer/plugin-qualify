@@ -21,6 +21,8 @@ import type { Judgment, RecordReason } from "./probe-judge.js";
 import { sha256Hex, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { VoicesHeld } from "./measurement/format.js";
 import { writeFileWhole } from "./whole-file.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import { MEASUREMENT_UNMEASURED_REASONS } from "@openmixer/omx-contract";
 
 export const QUALIFICATION_RECORD_SCHEMA = "plugin-qualify.qualification-record/1";
 
@@ -57,8 +59,11 @@ export interface RecordTiers {
   readonly dimmed?: string;
 }
 
-/** The profile each format's isolated tier is judged under. */
-export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "mod-host", clap: "omx-clap-host" };
+/**
+ * The profile each format's isolated tier is judged under: omx-clap-host for both, an LV2 plugin through plugin-hostd's
+ * LV2 adapter, whose run decides that verdict (`host-admission.ts`). mod-host is judged only when a run asks for it.
+ */
+export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "omx-clap-host", clap: "omx-clap-host" };
 export const IN_PROCESS_TIER_HOST = "openmixer-console";
 
 /** A latency or cost figure the run could not take: which one, at what rate and quantum, and the code that says why. */
@@ -87,6 +92,52 @@ export function unmeasuredFigures(output: ProbeOutput): readonly UnmeasuredFigur
       code: s.hostingCode ?? s.outcome,
       ...(s.detail === undefined ? {} : { detail: s.detail }),
     }));
+}
+
+/** A cell's latency when the run took no figure: the contract's unmeasured word and the hosting code a reader classifies by. */
+export interface UnmeasuredLatency {
+  /** The figure the plugin declared (LV2 latency port, CLAP latency extension) when it loaded but the probe did not measure. */
+  readonly declaredFrames?: number;
+  readonly unmeasuredReason: string;
+  readonly code: string;
+}
+
+/** A grid point as the record writes it: every cell carries `latency`, the figures or why there are none (#201). */
+export type RecordGridPoint = Omit<ProbeGridPoint, "latency"> & {
+  readonly latency: (Omit<NonNullable<ProbeGridPoint["latency"]>, "measuredFrames"> & { readonly measuredFrames: number }) | UnmeasuredLatency;
+};
+
+const UNMEASURED_WORDS: ReadonlySet<string> = new Set(Object.values(MEASUREMENT_UNMEASURED_REASONS).map((r) => r.word));
+const word = (key: keyof typeof MEASUREMENT_UNMEASURED_REASONS): string => MEASUREMENT_UNMEASURED_REASONS[key].word;
+
+/** The unmeasured word of a cell whose run did not end well, by its outcome code. */
+const OUTCOME_WORD: Readonly<Record<string, string>> = {
+  "probe.crashed": word("probeCrashed"),
+  "probe.timeout": word("probeTimeout"),
+  "probe.refused-instantiation": word("refusedInstantiation"),
+  "probe.non-finite-output": word("nonFiniteOutput"),
+};
+
+/**
+ * Why a cell has no latency figure. A cell whose run failed: its outcome's word. A latency step at the cell that did not
+ * end well: the child's own reason, which the runner writes first in the step's detail, when it is a contract word,
+ * else `probe-error`. No latency step at all: the run did not take the figure (`not-attempted`), as a runner or a child
+ * older than the latency arm writes it.
+ */
+export function latencyOfCell(output: ProbeOutput, point: ProbeGridPoint): RecordGridPoint["latency"] {
+  const had = point.latency;
+  if (had?.measuredFrames !== undefined) return { ...had, measuredFrames: had.measuredFrames };
+  const why = unmeasuredOfCell(output, point);
+  return had === undefined ? why : { declaredFrames: had.declaredFrames, ...why };
+}
+
+function unmeasuredOfCell(output: ProbeOutput, point: ProbeGridPoint): UnmeasuredLatency {
+  const code = HOSTING_CODE.latencyUnmeasured;
+  if (point.outcome !== PROBE_OK) return { unmeasuredReason: OUTCOME_WORD[point.outcome] ?? word("probeError"), code };
+  const step = output.steps.find((st) => st.step === "latency" && st.rate === point.rate && (st.quantum === undefined || st.quantum === point.quantum));
+  if (step === undefined) return { unmeasuredReason: word("notAttempted"), code };
+  const said = step.detail?.split(":")[0]?.trim() ?? "";
+  return { unmeasuredReason: UNMEASURED_WORDS.has(said) ? said : word("probeError"), code: step.hostingCode ?? code };
 }
 
 /**
@@ -122,6 +173,11 @@ export interface QualificationRecord {
   readonly testedVersion?: string;
   readonly binary: ProbeOutput["binary"];
   readonly verdicts: readonly RecordVerdict[];
+  /**
+   * An LV2 plugin run under plugin-hostd's LV2 adapter (omx-clap-host), as under mod-host: admitted, or refused with
+   * its code, or `measured: false` when it was not tried. Beside the verdicts, which it does not change (#223).
+   */
+  readonly adapter?: { readonly host: string; readonly measured: boolean; readonly admitted: boolean; readonly code?: string; readonly params: Readonly<Record<string, string | number>> };
   readonly tiers: RecordTiers;
   /** The cost reasons at each host's rate and quantum, beside the verdicts; an instrument's with the notes it held. */
   readonly cost: readonly {
@@ -136,7 +192,7 @@ export interface QualificationRecord {
    * {declaredFrames, measuredFrames}, `cost`, `rtSafety`, `noteSweep`), and the figures the run could not take, named.
    */
   readonly measurements: {
-    readonly grid: readonly ProbeGridPoint[];
+    readonly grid: readonly RecordGridPoint[];
     readonly behaviour?: Readonly<Record<string, unknown>>;
     readonly unmeasured?: readonly UnmeasuredFigure[];
   };
@@ -150,6 +206,8 @@ export interface QualificationRecord {
   readonly measuredAt: string;
   /** The second verdict, per host class of the history that was read; absent until `adjust --history` has run. */
   readonly history?: readonly HistoryBlock[];
+  /** Where the record came from when it was not measured on this device: the distributed set's provenance, as the set's package wrote it. */
+  readonly provenance?: Readonly<Record<string, unknown>>;
   /** The probe output this record judged. */
   readonly probe: {
     readonly file: string;
@@ -224,10 +282,11 @@ export function buildQualificationRecord(
       ...(h.verdict.deciding === undefined ? {} : { deciding: h.verdict.deciding }),
       reasons: h.reasons,
     })),
+    ...(judgment.adapter === undefined ? {} : { adapter: judgment.adapter }),
     tiers: tiersOf(judgment),
     cost: judgment.hosts.map((h) => ({ host: h.verdict.host, ...h.cost })),
     measurements: {
-      grid: o.grid,
+      grid: o.grid.map((p) => ({ ...p, latency: latencyOfCell(o, p) })),
       ...(o.behaviour === undefined ? {} : { behaviour: o.behaviour }),
       ...(unmeasuredFigures(o).length === 0 ? {} : { unmeasured: unmeasuredFigures(o) }),
     },

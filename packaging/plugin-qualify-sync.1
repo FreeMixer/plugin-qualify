@@ -3,7 +3,7 @@
 plugin-qualify-sync \- qualify every plugin on the machine once, and again when its files change
 .SH SYNOPSIS
 .B plugin-qualify-sync
-[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
+[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-no\-distributed\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
 .SH DESCRIPTION
 Finds every CLAP and LV2 plugin on the search paths and gives each new or changed one the quick
 qualification: its pin, the real-time safety sweep, cost and latency, and its descriptor. A plugin whose
@@ -19,15 +19,26 @@ A plugin that is no longer found, or whose bytes changed, leaves nothing behind:
 record and the probe output beside it, and its descriptor are removed, and a running plugin-hostd is told with
 \fBpin_clear\fR. Nothing is removed in a run that could not read a plugin bundle.
 .PP
+Before a plugin is measured, the distributed records of the machine class are read
+(/usr/share/omx/qualification/\fIhost class\fR/\fIset\fR/, installed by a package of a plugin set). A record
+applies only when every file it names is installed with the SHA-256 it recorded; the plugin is then not measured,
+the record is copied into the qualification directory with the set's provenance, and the run says
+\fBdistributed: \fIuri\fB: applied (\fIset\fB)\fR. A record whose files differ is ignored
+(\fBdistributed: \fIuri\fB: binary differs\fR) and the plugin is measured. The host class is \fBhost_class\fR,
+else the board's own from the device tree (\fBrpi5\fR on a Raspberry Pi 5).
+.PP
 The last line on standard output counts the plugins: qualified, skipped, refused, crashed, hung,
-unmeasured, and the seconds the run took.
+unmeasured, taken from the distributed records, and the seconds the run took.
 .SH OPTIONS
 .TP
 .B \-\-system
 The directories of a system service, under /var/lib/omx.
 .TP
 .B \-\-force
-Qualify every plugin again, recorded or not.
+Qualify every plugin again, recorded or not; no distributed record is read.
+.TP
+.B \-\-no\-distributed
+Read no distributed record.
 .TP
 .BI \-\-config " file"
 The settings file (default /etc/omx/qualify.conf).
@@ -37,7 +48,7 @@ Any setting of the file, as a flag: \fB\-\-budget\-s 30\fR for \fBbudget_s 30\fR
 \fBplugin-qualify-sync \-\-help\fR lists them with their defaults.
 .SH FILES
 /etc/omx/qualify.conf, /var/lib/omx/qualified.pins, /var/lib/omx/qualification, /var/lib/omx/descriptors,
-/var/lib/omx/qualify-sync.json
+/var/lib/omx/qualify-sync.json, /usr/share/omx/qualification
 .PP
 plugin-qualify-sync.path watches the standard plugin folders. The folders the settings file adds
 (\fBlv2_path\fR, \fBlv2_extra\fR, \fBclap_path\fR, \fBclap_extra\fR) are written into a drop-in of that unit by a

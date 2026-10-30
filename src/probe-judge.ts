@@ -33,11 +33,12 @@ import {
   type HostingReason,
 } from "./hosting-suitability.js";
 import type { HostProfile } from "./host-profiles.js";
-import { admittedHostOf, type HostAdmission } from "./host-admission.js";
+import { runDecides, type HostAdmission } from "./host-admission.js";
 import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import type { IntegrityMeasurement, VoicesHeld } from "./measurement/format.js";
+import { PROBE_OOM } from "./memory-bound.js";
 
 /** Facts of the descriptor, which the probe output repeats none of. */
 export interface JudgeFacts {
@@ -132,7 +133,9 @@ export function clapLineFromProbeOutput(output: ProbeOutput, facts: JudgeFacts =
   const points = okPoints(output);
   const latency: Record<string, { declaredFrames: number; measuredFrames: number }> = {};
   for (const p of points) {
-    if (p.latency !== undefined && latency[String(p.rate)] === undefined) latency[String(p.rate)] = p.latency;
+    if (p.latency?.measuredFrames !== undefined && latency[String(p.rate)] === undefined) {
+      latency[String(p.rate)] = { declaredFrames: p.latency.declaredFrames, measuredFrames: p.latency.measuredFrames };
+    }
   }
   const withRt = points.filter((p) => p.rtSafety !== undefined);
   return {
@@ -187,6 +190,8 @@ export interface HostJudgment {
 
 export interface Judgment {
   readonly output: ProbeOutput;
+  /** An LV2 plugin's run under plugin-hostd's LV2 adapter, beside the verdicts (plugin-qualify#223). */
+  readonly adapter?: HostAdmission;
   readonly hosts: readonly HostJudgment[];
   /** For a CLAP plugin, the document of each host that today's judge writes; the pins are taken from these. */
   readonly documents: readonly RtSafetyDocument[];
@@ -197,8 +202,25 @@ function decidingOf(reasons: readonly RecordReason[], rating: SuitabilityRating)
   return [...reasons].sort((a, b) => RATING_SEVERITY[b.rating] - RATING_SEVERITY[a.rating]).find((r) => r.rating === rating);
 }
 
+/** The grid point at a host's own cell, whatever its outcome; `undefined` when the grid does not hold that cell. */
+function cellOf(output: ProbeOutput, profile: HostProfile): ProbeGridPoint | undefined {
+  return output.grid.find((p) => p.rate === profile.cost.rate && p.quantum === profile.cost.quantum);
+}
+
+const memoryParams = (p: ProbeGridPoint): Record<string, number | string> =>
+  p.memoryLimit === undefined ? {} : { memoryLimitBytes: p.memoryLimit.bytes, memoryLimitMechanism: p.memoryLimit.mechanism };
+
+/**
+ * The cost reasons at the host's rate and quantum. A cell that was measured is read against the host's budget; a cell
+ * whose run did not end well is `unknown` with that run's outcome (`probe.oom`, `probe.crashed`); only a cell the grid
+ * does not hold is `hosting.cost.unmeasured-at-rate-and-quantum`.
+ */
 function costOf(output: ProbeOutput, profile: HostProfile): HostJudgment["cost"] {
   const { rate, quantum } = profile.cost;
+  const cell = cellOf(output, profile);
+  if (cell !== undefined && cell.outcome !== PROBE_OK && cell.outcome !== PROBE_NOT_ATTEMPTED) {
+    return { rate, quantum, reasons: [{ dimension: "cost", rating: "unknown", code: cell.outcome, params: { rate, quantum, ...memoryParams(cell) } }] };
+  }
   const reasons = hostingCostReasons(
     { cpuCost: { perRateQuantum: gridCostReadings(output.grid, PROBE_OK) } },
     { rate, quantum, profile },
@@ -215,7 +237,8 @@ function costOf(output: ProbeOutput, profile: HostProfile): HostJudgment["cost"]
  */
 function failedOutcome(output: ProbeOutput): string | undefined {
   if (output.run.outcome !== PROBE_OK) return output.run.outcome;
-  return output.grid.find((p) => p.outcome !== PROBE_OK && p.outcome !== PROBE_NOT_ATTEMPTED)?.outcome;
+  // a cell that outgrew the memory bound is a recorded outcome of that cell, judged per host below, not the run's end
+  return output.grid.find((p) => p.outcome !== PROBE_OK && p.outcome !== PROBE_NOT_ATTEMPTED && p.outcome !== PROBE_OOM)?.outcome;
 }
 
 /**
@@ -257,8 +280,14 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       const notes = noteSweepOfProbeOutput(output, rt);
       reasons = [...rtSafetyReasons(rt), ...noteSweepReasons(notes, facts.noteInputs ?? (notes.applicable ? 1 : 0))].map(asRecordReason);
     }
+    // the plugin did not run within the memory bound at this host's own rate and quantum: not hostable there as measured
+    const cell = cellOf(output, profile);
+    if (cell?.outcome === PROBE_OOM) {
+      reasons = [...reasons, { dimension: "memory", rating: "unknown", code: PROBE_OOM, params: { rate: cell.rate, quantum: cell.quantum, ...memoryParams(cell) } }];
+    }
     const admission = facts.admissions?.[profile.id];
-    if (admission !== undefined && admittedHostOf(profile) !== undefined) {
+    const ran = admission !== undefined && runDecides(profile, output.plugin.format, admission);
+    if (ran && admission !== undefined) {
       if (!admission.measured || !admission.admitted) {
         // the host could not be run, or the plugin did not survive it: the run decides, whatever the declaration says
         const code = admission.code ?? `${admission.host}.not-admitted`;
@@ -284,7 +313,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
         ...(deciding === undefined ? {} : { deciding: deciding.code }),
       },
       hosting: rating === "suitable" && profile.isolation === "in-process" ? "in-process" : "isolated",
-      arm: admission !== undefined && admittedHostOf(profile) !== undefined ? "run" : "declaration",
+      arm: ran ? "run" : "declaration",
       reasons,
       cost: costOf(output, profile),
     };

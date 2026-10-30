@@ -16,6 +16,7 @@ import { QUALIFY_QUANTA, QUALIFY_RATES, DEFAULT_HOSTING_POLICY, COST_REFERENCE_R
 import { EXIT_CODE, QUALIFY_OPTIONS } from "./qualify-options.js";
 import { HOSTING_CODE, attributeCrash, type QualifiedPlugin } from "./hosting-suitability.js";
 import { lv2Loader } from "./lv2-loader.js";
+import type { PluginLoader } from "./loader.js";
 import {
   exitCodeFor,
   helpText,
@@ -47,6 +48,22 @@ describe("parseQualifyArgs — the named-plugin path is first-class", () => {
     expect(a.args.rates).toEqual(QUALIFY_RATES);
     expect(a.args.quanta).toEqual(QUALIFY_QUANTA);
     expect(a.args.format).toBe("text");
+  });
+
+  it("the grid is the full one by default; --grid full, named cells, --grid-hosts, a cell budget, --blocks and --memory-limit (#193)", () => {
+    const d = parseQualifyArgs([ZERO_PATH_URI]);
+    expect(d.ok && [d.args.grid, d.args.cellsPerPluginBudget, d.args.blocks, d.args.memoryLimit]).toEqual([{ kind: "full" }, 0, undefined, undefined]);
+    const h = parseQualifyArgs([ZERO_PATH_URI, "--grid-hosts"]);
+    expect(h.ok && h.args.grid).toEqual({ kind: "hosts" });
+    const f = parseQualifyArgs([ZERO_PATH_URI, "--grid", "full", "--cells-per-plugin-budget", "3", "--blocks", "128", "--memory-limit", "2G"]);
+    expect(f.ok && [f.args.grid, f.args.cellsPerPluginBudget, f.args.blocks, f.args.memoryLimit]).toEqual([{ kind: "full" }, 3, 128, 2 ** 31]);
+    const c = parseQualifyArgs([ZERO_PATH_URI, "--grid", "48000/128"]);
+    expect(c.ok && c.args.grid).toEqual({ kind: "cells", cells: [{ rate: 48000, quantum: 128 }] });
+    expect(parseQualifyArgs([ZERO_PATH_URI, "--grid-hosts"]).ok).toBe(true);
+    expect(parseQualifyArgs([ZERO_PATH_URI, "--memory-limit", "off"]).ok).toBe(true);
+    for (const bad of [["--grid", "48000"], ["--grid-hosts", "--grid", "full"], ["--cells-per-plugin-budget", "-1"], ["--blocks", "0"], ["--memory-limit", "lots"]]) {
+      expect(parseQualifyArgs([ZERO_PATH_URI, ...bad]).ok, bad.join(" ")).toBe(false);
+    }
   });
 
   it("a bundle path is a target like a URI", () => {
@@ -129,6 +146,19 @@ describe("lv2Loader — the one discovery seam", () => {
     } finally {
       rmSync(dir, { recursive: true });
     }
+  });
+
+  it("resolveTargets keeps every file that holds a plugin of the same id, keyed by its path", () => {
+    const files = ["/a/MVerb.clap", "/b/MVerb.clap", "/c/MVerb.clap", "/d/MVerb.clap"];
+    const loader: PluginLoader = {
+      format: "clap",
+      resolve: (t) =>
+        t === "scan"
+          ? files.map((binaryPath) => ({ format: "clap", uri: "urn:clap:studio.kx.distrho.MVerb", bundle: "/x", binary: "MVerb.clap", binaryPath }))
+          : [{ format: "clap", uri: t }],
+    };
+    const r = resolveTargets(["scan", "urn:clap:studio.kx.distrho.MVerb"], [loader]);
+    expect(r.ok && r.plugins.map((p) => p.binaryPath)).toEqual(files);
   });
 
   it("resolveTargets refuses a target no loader claims, naming it", () => {

@@ -16,7 +16,7 @@ body, and judges it against the plugin's own descriptor params:
   listed — refuse or report, never drop.
 
 Only the bundles lilv loads from LV2_PATH are read, which is what the scan reads: the presets a
-plugin ships, never one another host saved in a user's home (ruling 2). The output is sorted by
+plugin ships, never one another host saved in a user's home (decision 2). The output is sorted by
 preset URI and the values by symbol, so the same install yields the same bytes.
 """
 

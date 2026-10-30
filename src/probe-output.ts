@@ -91,10 +91,13 @@ export interface ProbeGridPoint {
   readonly rate: number;
   readonly quantum: number;
   readonly outcome: string;
-  readonly latency?: { readonly declaredFrames: number; readonly measuredFrames: number };
+  /** `measuredFrames` is absent where the probe did not measure; the declared figure is kept whenever the plugin loaded (#201). */
+  readonly latency?: { readonly declaredFrames: number; readonly measuredFrames?: number };
   readonly cost?: ProbeCost;
   readonly rtSafety?: ProbeRtSafety;
   readonly noteSweep?: ProbeNoteSweep;
+  /** A cell whose run outgrew the memory bound (`probe.oom`): the bound it ran under. */
+  readonly memoryLimit?: { readonly bytes: number; readonly mechanism: string };
 }
 
 export interface ProbeStep {
@@ -105,6 +108,9 @@ export interface ProbeStep {
   /** The hosting code the step carries when it says why a figure is absent (`hosting.latency.unmeasured`). */
   readonly hostingCode?: string;
   readonly detail?: string;
+  /** How the child ended, when this step is a child's end: its exit status, or the signal that killed it. */
+  readonly exitStatus?: number;
+  readonly signal?: string;
 }
 
 export interface ProbeIdleState {
@@ -291,7 +297,10 @@ function readPoint(v: unknown, i: number): ProbeGridPoint {
   let latency: ProbeGridPoint["latency"];
   if (latencyIn !== undefined) {
     const l = record(latencyIn, `${where} latency`);
-    latency = { declaredFrames: count(l, "declaredFrames", `${where} latency`), measuredFrames: count(l, "measuredFrames", `${where} latency`) };
+    latency = {
+      declaredFrames: count(l, "declaredFrames", `${where} latency`),
+      ...(l["measuredFrames"] === undefined ? {} : { measuredFrames: count(l, "measuredFrames", `${where} latency`) }),
+    };
   }
   return {
     rate: posInt(o, "rate", where),
@@ -301,7 +310,13 @@ function readPoint(v: unknown, i: number): ProbeGridPoint {
     ...(o["cost"] === undefined ? {} : { cost: readCost(o["cost"], `${where} cost`) }),
     ...(o["rtSafety"] === undefined ? {} : { rtSafety: readRtSafety(o["rtSafety"], `${where} rtSafety`) }),
     ...(o["noteSweep"] === undefined ? {} : { noteSweep: readNoteSweep(o["noteSweep"], `${where} noteSweep`) }),
+    ...(o["memoryLimit"] === undefined ? {} : { memoryLimit: readMemoryLimit(o["memoryLimit"], `${where} memoryLimit`) }),
   };
+}
+
+function readMemoryLimit(v: unknown, where: string): { bytes: number; mechanism: string } {
+  const o = record(v, where);
+  return { bytes: posInt(o, "bytes", where), mechanism: str(o, "mechanism", where) };
 }
 
 function readStep(v: unknown, i: number): ProbeStep {
@@ -314,6 +329,8 @@ function readStep(v: unknown, i: number): ProbeStep {
     ...optional("quantum", o["quantum"] === undefined ? undefined : posInt(o, "quantum", where)),
     ...optional("hostingCode", nonEmptyString(o["hostingCode"])),
     ...optional("detail", nonEmptyString(o["detail"])),
+    ...optional("exitStatus", typeof o["exitStatus"] === "number" && Number.isInteger(o["exitStatus"]) ? o["exitStatus"] : undefined),
+    ...optional("signal", nonEmptyString(o["signal"])),
   };
 }
 

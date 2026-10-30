@@ -41,7 +41,7 @@ import { HOST_BUDGETS } from "./qualify-declarations.js";
 /** The console's per-instance ceiling, read from the declaration it lives in. */
 const DEFAULT_HOSTING_POLICY_CEILING = HOST_BUDGETS["openmixer-console"].coreFractionCeiling;
 
-/** The desk's rate since the operator's 2026-09-14 ruling. The classifier is rate-agnostic —
+/** The desk's rate since the 2026-09-14 decision. The classifier is rate-agnostic —
  *  it reads the figure at the rate it is GIVEN — so this is the fixture's own parameter and
  *  never a rate any code knows; what it must be is the rate the console actually runs. */
 const RATE = 96_000;
@@ -333,6 +333,37 @@ describe("the disqualifiers", () => {
     }
     expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
   });
+
+  // plugin-qualify#118/#129 (omx-clap-core #94): the adapter now provides the path features and
+  // the rtmempool URIs, and always keeps the inPlaceBroken promise.
+  it("a plugin requiring state:mapPath is suitable; removing it from the list turns it unsuitable again", () => {
+    const mapPath = "http://lv2plug.in/ns/ext/state#mapPath";
+    const need = { required: [mapPath] };
+    expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
+    const list = OMX_INPROCESS_FEATURES as string[];
+    const at = list.indexOf(mapPath);
+    expect(at).toBeGreaterThanOrEqual(0);
+    list.splice(at, 1);
+    try {
+      expect(classify(measured({}, { lv2Features: need })).rating).toBe("unsuitable");
+    } finally {
+      list.splice(at, 0, mapPath);
+    }
+    expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
+  });
+
+  it("a plugin requiring an rtmempool URI (zynadd) is suitable", () => {
+    const need = { required: ["http://kxstudio.sf.net/ns/lv2ext/rtmempoolPool"] };
+    expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
+  });
+
+  it("a plugin requiring lv2:inPlaceBroken is met regardless of the profile's list", () => {
+    const need = { required: ["http://lv2plug.in/ns/lv2core#inPlaceBroken"] };
+    expect(classify(measured({}, { lv2Features: need })).rating).toBe("suitable");
+    // sabotage: a profile that never lists it still must not refuse it — the promise is the adapter's, not the profile's
+    const bare = { ...OPENMIXER_CONSOLE_PROFILE, id: "t", lv2Features: [] };
+    expect(classify(measured({}, { lv2Features: need }), { profile: bare }).rating).toBe("suitable");
+  });
 });
 
 describe("the cautions cap at conditional and stay isolated", () => {
@@ -384,7 +415,7 @@ describe("the floor comes from policy, never baked in", () => {
     expect(high.reasons.map((r) => r.code)).toContain(HOSTING_CODE.stabilityBelowFloor);
   });
 
-  it("the operator's ruling of 2026-09-05 is the default floor", () => {
+  it("the decision of 2026-09-05 is the default floor", () => {
     expect(DEFAULT_HOSTING_POLICY.cycleFloor).toBe(1000);
   });
 });
@@ -814,8 +845,8 @@ describe("host profiles — the host is a declared input, the measurements are n
     expect(onJalv(measured({ audioInputs: 0, hasMidiIn: false })).deciding?.code).toBe(HOSTING_CODE.topologyNoAudioInput);
   });
 
-  it("the provided features are the profile's: state#makePath passes mod-host, fails the console and jalv", () => {
-    const d = measured({}, { lv2Features: { required: ["http://lv2plug.in/ns/ext/state#makePath"] } });
+  it("the provided features are the profile's: mod-host's license feature passes mod-host, fails the console and jalv", () => {
+    const d = measured({}, { lv2Features: { required: ["http://moddevices.com/ns/ext/license#feature"] } });
     expect(classify(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
     expect(onJalv(d).deciding?.code).toBe(HOSTING_CODE.featuresMissing);
     expect(onModHost(d).rating).toBe("suitable");

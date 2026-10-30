@@ -81,7 +81,8 @@ function machine(extraLv2Dir?: string) {
   });
   const state: SyncState = {
     schema: SYNC_STATE_SCHEMA,
-    entries: { [`lv2:${GONE}`]: entry(GONE, join(root, "gone.lv2"), [], "b"), [item.key]: entry(KEPT, item.root, digestFiles(item.root, item.files)!, "a") },
+    // the uninstalled bundle lived in a directory the run scans (#247: a run drops only what it looked for)
+    entries: { [`lv2:${GONE}`]: entry(GONE, join(lv2, "gone.lv2"), [], "b"), [item.key]: entry(KEPT, item.root, digestFiles(item.root, item.files)!, "a") },
   };
   writeFileSync(join(root, "state.json"), JSON.stringify(state));
   writeFileSync(join(root, "qualified.pins"), `# written by plugin-qualify-sync\n${PIN_GONE}\n`);
@@ -153,5 +154,62 @@ describe("pruneStale", () => {
     // the binary changed (a new stem): the old stem's files go
     const upgraded: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { a: entry(q(stem(GONE, "d"))), b: entry(q(stem(GONE, "d"))) } };
     expect(pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, upgraded).map((f) => f.replace(m.root, "")).sort()).toEqual([`/descriptors/${m.files[GONE]}.json`, `/qualification/${m.files[GONE]}.default.probe.json`, `/qualification/${m.files[GONE]}.default.qualification.json`].sort());
+  });
+
+  // #177: a CLAP record is keyed `<id>@unversioned-<hash>` while its descriptor is keyed `<id>@<declared version>-<hash>`
+  const CLAP_ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
+  const clapEntry = (record: string, uri = `urn:clap:${CLAP_ID}`) => ({ format: "clap" as const, root: "/r", files: [], qualifiedAt: "", seconds: 0, plugins: [{ uri, outcome: "qualified" as const, record }] });
+
+  it("removes a CLAP plugin's descriptor by id and binary hash, though its record names a different version suffix than its descriptor does", () => {
+    const m = machine();
+    const hash = "d".repeat(12);
+    const recordStemName = `${CLAP_ID}@unversioned-${hash}`;
+    const descriptorStemName = `${CLAP_ID}@1-${hash}`;
+    const record = join(m.q, `${recordStemName}.default.qualification.json`);
+    writeFileSync(record, "{}");
+    writeFileSync(join(m.q, `${recordStemName}.default.probe.json`), "{}");
+    writeFileSync(join(m.d, `${descriptorStemName}.json`), "{}");
+    const before: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(record) } };
+    const after: SyncState = { schema: SYNC_STATE_SCHEMA, entries: {} };
+    const removed = pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, after).map((f) => f.replace(m.root, ""));
+    expect(removed.sort()).toEqual([`/descriptors/${descriptorStemName}.json`, `/qualification/${recordStemName}.default.probe.json`, `/qualification/${recordStemName}.default.qualification.json`].sort());
+  });
+
+  it("keeps a descriptor whose id and binary hash the state still names, even though its own stem became stale", () => {
+    const m = machine();
+    const hash = "e".repeat(12);
+    const staleStem = `${CLAP_ID}@unversioned-${hash}`;
+    const keptStem = `${CLAP_ID}@1-${hash}`;
+    const staleRecord = join(m.q, `${staleStem}.default.qualification.json`);
+    const keptRecord = join(m.q, `${keptStem}.default.qualification.json`);
+    writeFileSync(staleRecord, "{}");
+    writeFileSync(keptRecord, "{}");
+    writeFileSync(join(m.d, `${keptStem}.json`), "{}");
+    const before: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(staleRecord) } };
+    const after: SyncState = { schema: SYNC_STATE_SCHEMA, entries: { c: clapEntry(keptRecord) } };
+    const removed = pruneStale({ qualificationDir: m.q, descriptorDir: m.d }, before, after).map((f) => f.replace(m.root, ""));
+    expect(removed).toEqual([`/qualification/${staleStem}.default.qualification.json`]);
+    expect(existsSync(join(m.d, `${keptStem}.json`))).toBe(true);
+  });
+});
+
+describe("pruneStale over records the state never named (#198)", () => {
+  it("removes every record of an installed id made from other bytes, whichever tier, and keeps the installed bytes' records and other ids", () => {
+    const root = mkdtempSync(join(scratch, "n-"));
+    const q = join(root, "q");
+    const d = join(root, "d");
+    mkdirSync(q);
+    mkdirSync(d);
+    const old = "org.openmixer.chorus@unversioned-c9d6503c6c1b";
+    const cur = "org.openmixer.chorus@unversioned-ea807d68956a";
+    const other = "org.openmixer.flanger@unversioned-111111111111";
+    for (const f of [`${old}.custom.qualification.json`, `${old}.default.qualification.json`, `${old}.default.probe.json`, `${cur}.custom.qualification.json`, `${cur}.default.qualification.json`, `${other}.default.qualification.json`, "by-hand.json"])
+      writeFileSync(join(q, f), "{}");
+    const state: SyncState = {
+      schema: SYNC_STATE_SCHEMA,
+      entries: { clap: { format: "clap", root: "/x", files: [], qualifiedAt: "2026-10-28T00:00:00.000Z", seconds: 0, plugins: [{ uri: "org.openmixer.chorus", outcome: "qualified", record: join(q, `${cur}.custom.qualification.json`) }] } },
+    };
+    pruneStale({ qualificationDir: q, descriptorDir: d }, state, state);
+    expect(readdirSync(q).sort()).toEqual([`${cur}.custom.qualification.json`, `${cur}.default.qualification.json`, `${other}.default.qualification.json`, "by-hand.json"].sort());
   });
 });

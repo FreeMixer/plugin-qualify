@@ -198,7 +198,10 @@ export function probeOutputOfLv2Line(line: Lv2MeasureLine): Record<string, any> 
       method: latency.from === "note" ? "note-onset" : "impulse-onset",
       ...(latency.from === "note" ? { heard: true } : {}),
     };
-  } else absent("latency", latency);
+  } else {
+    absent("latency", latency);
+    if (latency?.declaredFrames !== undefined) point["latency"] = { declaredFrames: latency.declaredFrames };
+  }
   if (cost?.nsPerSampleMedian !== undefined) {
     steps.push({ step: "cost", rate, quantum, outcome: "probe.ok", elapsedMs: 1 });
     point["cost"] = {

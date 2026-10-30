@@ -69,6 +69,83 @@ A named LV2 plugin is measured the same way as a CLAP one: through the probe run
 output it writes (`plugin-qualify judge` below). Exit code: `0` every plugin qualified, `1` some did not, `2`
 something could not be measured.
 
+## The measurement grid
+
+A plugin is measured in cells, each one sample rate and one quantum (block size in frames). The verdict a host
+gets reads the cell of that host's rate and quantum, so the grid has to hold it.
+
+```
+plugin-qualify --all --out ./q                          # the full grid (the default): 4 rates x 4 block sizes
+plugin-qualify --all --grid-hosts --out ./q             # the hosts' grid, the fast option (also --grid hosts)
+plugin-qualify --grid 48000/128,96000/1024 urn:my:fx    # exactly these cells
+```
+
+- `--grid hosts` (the fast option; `--grid-hosts` says the same): the rate and quantum of every host the run judges
+  (each `--host-profile`, and the console's two tiers, `openmixer-console` and the format's isolated host), then
+  quantum 512 at every `--rates` rate, so that a record stays comparable with the ones written before the grid.
+  With the four shipped hosts that is seven cells: 96000/1024 (`openmixer-console`), 48000/256 (`jalv`),
+  48000/128 (`mod-host`, `omx-clap-host`), and 512 at 44100, 48000, 96000 and 192000.
+- `--grid full` (the default; every plugin is measured under the same conditions, so any host's verdict can be read at any cell and the figures compare): every `--rates` rate at every `--quanta` quantum, 16 cells with the defaults
+  (44100, 48000, 96000, 192000 by 128, 256, 512, 1024).
+- `--grid <rate>/<quantum>,...`: exactly the cells named.
+
+The cells are taken in that order: the hosts' own cells first, in the order the hosts are named, then the
+512 cells, then the rest by rate and quantum. `--cells-per-plugin-budget N` keeps the first N, so a first pass
+over a large machine can measure the hosts' cells alone (`--cells-per-plugin-budget 3` with the four shipped hosts).
+`--blocks N` shortens the CLAP sweep of each cell from 512 blocks to N; the LV2 pass has a fixed shape (30
+lifecycles and 3 swept runs per cell) and is not shortened by it.
+
+An LV2 plugin is measured on the same grid as a CLAP one. plugin-hostd's runner measures an LV2 plugin at one
+rate per run (the highest it is given), which is why records written before the grid hold LV2 figures at 192000
+only; plugin-qualify now runs it once per cell. A CLAP plugin is run once per quantum, at every rate of the grid
+at that quantum. The runs of one plugin and one offer make one probe output: the grid points of every run, the
+steps of every run, and the run's outcome. The record and its byte copy hold that document.
+
+A run that ended badly leaves a grid point at each of its cells with the run's outcome in place of figures, so a
+cell is never silently absent. The cost a host is judged by is read at its cell: a measured cell is compared with
+the host's budget; a cell whose run failed reads `unknown` with that run's outcome (`probe.oom`, say); only a
+cell the grid does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`.
+
+### The memory bound
+
+A sampler loading its library can take all the memory of a small machine, and the kernel then kills it, or
+something else. Every run is bounded: `--memory-limit <bytes>` (`512M`, `2G`, or `off`), by default half of
+the machine's RAM. The bound is the runner's data limit (`--data-bytes`, `RLIMIT_DATA` on the measuring child:
+its heap and private writable mappings), and the interposer the child runs under turns an allocation refused
+under that limit into an immediate exit with status 121. A run that ends that way, or by a `SIGKILL` the
+runner did not send (the kernel's out-of-memory killer), is recorded as `probe.oom`: its cells carry the
+outcome and `memoryLimit { bytes, mechanism }`, the plugin's record is still written, and the other cells are
+judged as usual. A plugin whose every run ended `probe.oom` is `unknown` under every host, deciding `probe.oom`.
+A host whose own cell ended `probe.oom` is `unknown` there as well (`memory`, `probe.oom`): the plugin did not
+run within the bound at that host's rate and quantum.
+
+### How long a run takes
+
+The default grid is the full one, so the expected time of a run with no grid option is the `full` row: about 65 hours on a Raspberry Pi 5 for the vangelis set (1823 records). `--grid-hosts` is the fast option, about 30 hours there.
+
+Times from one deep run on a Raspberry Pi 5 (4 cores, 4 GB), 1823 records (494 CLAP, two offers of each of 247,
+and 1329 LV2), six hours in all with the grid of before (CLAP at four rates in one run at quantum 512, LV2 at
+192000/512 alone):
+
+| | runs | mean a run | total |
+| --- | --- | --- | --- |
+| CLAP, one run per offer (4 cells) | 494 | 2.8 s | 0.38 h |
+| LV2, one run (1 cell) | 1329 | 10.5 s | 3.86 h |
+| host admissions (jalv, mod-host) and the scan | | | about 1.8 h |
+
+A CLAP plugin takes one run per quantum of the grid, an LV2 plugin one run per cell; the admissions do not
+grow with the grid. On that machine, then, about:
+
+| grid | CLAP runs a plugin | LV2 runs a plugin | expected |
+| --- | --- | --- | --- |
+| hosts (7 cells) | 4 | 7 | 1.5 h + 27 h + 1.8 h, about 30 h |
+| full (16 cells) | 4 | 16 | 1.5 h + 62 h + 1.8 h, about 65 h |
+| hosts, `--cells-per-plugin-budget 3` | 3 | 3 | 1.1 h + 11.6 h + 1.8 h, about 15 h |
+
+These are ceilings: the LV2 time a run was taken at 192000, the dearest rate. `--blocks 128` takes a quarter of
+the CLAP sweep a cell. A first pass with `--cells-per-plugin-budget 3`, then `--grid full` over the plugins worth
+it, keeps a small machine's night bounded.
+
 ## CLAP plugins: the RT-safety verdict
 
 A `.clap` file, or a directory holding one, is scanned by `omx-clap-scan` (from omx-clap-core; set
@@ -87,6 +164,11 @@ the RPM and DEB require;
 that kills the whole process tree, CPU time, memory, files), and plugin-qualify waits for the runner and reads
 the document it writes, the probe output. Nothing in plugin-qualify times a prober out on its own any more.
 
+The files a pin holds are plugin-hostd's: the sync writes each pin with the files `plugin-hostd --pin-files <uri>`
+prints for the device's LV2 directories (plugin-hostd 0.15.0 or later; `PLUGIN_HOSTD` names the daemon when it is not
+on `PATH`), the list an add checks, and hashes exactly those. When plugin-hostd cannot name them, or is older, the
+plugin gets no pin, the log says why, and the daemon pins it on its first add (`pin_mode first-use`).
+
 `--all` walks the standard CLAP search path through the same scanner: each directory `CLAP_PATH`
 names (colon-separated), then `~/.clap`, then `/usr/lib/clap`, which is the system directory on every
 distribution and architecture. A plugin id found twice keeps its first place on that path. LV2 plugins
@@ -95,7 +177,7 @@ are measured by `tools/lv2-measure.mjs` (below); this entry point does not drive
 system lv2 directories) rather than qualify only the CLAP side. A directory on the CLAP path that cannot
 be read (permissions, a symlink loop) also refuses with exit 2, naming it.
 
-The prober runs each plugin headless at every `--rates` rate, under an interposer that counts the
+The prober runs each plugin headless at every cell of the grid (see "The measurement grid"), under an interposer that counts the
 allocations, locks and syscalls its `process()` makes while every parameter is swept, and prints
 the file's SHA-256 beside what it measured. The verdict is the real-time-safety one: **suitable**
 only on a clean count, **unsuitable** on any allocation, lock, syscall, main-thread host call from
@@ -136,7 +218,7 @@ class, so a reference figure and a local one are told apart. The record holds, f
 quantum, and the figures as measured. Exit `0` every plugin qualified, `1` some did not, `2` something could not
 be read or judged.
 
-The verdict is the same one `plugin-qualify` gives CLAP plugins today, the real-time-safety one, now for LV2 as
+The verdict is the same one `plugin-qualify` gives CLAP plugins, the real-time-safety one, now for LV2 as
 well; cost is reported beside it, not folded into it. Cost is read at the profile's rate AND quantum: a pair the
 document does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`, and two quanta of one plugin that cost
 differently give two different cost reasons. Only a measurement of the old format, which keeps one figure per
@@ -158,6 +240,13 @@ struck A4 sounds. A plugin that has no latency port is measured, never read as 0
 stays silent, an instrument with no count to hold) is left out of the grid point and named in
 `measurements.unmeasured` with its hosting code (`hosting.latency.unmeasured`,
 `hosting.cost.unmeasured-at-rate-and-quantum`).
+
+Every cell of a record carries `latency`: the two figures when the run took them, else
+`{ unmeasuredReason, code }`, the contract's word for why and the hosting code a reader classifies by. A latency
+step that did not end well gives the child's reason (`silent-output`, say); a cell whose run failed, its outcome's
+word (`probe-crashed`, or `probe-error` for `probe.oom`); a run that took no latency at all (a runner or a child
+older than the latency arm), `not-attempted`. The declared figure alone, for a plugin whose response could not be
+measured, is not in the probe output: plugin-hostd's runner writes a cell's latency only with both figures.
 
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
@@ -201,7 +290,8 @@ history outside its grammar is not read and is named on stderr; a history of a v
 `tools/lv2-measure.mjs` measures the hosting dimensions (`stability`, `rtSafety`, `features`) through
 the LV2 measurer the package installs, `lv2_measure`: each plugin is loaded through lilv in its own
 process, instantiated and destroyed 30 times, and run under the interposer while every control is
-swept, at the highest `--rates` rate:
+swept. `tools/lv2-measure.mjs` measures at the highest `--rates` rate; `plugin-qualify` runs the measurer
+once per cell of its grid (see "The measurement grid"):
 
 ```
 node tools/lv2-measure.mjs --rates 48000 --dimensions stability,rtSafety,features \
@@ -327,9 +417,11 @@ death on mod-host the next admission starts a fresh host. `plugin-qualify judge`
 that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"`.
 
 **The console's two tiers.** Every record carries `tiers`: the *in-process* verdict (`openmixer-console`) and the
-*isolated* verdict (`mod-host` for LV2, `omx-clap-host` for CLAP), `offeredOn` (the tiers whose verdict qualified)
-and, when neither did, `dimmed` with the reason. A plugin that kills the isolated host and qualifies in-process is
-offered in-process only. The tiers are judged for every plugin whether or not `--host-profile` names them.
+*isolated* verdict (`omx-clap-host`, an LV2 plugin through plugin-hostd's LV2 adapter), `offeredOn` (the tiers whose
+verdict qualified) and, when neither did, `dimmed` with the reason. An LV2 plugin is run once under the adapter, and
+that run decides its `omx-clap-host` verdict as a mod-host run decides mod-host's. A plugin that kills the isolated
+host and qualifies in-process is offered in-process only. The tiers are judged for every plugin whether or not
+`--host-profile` names them; mod-host and jalv are run only when `--host-profile` asks for them.
 
 `omx-clap-host` offers a CLAP plugin the console's six host extensions and three more,
 `clap.preset-load/2`, `clap.track-info/1` and `clap.remote-controls/2`. A CLAP plugin judged
@@ -370,7 +462,7 @@ With several profiles, the exit code is `0` only if every plugin qualifies under
 
 ### The JSON document
 
-`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.2,
+`--out <dir>` writes one interchange document per run (`lv2-plugin-measurements`, format 1.5,
 the same format the OpenMixer console reads). The
 `plugins` array holds the raw, host-free measurements. Beside it, `hostProfiles` holds each
 profile the run judged against, in full, and `verdicts` holds one entry per plugin per profile:
@@ -418,21 +510,23 @@ The package ships it as a service that runs two minutes after boot and whenever 
 changes, once the directory has been quiet for a minute. A run finds every `.clap` under the CLAP
 directories and every plugin of every bundle under the LV2 ones, and hashes each one's files as
 plugin-hostd does for a pin. A plugin whose files hash as recorded is skipped. A new or changed one gets the
-quick qualification through the probe runner: its pin, the RT-safety sweep, cost and latency, its
+quick qualification through the probe runner, on the grid `grid` names (see "The measurement grid"): its pin, the RT-safety sweep, cost and latency, its
 qualification record and its descriptor. The soak is not part of it, and every record it writes says so in
 `notMeasured` (`hosting.stability.unsoaked`).
 
-Each plugin has `budget_s` seconds. One that crashes or hangs is recorded as `crashed` or `hung`, one that
+Each run of the runner (one cell of an LV2 plugin, one quantum of a CLAP one) has `budget_s` seconds, under `memory_limit`. One that crashes or hangs is recorded as `crashed` or `hung`, one that
 fails the sweep is pinned `verdict=refused`, and the run goes on to the next. The pin file and the state are
 written whole after every plugin, so a run cut short keeps what it finished. The last line counts the run:
 
 ```
-qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, 4.6 s
+qualified 2, skipped 0, refused 0, crashed 1, hung 1, unmeasured 0, distributed 0, 4.6 s
 ```
 
 A plugin that is no longer found, or whose bytes changed, leaves nothing behind: its pin, its qualification
 record (with the probe output copied beside it) and its descriptor are removed. Records the sync did not write
 stay, and nothing is removed in a run that could not read a bundle, so a half-written install is no uninstall.
+A run looks only where its settings point: a plugin outside every directory of its format that the run scans is
+kept as it is (a run scoped to LV2 keeps every CLAP pin), and only one missing from a directory it scans is gone.
 A running plugin-hostd is told with `pin_clear`.
 
 When plugin-hostd answers on `hostd_port`, the changed pins are also sent to it with `pin_set` and apply at
@@ -452,11 +546,22 @@ The settings are `/etc/omx/qualify.conf`, one `key value` per line, and each is 
 | `state_file` | `/var/lib/omx/qualify-sync.json` |
 | `budget_s` | `60` |
 | `host_profile` | `omx-clap-host` |
+| `grid` | `full`: every rate at every block size, 16 cells (`hosts`, or `--grid-hosts`: the cells of `host_profile` and of the console's two tiers, then 512 at every rate; or `<rate>/<quantum>,...`) |
+| `cells_per_plugin_budget` | `0`, every cell of the grid |
+| `memory_limit` | half of the machine's RAM (`off` for none) |
 | `hostd_port`, `hostd_feedback_port` | `5555`, the next port |
+| `host_class` | the board's own, from the device tree (`rpi5`); none elsewhere |
+| `distributed_dir` | `/usr/share/omx/qualification` |
 
 Those are the service's (`--system`); run by a user, the files go under `$XDG_STATE_HOME/omx`. An LV2
 directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
-pinned. `--force` qualifies everything again.
+pinned. `--force` qualifies everything again, and `--no-distributed` reads no distributed record. A second `plugin-qualify-sync` waits for the run in progress (a lock on `<state_file>.lock`); `--no-wait` exits 0 at once and leaves a marker, and the holder runs once more at its end over what changed meanwhile.
+
+Every run starts by bringing each pin's files up to the ones `plugin-hostd --pin-files` names, measuring nothing: a pin
+written before 0.17.3 lacks the preset files an LV2's manifest names, which plugin-hostd 0.15.0 also checks, and its add
+answers -509 until then. The new list replaces the old one when no file both lists hold changed its hash, so the verdict
+stands; a changed file is measured again by the run. `--refresh-pins` does only that, writes the pin file and sends the
+changed pins to a running plugin-hostd; the package's upgrade runs it (plugin-qualify#239).
 
 The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/usr/local/lib/lv2`,
 `/usr/lib/clap`, `/usr/lib64/clap`). The folders the settings file adds (`lv2_path`, `lv2_extra`, `clap_path`,
@@ -468,6 +573,65 @@ seen at once, but a package's own files being replaced in place (an upgrade) is 
 itself. A packaged plugin is still caught at once, by the distribution's install triggers over the standard
 folders. An unpackaged bundle replaced in place in an extra folder is caught at the next run of
 plugin-qualify-sync.timer, at most about 15 minutes after the change.
+
+### Distributed records
+
+A device that ships with a known plugin set need not measure it again at first start. The qualification records
+another device of the same machine class wrote for that set are installed read-only, and the sync takes from them
+every plugin whose files are the bytes that were measured:
+
+```
+/usr/share/omx/qualification/<host class>/<set>/          # system (--system)
+$XDG_DATA_HOME/omx/qualification/<host class>/<set>/      # a user run, then each $XDG_DATA_DIRS/omx/qualification
+```
+
+Each `<set>` directory holds the records (`*.qualification.json`, each with its probe output `*.probe.json`) and a
+`provenance.json` that says where they come from: the set, the host class, the image, the package versions of the
+measuring device, the date and the package that installed them. The host class is a directory name: `host_class`
+in the settings, or, when it is unset, the board's own name read from the device tree (`rpi5` on a Raspberry Pi 5,
+`rpi4` on a Raspberry Pi 4). Where neither gives one, the layer is not read and the run says so.
+
+Before a plugin is measured, the sync looks for a distributed record of it: a CLAP record whose binary is the same
+`.clap` path, or an LV2 record of the same plugin uri. The name only finds the record; a record applies when, and
+only when:
+
+- every file of its `binary.files` is installed at that path relative to the plugin's root, with that SHA-256,
+  computed on the device;
+- its schema is the one this version writes and its probe output is one this version's reader accepts, the copy
+  intact (its SHA-256 the one the record names): the same acceptance the sync gives a record of its own, which it
+  never measures again for a newer tool;
+- it holds a verdict for the sync's `host_profile`, and that verdict ended `qualified`, `refused`, `crashed` or
+  `hung`. One that could not be measured at the source (`unmeasured`) is measured here.
+
+A plugin whose distributed records apply is not measured: the records are copied into `qualification_dir` with the
+set's `provenance` object added, its pin is taken from the probe output the record judged, its descriptor is
+written, and the run says
+
+```
+distributed: http://distrho.sf.net/plugins/3BandEQ: applied (zynthian-vangelis)
+```
+
+A plugin with a distributed record whose files differ is measured as before, and the run says
+`distributed: <uri>: binary differs`; one with no distributed record is measured without a word. The summary counts
+the plugins taken from the layer, `distributed N`, apart from the ones measured and skipped. A later run treats an
+applied plugin like one it measured: skipped while its files are unchanged, measured when they change. `--force`
+measures everything and reads no distributed record; `--no-distributed` keeps the layer out of a run.
+
+The package that installs a set is built from a device's `qualification_dir` by `plugin-qualify-records-package`:
+
+```
+plugin-qualify-records-package /var/lib/omx/qualification --host-class rpi5 --set zynthian-vangelis \
+  --provenance provenance.json --out .
+```
+
+It writes `omx-qualification-<host class>-<set>_<version>_all.deb`, the version the build date
+(`2026.10.29`) unless `--version` names one. The package installs the records under
+`/usr/share/omx/qualification/<host class>/<set>/` with `provenance.json`, depends on the plugin-qualify that reads
+the layer, and is `Architecture: all`. `--provenance` names a JSON file (or holds the JSON itself) with what the tool
+cannot know: the image, the package versions and the source revisions of the device. The tool adds the set, the host
+class, the package and the date. A record whose probe output is missing or does not match its SHA-256 is left out
+and named; a record of a plugin that could not be measured (`*.unmeasured.json`) is left out, since it never
+applies. The tool builds the Debian package only; an RPM of a set is not built yet.
 
 ### The container image
 

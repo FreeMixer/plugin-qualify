@@ -1,5 +1,5 @@
 name: Install plugin-hostd and its fake worker
-description: plugin-hostd with pin_file (0.2.0 and after) and its fake worker, from the OpenMixer channel, for the pins-file test.
+description: plugin-hostd with --pin-files (0.15.0 and after) and its fake worker, from the OpenMixer channel, for the pins-file test.
 
 # Shared by ci.yml and publish.yml: both run the whole suite, and the pins-file test starts the real daemon on a
 # qualified pins file. Bookworm is the suite built against the oldest glibc the channel serves, which the runner's
@@ -19,6 +19,8 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends plugin-hostd plugin-hostd-tests
         # apt takes no version relation on the command line: the floor is checked on what it installed
-        dpkg --compare-versions "$(dpkg-query -W -f='${Version}' plugin-hostd)" ge 0.2.0
+        # 0.15.0: plugin-hostd --pin-files names the files a pin holds, which the sync writes its pins from (#228)
+        v=$(dpkg-query -W -f='${Version}' plugin-hostd)
+        dpkg --compare-versions "$v" ge 0.15.0 || { echo "::error::plugin-hostd $v in the channel; the sync's pins need --pin-files, plugin-hostd 0.15.0 or later"; exit 1; }
         echo "PLUGIN_HOSTD=/usr/bin/plugin-hostd" >> "$GITHUB_ENV"
         echo "PLUGIN_HOSTD_FAKE_HOST=/usr/libexec/plugin-hostd/tests/fake-host" >> "$GITHUB_ENV"

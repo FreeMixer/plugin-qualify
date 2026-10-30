@@ -33,12 +33,14 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <execinfo.h>
+#include <stdlib.h>
 #include "rt-interpose.h"
 
 /* Counters. Read by the host through dlsym after the render. */
@@ -93,6 +95,22 @@ static int from_boot_arena(const void *p) {
   return (const char *)p >= boot_arena && (const char *)p < boot_arena + sizeof boot_arena;
 }
 
+/*
+ * The memory bound. Under the runner's data limit an allocation the plugin asks for past the limit comes back NULL; most
+ * plugins then crash somewhere that says nothing about why. With OMX_RT_OOM_EXIT_ENV set, the first refused allocation
+ * ends the process at once with OMX_RT_OOM_EXIT_STATUS, which the runner records as the child's exit status. Read once,
+ * on the first allocation; getenv allocates nothing.
+ */
+static int oom_exit = -1;
+
+static void *bounded(void *p, size_t n) {
+  if (p == NULL && n != 0) {
+    if (oom_exit < 0) oom_exit = getenv(OMX_RT_OOM_EXIT_ENV) != NULL;
+    if (oom_exit) _exit(OMX_RT_OOM_EXIT_STATUS);
+  }
+  return p;
+}
+
 static void resolve(void) {
   if (real_malloc != NULL || in_dlsym) return;
   in_dlsym = 1;
@@ -135,7 +153,7 @@ void *malloc(size_t n) {
   resolve();
   if (real_malloc == NULL) return boot_alloc(n);
   if (armed && !in_record) { n_alloc++; record(OMX_RT_MALLOC); }
-  return real_malloc(n);
+  return bounded(real_malloc(n), n);
 }
 
 void *calloc(size_t nmemb, size_t size) {
@@ -146,14 +164,14 @@ void *calloc(size_t nmemb, size_t size) {
     return p;
   }
   if (armed && !in_record) { n_alloc++; record(OMX_RT_CALLOC); }
-  return real_calloc(nmemb, size);
+  return bounded(real_calloc(nmemb, size), nmemb * size);
 }
 
 void *realloc(void *p, size_t n) {
   resolve();
   if (real_realloc == NULL) return boot_alloc(n);
   if (armed && !in_record) { n_alloc++; record(OMX_RT_REALLOC); }
-  return real_realloc(p, n);
+  return bounded(real_realloc(p, n), n);
 }
 
 void free(void *p) {
@@ -162,6 +180,22 @@ void free(void *p) {
   if (from_boot_arena(p)) return;
   if (armed && !in_record) { n_alloc++; record(OMX_RT_FREE); }
   if (real_free != NULL) real_free(p);
+}
+
+/* The aligned allocations (C++'s aligned new among them) are not counted, as before; only a refusal is watched. */
+int posix_memalign(void **out, size_t align, size_t n) {
+  static int (*real)(void **, size_t, size_t);
+  if (real == NULL) real = dlsym(RTLD_NEXT, "posix_memalign");
+  if (real == NULL) return ENOMEM;
+  int r = real(out, align, n);
+  if (r == ENOMEM) bounded(NULL, n);
+  return r;
+}
+
+void *aligned_alloc(size_t align, size_t n) {
+  static void *(*real)(size_t, size_t);
+  if (real == NULL) real = dlsym(RTLD_NEXT, "aligned_alloc");
+  return real == NULL ? NULL : bounded(real(align, n), n);
 }
 
 int pthread_mutex_lock(pthread_mutex_t *m) {

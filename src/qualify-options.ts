@@ -4,7 +4,7 @@
  * The `plugin-qualify` CLI's OPTIONS, declared once. The parser, `--help` and the tests all read this table; every default is a declaration
  * from `declarations.ts`, never a literal here.
  */
-import { QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
+import { CLAP_SWEEP_BLOCKS, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { HOST_PROFILES, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 
 /** How the result is printed. `text` = plugin, verdict, the reason that decided it. */
@@ -35,6 +35,16 @@ export const QUALIFY_OPTIONS: readonly QualifyOption[] = [
   { flag: "--all", describe: "every LV2 plugin on the LV2 search path and every CLAP plugin on the CLAP search path; with --out, one record each" },
   { flag: "--rates", value: "list", describe: "sample rates to measure at, comma-separated", default: QUALIFY_RATES.join(",") },
   { flag: "--quanta", value: "list", describe: "quanta (frames) to rate cost at, comma-separated", default: QUALIFY_QUANTA.join(",") },
+  {
+    flag: "--grid",
+    value: "hosts|full|cells",
+    describe: "the cells measured: full = every rate at every quantum; hosts = each judged host's rate/quantum, then 512 at every rate (the fast option); or <rate>/<quantum>,...",
+    default: "full",
+  },
+  { flag: "--grid-hosts", describe: "the fast grid, the same as --grid hosts" },
+  { flag: "--cells-per-plugin-budget", value: "n", describe: "measure at most the first n cells of the grid a plugin (0: every cell)", default: "0" },
+  { flag: "--blocks", value: "n", describe: "blocks of the CLAP sweep a cell (the LV2 pass has a fixed shape)", default: String(CLAP_SWEEP_BLOCKS) },
+  { flag: "--memory-limit", value: "size|off", describe: "the memory bound of every run (bytes, or with K, M, G); past it a cell is probe.oom", default: "half of the RAM" },
   { flag: "--out", value: "dir", describe: "write one interchange JSON document per run into this directory" },
   { flag: "--format", value: OUTPUT_FORMATS.join("|"), describe: "json = the verdicts as JSON; text = plugin, verdict, deciding reason", default: "text" },
   { flag: "--isolate", describe: "a fresh worker per plugin, so a crash or hang takes only that plugin" },

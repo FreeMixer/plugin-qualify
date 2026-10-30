@@ -8,6 +8,8 @@ import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
 
 const uri = process.argv[2];
+// the host to admit under: mod-host, or omx-clap-host for plugin-hostd's LV2 adapter, which answers the same protocol
+const bin = process.argv[3] ?? "mod-host";
 const port = 20000 + (process.pid % 20000);
 const STEP_MS = 10000;
 const INSTANCE = 0;
@@ -16,7 +18,7 @@ const COMMANDS = [
   ["remove", `remove ${INSTANCE}`],
 ];
 
-const host = spawn("mod-host", ["-n", "-p", String(port)], { stdio: "ignore" });
+const host = spawn(bin, ["-n", "-p", String(port)], { stdio: "ignore" });
 let hostEnd; // how the host went, once it has
 host.on("exit", (code, signal) => (hostEnd = signal ?? "exit"));
 const spawnFailed = new Promise((resolve) => host.on("error", (e) => resolve(e.code)));
@@ -38,7 +40,8 @@ async function connect() {
 async function main() {
   if ((await Promise.race([spawnFailed, sleep(200).then(() => undefined)])) === "ENOENT") return { installed: false, steps: [] };
   const sock = await connect();
-  if (sock === undefined) return { installed: true, steps: [{ cmd: "add", died: hostEnd ?? "closed" }] };
+  // the host never listened (omx-clap-host with no JACK server): the plugin was never loaded
+  if (sock === undefined) return { installed: true, started: false, steps: [] };
   let buffer = "";
   let closed = false;
   sock.on("data", (d) => (buffer += d.toString()));
