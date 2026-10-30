@@ -53,6 +53,11 @@ Any setting of the file, as a flag: \fB\-\-budget\-s 30\fR for \fBbudget_s 30\fR
 plugin-qualify-sync.path watches the standard plugin folders. The folders the settings file adds
 (\fBlv2_path\fR, \fBlv2_extra\fR, \fBclap_path\fR, \fBclap_extra\fR) are written into a drop-in of that unit by a
 systemd generator at boot and at every \fBsystemctl daemon\-reload\fR.
+.PP
+The path unit sees a bundle appear in a watched folder at once, but not a bundle's files being replaced in
+place (an upgrade). A plugin from a package is still caught at once, by the distribution's install triggers
+over the standard folders; an unpackaged bundle replaced in place in an extra folder is caught at the next run
+of plugin-qualify-sync.timer, at most about 15 minutes after the change.
 .SH EXIT STATUS
 0 the run went through, whatever the verdicts; 2 it could not run.
 .SH SEE ALSO

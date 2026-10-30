@@ -2,6 +2,10 @@
 # A plugin installed into one of these directories is qualified soon after: the service waits for a minute of
 # quiet first. The standard folders are named here; the folders qualify.conf adds (lv2_path, lv2_extra, clap_path,
 # clap_extra) are written into a drop-in by plugin-qualify-sync-generator at boot and at every daemon-reload.
+# This unit is inotify on the named folder, not on the bundles inside it: a bundle's files replaced in place
+# (an upgrade) is not a change of the folder, so it is not seen here. A packaged plugin is still caught at once
+# by the distribution's install triggers over the standard folders; an unpackaged bundle replaced in place in
+# an extra folder is caught at the next run of plugin-qualify-sync.timer, which now also rescans periodically.
 [Unit]
 Description=Qualify plugins as they are installed
 Documentation=man:plugin-qualify-sync(1)

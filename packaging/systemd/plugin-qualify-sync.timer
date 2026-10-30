@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The first run on every boot: a machine whose records are empty qualifies everything, one whose records are
-# current only checks that nothing changed. Two minutes after boot, so the console's UI is up first.
+# current only checks that nothing changed. Two minutes after boot, so the console's UI is up first. Then every
+# 15 minutes: the path unit only sees a bundle appear in a watched folder, not a bundle's files being replaced
+# in place, so an in-place upgrade in an extra folder needs this rescan to be noticed at all. The sync is
+# incremental by content hash, so a pass with nothing changed is cheap.
 [Unit]
-Description=Qualify new and changed plugins after boot
+Description=Qualify new and changed plugins after boot, and rescan on a timer
 Documentation=man:plugin-qualify-sync(1)
 
 [Timer]
 OnBootSec=2min
+OnUnitInactiveSec=15min
 Unit=plugin-qualify-sync.service
 
 [Install]
