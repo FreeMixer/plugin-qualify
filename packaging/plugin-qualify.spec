@@ -85,6 +85,10 @@ systemd-tmpfiles --create %{_tmpfilesdir}/plugin-qualify.conf >/dev/null 2>&1 ||
 if [ -d /run/systemd/system ] && systemctl -q is-enabled plugin-qualify-sync.path 2>/dev/null; then
   systemctl start plugin-qualify-sync.path >/dev/null 2>&1 || :
 fi
+# an upgrade: the pins on disk get the files this plugin-hostd collects, measuring nothing (plugin-qualify#239)
+if [ -s /var/lib/omx/qualify-sync.json ]; then
+  %{_bindir}/plugin-qualify-sync --system --refresh-pins --no-wait >/dev/null 2>&1 || :
+fi
 
 # a plugin package installed, upgraded or removed in a standard folder: one scan per transaction
 %transfiletriggerin -- /usr/lib/lv2 /usr/lib64/lv2 /usr/local/lib/lv2 /usr/lib/clap /usr/lib64/clap

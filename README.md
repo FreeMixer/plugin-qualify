@@ -553,6 +553,12 @@ Those are the service's (`--system`); run by a user, the files go under `$XDG_ST
 directory added here belongs in plugin-hostd's `lv2_path` too, or the daemon cannot find the bundle it
 pinned. `--force` qualifies everything again, and `--no-distributed` reads no distributed record. A second `plugin-qualify-sync` waits for the run in progress (a lock on `<state_file>.lock`); `--no-wait` exits 0 at once and leaves a marker, and the holder runs once more at its end over what changed meanwhile.
 
+Every run starts by bringing each pin's files up to the ones `plugin-hostd --pin-files` names, measuring nothing: a pin
+written before 0.17.3 lacks the preset files an LV2's manifest names, which plugin-hostd 0.15.0 also checks, and its add
+answers -509 until then. The new list replaces the old one when no file both lists hold changed its hash, so the verdict
+stands; a changed file is measured again by the run. `--refresh-pins` does only that, writes the pin file and sends the
+changed pins to a running plugin-hostd; the package's upgrade runs it (plugin-qualify#239).
+
 The path unit names the standard folders (`/usr/lib/lv2`, `/usr/lib64/lv2`, `/usr/local/lib/lv2`,
 `/usr/lib/clap`, `/usr/lib64/clap`). The folders the settings file adds (`lv2_path`, `lv2_extra`, `clap_path`,
 `clap_extra`) are written into a drop-in of the unit by a systemd generator at boot and at every
