@@ -68,8 +68,15 @@ static void activate(LV2_Handle h) {
 static void run(LV2_Handle h, uint32_t frames) {
   struct gain *g = h;
 #ifdef FIXTURE_LEAKS_KB
-  char *volatile leak = malloc((size_t)FIXTURE_LEAKS_KB << 10);
-  if (leak != NULL) memset(leak, 1, (size_t)FIXTURE_LEAKS_KB << 10);
+  /* touched through a volatile pointer and kept in a static: a compiler may drop a memset into memory nothing reads, and
+   * the leak is then never resident (gcc 13 on Ubuntu 24.04 did) */
+  static char *volatile leaked;
+  volatile char *leak = malloc((size_t)FIXTURE_LEAKS_KB << 10);
+  if (leak != NULL) {
+    for (size_t i = 0; i < ((size_t)FIXTURE_LEAKS_KB << 10); i += 1024) leak[i] = 1;
+    leaked = (char *)leak;
+    (void)leaked;
+  }
 #endif
 #ifdef FIXTURE_ALLOCATES
   fixture_free(fixture_malloc(frames * sizeof(float)));
