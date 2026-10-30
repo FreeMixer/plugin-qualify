@@ -24,10 +24,19 @@ export function admittedHostOf(profile: HostProfile): AdmittedHost | undefined {
 
 /**
  * plugin-hostd's LV2 adapter, omx-clap-host: an LV2 plugin is run under it once, as under mod-host, and the record
- * carries the outcome as its own step beside the verdicts (plugin-qualify#223), which it does not change: the
- * omx-clap-host verdict of an LV2 plugin stays the in-process measurement. It is what the removal of mod-host counts.
+ * carries the outcome as its own step (plugin-qualify#223). The run decides the omx-clap-host verdict of an LV2
+ * plugin, the isolated tier, as a mod-host run decides mod-host's; a CLAP plugin's stays the measurement.
  */
 export const ADAPTER_HOST = "omx-clap-host";
+
+/**
+ * Whether this run decides the profile's verdict for a plugin of this format. A mod-host or jalv run always does, an
+ * unmeasured one making the verdict unknown; the adapter's only when it measured, since the omx-clap-host verdict
+ * otherwise stands on the measurement.
+ */
+export function runDecides(profile: HostProfile, format: string, admission: HostAdmission): boolean {
+  return admittedHostOf(profile) !== undefined || (profile.id === ADAPTER_HOST && format === "lv2" && admission.measured);
+}
 
 /** What running the plugin under one host came to. */
 export interface HostAdmission {
@@ -62,12 +71,16 @@ export interface ModHostStep {
 /** What `tools/mod-host-admit.mjs` printed. */
 export interface ModHostRun {
   readonly installed: boolean;
+  /** False when the host never took a connection (omx-clap-host with no JACK server): no plugin was loaded. */
+  readonly started?: boolean;
   readonly steps: readonly ModHostStep[];
 }
 
 /** The verdict of a run of a host that speaks mod-host's protocol: the first step that did not answer `resp 0` decides. */
 export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAdmission {
   if (!run.installed) return notInstalled(host);
+  // the host never listened, so the plugin was never loaded: nothing was learned about it
+  if (run.started === false) return { host, measured: false, admitted: false, code: `${host}.not-started`, params: {} };
   for (const s of run.steps) {
     if (s.died !== undefined) {
       if (s.died.startsWith("SIG")) return refused(host, `signal-${s.died}`, { step: s.cmd });

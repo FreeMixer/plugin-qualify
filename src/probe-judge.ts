@@ -33,7 +33,7 @@ import {
   type HostingReason,
 } from "./hosting-suitability.js";
 import type { HostProfile } from "./host-profiles.js";
-import { admittedHostOf, type HostAdmission } from "./host-admission.js";
+import { runDecides, type HostAdmission } from "./host-admission.js";
 import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
@@ -286,7 +286,8 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       reasons = [...reasons, { dimension: "memory", rating: "unknown", code: PROBE_OOM, params: { rate: cell.rate, quantum: cell.quantum, ...memoryParams(cell) } }];
     }
     const admission = facts.admissions?.[profile.id];
-    if (admission !== undefined && admittedHostOf(profile) !== undefined) {
+    const ran = admission !== undefined && runDecides(profile, output.plugin.format, admission);
+    if (ran && admission !== undefined) {
       if (!admission.measured || !admission.admitted) {
         // the host could not be run, or the plugin did not survive it: the run decides, whatever the declaration says
         const code = admission.code ?? `${admission.host}.not-admitted`;
@@ -312,7 +313,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
         ...(deciding === undefined ? {} : { deciding: deciding.code }),
       },
       hosting: rating === "suitable" && profile.isolation === "in-process" ? "in-process" : "isolated",
-      arm: admission !== undefined && admittedHostOf(profile) !== undefined ? "run" : "declaration",
+      arm: ran ? "run" : "declaration",
       reasons,
       cost: costOf(output, profile),
     };

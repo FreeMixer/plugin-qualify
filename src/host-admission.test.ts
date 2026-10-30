@@ -25,7 +25,7 @@ import {
   type JalvRun,
   type ModHostRun,
 } from "./host-admission.js";
-import { JALV_PROFILE, MOD_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { judgeProbeOutput } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { writeFileSync } from "node:fs";
@@ -135,7 +135,9 @@ describe("the verdict and the tiers", () => {
     expect(by("mod-host")).toMatchObject({ arm: "run", verdict: { measured: true, rating: "unsuitable", qualified: false, deciding: "mod-host.resp-102" } });
     expect(by("jalv").verdict.deciding).toBe("jalv.unknown-port-type");
     expect(by("openmixer-console")).toMatchObject({ arm: "declaration", verdict: { qualified: true } });
-    expect(tiersOf(j)).toMatchObject({ offeredOn: ["in-process"], isolated: { host: "mod-host", qualified: false, deciding: "mod-host.resp-102" } });
+    // mod-host is a host asked about, not a tier: the LV2 isolated tier is omx-clap-host, and no profile here judged it
+    expect(tiersOf(j)).toMatchObject({ offeredOn: ["in-process"] });
+    expect(tiersOf(j).isolated).toBeUndefined();
   });
 
   it("an uninstalled host leaves the verdict unmeasured, with that reason", () => {
@@ -145,17 +147,17 @@ describe("the verdict and the tiers", () => {
   });
 
   it("a plugin neither tier takes is dimmed with both reasons", () => {
-    const a = { "mod-host": classifyModHostRun({ installed: true, steps: [{ cmd: "add", died: "SIGABRT" }] }) };
+    const a = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", died: "SIGABRT" }] }) };
     const bad = fixtureJson("success-msi");
     bad.plugin = { format: "lv2", id: "urn:x:bad" };
     bad.grid[0].rtSafety.locks = 4;
-    const doc = judgeProbeOutput({ ...output, plugin: { ...output.plugin, format: "lv2" }, grid: bad.grid }, profiles, { admissions: a });
+    const doc = judgeProbeOutput({ ...output, plugin: { ...output.plugin, format: "lv2" }, grid: bad.grid }, [...profiles, OMX_CLAP_HOST_PROFILE], { admissions: a });
     const tiers = tiersOf(doc);
     expect(tiers.offeredOn).toEqual([]);
-    expect(tiers.dimmed).toMatch(/openmixer-console: .*; mod-host: mod-host\.signal-SIGABRT/);
+    expect(tiers.dimmed).toMatch(/openmixer-console: .*; omx-clap-host: omx-clap-host\.signal-SIGABRT/);
   });
 
-  it("qualifyTargets runs each LV2 plugin under the measured hosts once and writes the tiers: a plugin that kills mod-host is offered in-process only", () => {
+  it("qualifyTargets runs each LV2 plugin under the LV2 adapter once and writes the tiers: a plugin the adapter refuses is offered in-process only", () => {
     const uri = "http://synthv1.sourceforge.net/lv2";
     const doc = lv2(uri);
     const run: ProbeRun = (_tool, args) => {
@@ -166,14 +168,16 @@ describe("the verdict and the tiers", () => {
     const runs: AdmissionRuns = {
       modHost: (u) => (calls.push(`mod-host ${u}`), recorded(uri).modHost(u)),
       jalv: (u) => (calls.push(`jalv ${u}`), recorded(uri).jalv(u)),
+      adapter: (u) => (calls.push(`omx-clap-host ${u}`), { installed: true, steps: [{ cmd: "add", died: "SIGABRT" }] }),
     };
     const pass = qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: runs });
-    // only the asked host is a verdict row; mod-host was run because it is the isolated tier
+    // only the asked host is a verdict row; the adapter was run because omx-clap-host is the isolated tier, and
+    // mod-host, which no one asked about, was not run at all
     expect(pass.verdicts.map((v) => [v.host, v.qualified])).toEqual([["openmixer-console", true]]);
-    expect(calls).toEqual([`mod-host ${uri}`]);
+    expect(calls).toEqual([`omx-clap-host ${uri}`]);
     const record = JSON.parse(JSON.stringify(pass.runs[0]!.judgment.hosts.map((h) => [h.verdict.host, h.arm])));
-    expect(record).toEqual([["openmixer-console", "declaration"], ["mod-host", "run"]]);
-    expect(tiersOf(pass.runs[0]!.judgment)).toMatchObject({ offeredOn: ["in-process"], isolated: { qualified: false, deciding: "mod-host.signal-SIGABRT" } });
+    expect(record).toEqual([["openmixer-console", "declaration"], ["omx-clap-host", "run"]]);
+    expect(tiersOf(pass.runs[0]!.judgment)).toMatchObject({ offeredOn: ["in-process"], isolated: { host: "omx-clap-host", qualified: false, deciding: "omx-clap-host.signal-SIGABRT" } });
   });
 });
 
@@ -234,7 +238,7 @@ net.createServer((c) => c.on("data", (d) => {
 });
 
 describe("qualifyTargets starts the admission hosts on the LV2 directories it is given", () => {
-  it("mod-host gets admissionLv2Path as its LV2_PATH, not the run's one-bundle world", () => {
+  it("mod-host and the adapter get admissionLv2Path as their LV2_PATH, not the run's one-bundle world", () => {
     const uri = "http://moddevices.com/plugins/mda/Piano";
     const doc = fixtureJson("success-msi");
     doc.plugin = { format: "lv2", id: uri };
@@ -246,15 +250,17 @@ describe("qualifyTargets starts the admission hosts on the LV2 directories it is
     const runs: AdmissionRuns = {
       modHost: (u, env) => (seen.push(env?.["LV2_PATH"]), recorded(uri).modHost(u)),
       jalv: (u, env) => (seen.push(env?.["LV2_PATH"]), recorded(uri).jalv(u)),
+      adapter: (_u, env) => (seen.push(env?.["LV2_PATH"]), { installed: true, steps: [] }),
     };
     const dirs = ["/usr/lib/lv2", "/usr/local/lib/lv2", "/zynthian/zynthian-plugins/lv2"];
-    qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: { LV2_PATH: "/tmp/one-bundle-world" }, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: runs, admissionLv2Path: dirs });
-    expect(seen.length).toBeGreaterThan(0);
+    qualifyTargets([{ format: "lv2", uri }], { rates: [48000], run, env: { LV2_PATH: "/tmp/one-bundle-world" }, profiles: [OPENMIXER_CONSOLE_PROFILE, MOD_HOST_PROFILE], admissions: runs, admissionLv2Path: dirs });
+    expect(seen.length).toBe(2);
     expect(seen.every((p) => p === dirs.join(":"))).toBe(true);
   });
 });
 
-// plugin-qualify#223: an LV2 record carries its run under plugin-hostd's LV2 adapter, beside the verdicts it leaves alone
+// plugin-qualify#223: an LV2 record carries its run under plugin-hostd's LV2 adapter; the run decides the
+// omx-clap-host verdict, the LV2 isolated tier, as a mod-host run decides mod-host's
 describe("the run under plugin-hostd's LV2 adapter", () => {
   it("is classified as a mod-host run is, under the adapter's own name", () => {
     expect(classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -512 }] })).toMatchObject({
@@ -263,7 +269,7 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
     expect(classifyProtocolRun(ADAPTER_HOST, { installed: false, steps: [] }).code).toBe("omx-clap-host.not-installed");
   });
 
-  it("is written into an LV2 record beside verdicts it does not change, and a CLAP plugin has none", () => {
+  it("is written into an LV2 record and decides its isolated tier, leaves the asked verdicts alone, and a CLAP plugin has none", () => {
     const uri = "urn:distrho:vitalium";
     const doc = fixtureJson("success-msi");
     doc.plugin = { format: "lv2", id: uri };
@@ -280,6 +286,9 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
     expect(base.runs[0]!.judgment.adapter).toBeUndefined();
     const record = buildQualificationRecord(judgment, { file: "x.probe.json", sha256: "c".repeat(64), bytes: 1 });
     expect(record.adapter).toMatchObject({ host: "omx-clap-host", measured: true, admitted: false, code: "omx-clap-host.resp-512" });
+    expect(tiersOf(judgment).isolated).toMatchObject({ host: "omx-clap-host", measured: true, qualified: false, deciding: "omx-clap-host.resp-512" });
+    // sabotage of the rule: the same plugin the adapter takes is judged from its measurement, and qualifies
+    expect(tiersOf(base.runs[0]!.judgment).isolated).toMatchObject({ host: "omx-clap-host", qualified: true });
     const clap = fixtureJson("success-msi");
     const clapRun: ProbeRun = (_tool, args) => {
       writeFileSync(args[args.indexOf("--out") + 1]!, JSON.stringify(clap));
@@ -289,6 +298,29 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
     const watching: AdmissionRuns = { ...SKIPPED, adapter: (u) => (asked.push(u), { installed: true, steps: [] }) };
     qualifyTargets([{ format: "clap", uri: `urn:clap:${clap.plugin.id}` }], { rates: [48000], run: clapRun, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: watching });
     expect(asked).toEqual([]);
+  });
+
+  it("a host that never started (no JACK server) is no evidence: the LV2 omx-clap-host verdict stays the measurement's", () => {
+    const run = { installed: true, started: false, steps: [] };
+    expect(classifyProtocolRun(ADAPTER_HOST, run)).toMatchObject({ measured: false, admitted: false, code: "omx-clap-host.not-started" });
+    expect(classifyModHostRun(run)).toMatchObject({ measured: false, code: "mod-host.not-started" });
+    const unstarted = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, run) };
+    const output = readFixture("success-msi");
+    const lv2 = { ...output, plugin: { ...output.plugin, format: "lv2" as const, id: "urn:x:lv2" } };
+    const asIf = judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE]);
+    const j = judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE], { admissions: unstarted });
+    expect(j.hosts[0]!.arm).toBe("declaration");
+    expect(j.hosts[0]!.verdict).toEqual(asIf.hosts[0]!.verdict);
+  });
+
+  it("decides an asked omx-clap-host verdict of an LV2 plugin by the run, and never a CLAP plugin's", () => {
+    const refused = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -512 }] }) };
+    const output = readFixture("success-msi");
+    const lv2 = judgeProbeOutput({ ...output, plugin: { ...output.plugin, format: "lv2", id: "urn:x:lv2" } }, [OMX_CLAP_HOST_PROFILE], { admissions: refused });
+    expect(lv2.hosts[0]).toMatchObject({ arm: "run", verdict: { host: "omx-clap-host", rating: "unsuitable", qualified: false, deciding: "omx-clap-host.resp-512" } });
+    const clap = judgeProbeOutput(output, [OMX_CLAP_HOST_PROFILE], { admissions: refused });
+    expect(clap.hosts[0]!.arm).toBe("declaration");
+    expect(clap.hosts[0]!.verdict.deciding).not.toBe("omx-clap-host.resp-512");
   });
 
   it("the spawned run starts omx-clap-host, not mod-host", () => {

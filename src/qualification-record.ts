@@ -59,8 +59,11 @@ export interface RecordTiers {
   readonly dimmed?: string;
 }
 
-/** The profile each format's isolated tier is judged under. */
-export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "mod-host", clap: "omx-clap-host" };
+/**
+ * The profile each format's isolated tier is judged under: omx-clap-host for both, an LV2 plugin through plugin-hostd's
+ * LV2 adapter, whose run decides that verdict (`host-admission.ts`). mod-host is judged only when a run asks for it.
+ */
+export const ISOLATED_TIER_HOST: Readonly<Record<string, string>> = { lv2: "omx-clap-host", clap: "omx-clap-host" };
 export const IN_PROCESS_TIER_HOST = "openmixer-console";
 
 /** A latency or cost figure the run could not take: which one, at what rate and quantum, and the code that says why. */
