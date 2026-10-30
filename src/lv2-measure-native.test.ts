@@ -87,7 +87,7 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(played.allocationsInRun).toBeGreaterThan(0);
     expect(played.noteEvents).toBeGreaterThan(played.blocks!);
     expect(noteSweepReasons(readNoteSweep(sweep(safe.line)), 1).map((r) => r.rating)).toEqual(["suitable"]);
-    expect(noteSweepReasons(played, 1)[0]).toMatchObject({ rating: "unsuitable", code: HOSTING_CODE.rtSafetyNotesViolations });
+    expect(noteSweepReasons(played, 1)[0]).toMatchObject({ rating: "conditional", code: HOSTING_CODE.rtSafetyNotesViolations });
   });
 
   live("an effect has no MIDI input: its note sweep is not applicable", () => {

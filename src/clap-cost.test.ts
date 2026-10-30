@@ -198,9 +198,9 @@ describe("clap-qualify, live — the full classifier reads the prober's instrume
     expect(console.reasons.map((r) => r.code)).toContain(HOSTING_CODE.clapNoteInput);
   });
 
-  live("the synth that allocates on note on is unsuitable under omx-clap-host, on the note sweep", () => {
+  live("the synth that allocates on note on is conditional under omx-clap-host, on the note sweep", () => {
     const v = judged(SYNTH_ALLOC, OMX_CLAP_HOST_PROFILE);
-    expect(v).toMatchObject({ rating: "unsuitable", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
+    expect(v).toMatchObject({ rating: "conditional", deciding: { code: HOSTING_CODE.rtSafetyNotesViolations } });
   });
 });
 

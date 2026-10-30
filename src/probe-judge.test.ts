@@ -61,7 +61,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       noteSweep: { applicable: true, dialect: "midi", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 5, locksInRun: 0, syscallsInRun: 0, events: [] },
     }),
     profiles: [CONSOLE_RT],
-    expected: "unsuitable",
+    expected: "conditional",
   },
   {
     name: "an instrument played with a syscall",
@@ -70,7 +70,7 @@ const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; exp
       noteSweep: { applicable: true, dialect: "clap", blocks: 512, blockFrames: 512, noteEvents: 40, processErrors: 0, nonFinite: false, interposer: true, allocationsInRun: 0, locksInRun: 0, syscallsInRun: 2, events: [] },
     }),
     profiles: [CONSOLE_RT],
-    expected: "unsuitable",
+    expected: "conditional",
   },
   {
     name: "an instrument that could not be played",
@@ -239,7 +239,7 @@ describe("the fixtures of plugin-hostd", () => {
     expect(clean.verdict.rating).toBe("suitable");
     expect(clean.reasons.map((r) => r.code)).toContain(HOSTING_CODE.rtSafetyNotesClean);
     const dirty = judged({ applicable: true, dialect: "midi", allocations: 4608, locks: 0, syscalls: 0 });
-    expect(dirty.verdict).toMatchObject({ rating: "unsuitable", deciding: HOSTING_CODE.rtSafetyNotesViolations });
+    expect(dirty.verdict).toMatchObject({ rating: "conditional", deciding: HOSTING_CODE.rtSafetyNotesViolations });
     // an effect, which the runner gives no note sweep, keeps the verdict it had
     const effect = judged({ applicable: false });
     expect(effect.reasons.map((r) => r.code)).toEqual([HOSTING_CODE.rtSafetyClean]);

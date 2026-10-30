@@ -1036,8 +1036,9 @@ export function clapRtReasons(clap: PluginClapMeasurement | undefined): readonly
  * The rtSafety reasons of the note sweep, for a plugin with `noteInputs` note inputs: none for a
  * plugin that takes no notes; `unknown` when it takes notes and was not played under the
  * interposer (an instrument is cheap and clean at rest, so the parameter sweep alone says nothing
- * about a voice); `unsuitable` on any allocation, lock or syscall while it was played, or a process
- * error; `suitable` on a clean count.
+ * about a voice); `conditional` (isolated in the pin: its own worker, never refused) on any
+ * allocation, lock or syscall while it was played; `unsuitable` on a process error only (a crash);
+ * `suitable` on a clean count.
  */
 export function noteSweepReasons(sweep: PluginNoteSweepMeasurement | undefined, noteInputs: number): readonly HostingReason[] {
   if (noteInputs === 0) return [];
@@ -1048,7 +1049,7 @@ export function noteSweepReasons(sweep: PluginNoteSweepMeasurement | undefined, 
   const out: HostingReason[] = [];
   if (sweep.allocationsInRun + sweep.locksInRun + sweep.syscallsInRun > 0) {
     out.push(
-      reason("rtSafety", "objective", "unsuitable", HOSTING_CODE.rtSafetyNotesViolations, {
+      reason("rtSafety", "objective", "conditional", HOSTING_CODE.rtSafetyNotesViolations, {
         allocations: sweep.allocationsInRun,
         syscalls: sweep.syscallsInRun,
         locks: sweep.locksInRun,
