@@ -3,7 +3,7 @@
 plugin-qualify-sync \- qualify every plugin on the machine once, and again when its files change
 .SH SYNOPSIS
 .B plugin-qualify-sync
-[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-no\-distributed\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
+[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-rejudge\fR | \fB\-\-memory\-only\fR] [\fB\-\-no\-distributed\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
 .SH DESCRIPTION
 Finds every CLAP and LV2 plugin on the search paths and gives each new or changed one the quick
 qualification: its pin, the real-time safety sweep, cost and latency, and its descriptor. A plugin whose
@@ -29,6 +29,9 @@ else the board's own from the device tree (\fBrpi5\fR on a Raspberry Pi 5).
 .PP
 The last line on standard output counts the plugins: qualified, skipped, refused, crashed, hung,
 unmeasured, taken from the distributed records, and the seconds the run took.
+.PP
+After an upgrade the figures in the records are carried across and judged again rather than measured again:
+\fB\-\-rejudge\fR and \fB\-\-memory\-only\fR below.
 .SH OPTIONS
 .TP
 .B \-\-system
@@ -36,6 +39,21 @@ The directories of a system service, under /var/lib/omx.
 .TP
 .B \-\-force
 Qualify every plugin again, recorded or not; no distributed record is read.
+.TP
+.B \-\-rejudge
+Measure nothing. Derive every record's verdicts, tiers and pin word again from the figures it holds, under this version's
+rules; the figures, the probe output and who took them are not changed, and the record's \fBrejudged\fR block says when
+they were measured and by which runner. A verdict that needs a run the record lacks (an LV2 plugin's
+\fBomx\-clap\-host\fR verdict and its run under the LV2 adapter) reads \fBunknown\fR, its pin has no verdict word, and
+the record owes that run. A record of changed bytes or with no readable probe output is left alone and owes a
+qualification. What is owed is printed, kept under \fBowes\fR in the record, and listed in \fIqualify\-owed.json\fR beside
+the state file. A second run changes nothing.
+.TP
+.B \-\-memory\-only
+Measure only the footprint of each plugin the state holds, at 48000 Hz in blocks of 128 and 256 frames, through the probe
+runner under the usual limits, and merge it into its record. No other figure changes. It judges nothing; run
+\fB\-\-rejudge\fR after it. A plugin already merged is skipped; with \fB\-\-force\fR it is measured again.
+A leak needs a soak and is not measured: the record says so under \fBnotMeasured\fR, and the last line says so.
 .TP
 .B \-\-no\-distributed
 Read no distributed record.
@@ -48,7 +66,7 @@ Any setting of the file, as a flag: \fB\-\-budget\-s 30\fR for \fBbudget_s 30\fR
 \fBplugin-qualify-sync \-\-help\fR lists them with their defaults.
 .SH FILES
 /etc/omx/qualify.conf, /var/lib/omx/qualified.pins, /var/lib/omx/qualification, /var/lib/omx/descriptors,
-/var/lib/omx/qualify-sync.json, /usr/share/omx/qualification
+/var/lib/omx/qualify-sync.json, /var/lib/omx/qualify-owed.json, /usr/share/omx/qualification
 .PP
 plugin-qualify-sync.path watches the standard plugin folders. The folders the settings file adds
 (\fBlv2_path\fR, \fBlv2_extra\fR, \fBclap_path\fR, \fBclap_extra\fR) are written into a drop-in of that unit by a
