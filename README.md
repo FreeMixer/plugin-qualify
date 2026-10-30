@@ -218,7 +218,7 @@ class, so a reference figure and a local one are told apart. The record holds, f
 quantum, and the figures as measured. Exit `0` every plugin qualified, `1` some did not, `2` something could not
 be read or judged.
 
-The verdict is the same one `plugin-qualify` gives CLAP plugins today, the real-time-safety one, now for LV2 as
+The verdict is the same one `plugin-qualify` gives CLAP plugins, the real-time-safety one, now for LV2 as
 well; cost is reported beside it, not folded into it. Cost is read at the profile's rate AND quantum: a pair the
 document does not hold reads `hosting.cost.unmeasured-at-rate-and-quantum`, and two quanta of one plugin that cost
 differently give two different cost reasons. Only a measurement of the old format, which keeps one figure per
@@ -246,7 +246,7 @@ Every cell of a record carries `latency`: the two figures when the run took them
 step that did not end well gives the child's reason (`silent-output`, say); a cell whose run failed, its outcome's
 word (`probe-crashed`, or `probe-error` for `probe.oom`); a run that took no latency at all (a runner or a child
 older than the latency arm), `not-attempted`. The declared figure alone, for a plugin whose response could not be
-measured, is not in the probe output today: plugin-hostd's runner writes a cell's latency only with both figures.
+measured, is not in the probe output: plugin-hostd's runner writes a cell's latency only with both figures.
 
 
 The prober also scans: `OMX_CLAP_SCAN=native/build/clap-qualify` makes it the scanner, and its scan
