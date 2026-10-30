@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.17.5
+Version:        0.18.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,11 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.0-1
+- Qualification measures and judges memory: the footprint of an instance, its growth over a soak and a hard limit, read against each host's budget as hosting.memory.* verdicts (#114). Needs plugin-hostd 0.15.3 and omx-clap-core 0.25.1.
+- An allocation, lock or syscall while an instrument is played rates conditional, isolated in the pin like the same violation in the run; it is no longer refused. A process error under notes is still unsuitable (#196).
+- The hosting codes are omx-clap-core's, regenerated from 0.25.1 (#146).
+
 * Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.17.5-1
 - Every sync starts by bringing each pin's files up to the ones plugin-hostd --pin-files names, measuring nothing; --refresh-pins does only that, and the package upgrade runs it. A pin written before 0.17.3 no longer leaves an LV2 with presets refused with -509 until it is qualified again (#239).
 
