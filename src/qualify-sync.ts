@@ -1016,6 +1016,9 @@ export function takeLock(stateFile: string, wait: boolean): Promise<SyncLock | u
 /** What a second run leaves for the holder: one more run at its end, over what changed meanwhile. */
 const againMarker = (stateFile: string): string => `${stateFile}.again`;
 
+/** The file a package trigger leaves when it ran without systemd (#237): a sweep is owed, the next sync run makes it. */
+export const pendingMarker = (stateFile: string): string => join(dirname(stateFile), "qualify-pending");
+
 export interface SyncRunOptions {
   readonly force?: boolean;
   /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
@@ -1047,7 +1050,11 @@ export async function runSync(settings: SyncSettings, options: SyncRunOptions = 
       rmSync(marker, { force: true });
       const one = await runLocked(settings, options);
       total = total === undefined ? one : addSummaries(total, one);
-      if (!existsSync(marker)) return total;
+      if (!existsSync(marker)) {
+        // a pass that went through settles what the trigger left behind (#237)
+        rmSync(pendingMarker(settings.stateFile), { force: true });
+        return total;
+      }
       log("a run was asked for while this one ran; running once more");
     }
   } finally {
