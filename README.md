@@ -139,7 +139,7 @@ yet, so a plugin under them is `conditional`, `hosting.memory.within-provisional
 ceiling and does not say the plugin fits. The other hosts have no budget, and read nothing.
 
 A soak (LV2; the CLAP prober has no continuous render yet) also reads the growth: past 10 MB per minute of audio over its
-second half, provisional, the rate fails as `leaks`. See [docs/design/memory-footprint-and-budget.md](docs/design/memory-footprint-and-budget.md).
+second half, provisional, the rate fails as `leaks`.
 
 ### How long a run takes
 
