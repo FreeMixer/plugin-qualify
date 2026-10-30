@@ -27,10 +27,10 @@ const OWN_GUI: HostProfile = { ...OPENMIXER_CONSOLE_PROFILE, id: "own-gui", clap
 /** Every shape of line the existing tests of the CLAP arm exercise, each with the profiles it is judged under. */
 const CASES: { name: string; line: ClapQualifyLine; profiles: HostProfile[]; expected: string }[] = [
   { name: "a clean effect", line: clapLineFixture(), profiles: [OPENMIXER_CONSOLE_PROFILE, OMX_CLAP_HOST_PROFILE, JALV_PROFILE, OWN_GUI], expected: "suitable" },
-  { name: "an allocation", line: clapLineFixture({ rtSafety: { allocationsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a lock", line: clapLineFixture({ rtSafety: { locksInRun: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a syscall", line: clapLineFixture({ rtSafety: { syscallsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
-  { name: "a thread violation", line: clapLineFixture({ clap: { threadViolations: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
+  { name: "an allocation", line: clapLineFixture({ rtSafety: { allocationsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
+  { name: "a lock", line: clapLineFixture({ rtSafety: { locksInRun: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
+  { name: "a syscall", line: clapLineFixture({ rtSafety: { syscallsInRun: 3 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
+  { name: "a thread violation", line: clapLineFixture({ clap: { threadViolations: 1 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "conditional" },
   { name: "a process error", line: clapLineFixture({ clap: { processErrors: 2 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unsuitable" },
   { name: "a sweep that ran nothing", line: clapLineFixture({ clap: { processCalls: 0 } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
   { name: "no interposer", line: clapLineFixture({ rtSafety: { interposer: false } }), profiles: [OPENMIXER_CONSOLE_PROFILE], expected: "unknown" },
@@ -112,7 +112,7 @@ describe("verdicts from a probe output equal verdicts from today's documents", (
 
   it("the cases span every rating, so the equality is not three copies of one answer", () => {
     const ratings = new Set(CASES.flatMap((c) => c.profiles.map((p) => rtSafetyDocument(c.line, p).verdict.rating)));
-    expect([...ratings].sort()).toEqual(["suitable", "unknown", "unsuitable"]);
+    expect([...ratings].sort()).toEqual(["conditional", "suitable", "unknown", "unsuitable"]);
     for (const c of CASES) expect(rtSafetyDocument(c.line, c.profiles[0]!).verdict.rating).toBe(c.expected);
   });
 
@@ -123,7 +123,7 @@ describe("verdicts from a probe output equal verdicts from today's documents", (
     const read = readProbeOutput(JSON.stringify(doc));
     if (!read.ok) throw new Error(read.problem);
     const j = judgeProbeOutput(read.output, [OPENMIXER_CONSOLE_PROFILE]);
-    expect(j.hosts[0]?.verdict).toMatchObject({ rating: "unsuitable", qualified: false, deciding: HOSTING_CODE.rtSafetyViolations });
+    expect(j.hosts[0]?.verdict).toMatchObject({ rating: "conditional", deciding: HOSTING_CODE.rtSafetyViolations });
     expect(j.hosts[0]?.verdict).not.toEqual(rtSafetyVerdict(rtSafetyDocument(line)));
   });
 });
@@ -217,7 +217,8 @@ describe("the fixtures of plugin-hostd", () => {
     const dirty = readProbeOutput(JSON.stringify(doc));
     if (!dirty.ok) throw new Error(dirty.problem);
     const j = judgeProbeOutput(dirty.output, [OPENMIXER_CONSOLE_PROFILE]);
-    expect(j.hosts[0]?.verdict).toMatchObject({ rating: "unsuitable", deciding: HOSTING_CODE.rtSafetyViolations });
+    expect(j.hosts[0]?.verdict).toMatchObject({ rating: "conditional", deciding: HOSTING_CODE.rtSafetyViolations });
+    expect(j.hosts[0]?.hosting).toBe("isolated");
     expect(j.hosts[0]?.reasons[0]?.params).toEqual({ allocations: 0, syscalls: 7, locks: 0 });
   });
 

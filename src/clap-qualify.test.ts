@@ -479,10 +479,10 @@ describe("parseClapQualifyLine — the prober's line, refused when it is not one
 });
 
 describe("rtSafetyDocument — the rtSafety dimension's verdict, and nothing else's", () => {
-  it("a lock or a syscall in process() is as unsuitable as an allocation", () => {
+  it("a lock or a syscall in process() isolates the plugin, as an allocation does (#196)", () => {
     for (const patch of [{ locksInRun: 1 }, { syscallsInRun: 3 }]) {
       const doc = rtSafetyDocument(parseClapQualifyLine(line({ rtSafety: patch })));
-      expect(doc.verdict.rating).toBe("unsuitable");
+      expect(doc.verdict.rating).toBe("conditional");
       expect(doc.verdict.deciding?.code).toBe(HOSTING_CODE.rtSafetyViolations);
     }
   });
