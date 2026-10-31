@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
-import { ADAPTER_HOST, SPAWNED_ADMISSIONS, admitUnderAdapter, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
+import { ADAPTER_HOST, ADAPTER_SILENT_CODE, SPAWNED_ADMISSIONS, admitUnderAdapter, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { HOSTD_ENV } from "./hostd-pin-files.js";
 import { cellKey, type GridCell } from "./measurement-grid.js";
 import { defaultAddressSpaceLimit } from "./direct-limit.js";
@@ -187,6 +187,8 @@ export const mergeAdapterRun = (record: QualificationRecord, block: AdapterBlock
 export function adapterFinished(record: QualificationRecord, versions: Readonly<Record<string, string>>, cells: readonly GridCell[] = ADAPTER_PASS_CELLS): boolean {
   const a = record.adapter;
   if (a === undefined || !a.measured || a.versions === undefined || a.cells === undefined) return false;
+  // silence under the one key the run once played says nothing of a plugin that maps others: it is run again
+  if (a.cells.some((c) => c.code === ADAPTER_SILENT_CODE && c.params["notes"] === undefined)) return false;
   const same = Object.keys(versions).length === Object.keys(a.versions).length && Object.entries(versions).every(([k, v]) => a.versions![k] === v);
   return same && cells.every((c) => a.cells!.some((x) => cellKey(x) === cellKey(c)));
 }

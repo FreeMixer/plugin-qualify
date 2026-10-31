@@ -186,6 +186,13 @@ describe("--adapter-only: resuming", () => {
     const d = device([LV2_CLEAN]);
     await pass(d, stand([]));
     expect(adapterFinished(d.record(LV2_CLEAN), VERSIONS)).toBe(true);
+    // silent under the one key the run once played is run again; silent under the wide range is not
+    const silentCell = (params: Record<string, number>) => {
+      const r = d.record(LV2_CLEAN);
+      return { ...r, adapter: { ...r.adapter!, measured: true, admitted: false, cells: r.adapter!.cells!.map((c) => ({ ...c, measured: true, admitted: false, code: "omx-clap-host.silent-under-note", params })) } };
+    };
+    expect(adapterFinished(silentCell({ peak: 0 }), VERSIONS)).toBe(false);
+    expect(adapterFinished(silentCell({ peak: 0, notes: 30 }), VERSIONS)).toBe(true);
     expect(adapterFinished(d.record(LV2_CLEAN), { ...VERSIONS, "omx-clap-host": "0.26.0" })).toBe(false);
     const seen: Seen[] = [];
     await pass(d, stand(seen, () => admitted, { versions: (tool) => ({ status: 0, stdout: `x version: ${tool.includes("omx-clap") ? "0.26.0" : "0.15.3"}\n` }) }));
