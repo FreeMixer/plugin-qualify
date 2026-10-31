@@ -443,7 +443,10 @@ that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"
 verdict qualified, `isolated` when its verdict qualified or is `conditional`) and, when neither, `dimmed` with the reason. A
 `conditional` plugin, RT-unsafe for instance, is offered on the isolated tier with `runsAlone: true`: it runs in a worker of
 its own, never grouped, and its pin says `isolated`. An LV2 plugin is run once under the adapter, and
-that run decides its `omx-clap-host` verdict as a mod-host run decides mod-host's. A plugin that kills the isolated
+that run decides its `omx-clap-host` verdict as a mod-host run decides mod-host's. An `lv2:InstrumentPlugin` is also played one
+held note there, its output read at its JACK ports (`jack_peak`): at or under -120 dBFS it reads `unknown`
+(`omx-clap-host.silent-under-note`), not qualified and not refused, since a sampler with nothing loaded is silent too. A level
+that could not be read reads the same way (`omx-clap-host.level-unmeasured`). A plugin that kills the isolated
 host and qualifies in-process is offered in-process only. The tiers are judged for every plugin whether or not
 `--host-profile` names them; mod-host and jalv are run only when `--host-profile` asks for them.
 

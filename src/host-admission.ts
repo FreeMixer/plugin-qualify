@@ -78,6 +78,28 @@ export interface ModHostRun {
   /** False when the host never took a connection (omx-clap-host with no JACK server): no plugin was loaded. */
   readonly started?: boolean;
   readonly steps: readonly ModHostStep[];
+  /**
+   * An instrument under the adapter, played one held note at its JACK ports: the peak in linear magnitude, or why it could
+   * not be read. Absent for a plugin that is no instrument, and for any plugin under mod-host.
+   */
+  readonly sound?: { readonly peak?: number; readonly unmeasured?: string };
+}
+
+/** At or under this magnitude (-120 dBFS) a held note is taken as digital silence: clap-qualify's own SILENCE. */
+export const SILENT_PEAK = 1e-6;
+
+/**
+ * The codes of an adapter run that took the instrument and could not show it sounding. No record of an instrument that makes
+ * no sound reads as qualified; but a sampler with nothing loaded is silent too, so this reads `unknown`, not refused: the
+ * plugin stays loadable and its pin has no verdict word (`host-admission.test.ts`).
+ */
+export const ADAPTER_SILENT_CODE = `${ADAPTER_HOST}.silent-under-note`;
+export const ADAPTER_LEVEL_UNMEASURED_CODE = `${ADAPTER_HOST}.level-unmeasured`;
+const UNPROVEN_SOUND: readonly string[] = [ADAPTER_SILENT_CODE, ADAPTER_LEVEL_UNMEASURED_CODE];
+
+/** The rating a run that did not admit the plugin gives its host's verdict. */
+export function admissionRating(admission: HostAdmission): "unsuitable" | "unknown" {
+  return !admission.measured || UNPROVEN_SOUND.includes(admission.code ?? "") ? "unknown" : "unsuitable";
 }
 
 /** The verdict of a run of a host that speaks mod-host's protocol: the first step that did not answer `resp 0` decides. */
@@ -95,6 +117,11 @@ export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAd
     if (s.resp < 0) return refused(host, `resp-${-s.resp}`, { step: s.cmd, resp: s.resp });
   }
   if (run.steps.length === 0) return refused(host, "no-answer");
+  if (run.sound !== undefined) {
+    const { peak, unmeasured } = run.sound;
+    if (peak === undefined) return { host, measured: true, admitted: false, code: ADAPTER_LEVEL_UNMEASURED_CODE, params: { problem: unmeasured ?? "no figure" } };
+    if (!(peak > SILENT_PEAK)) return { host, measured: true, admitted: false, code: ADAPTER_SILENT_CODE, params: { peak } };
+  }
   return admitted(host);
 }
 

@@ -78,6 +78,9 @@ set -e
 grep -q 'could not find urn:plugin-qualify:fixture:no-such-plugin' "$out/probe.txt" || fail "lv2_host_probe did not name the plugin it could not find"
 echo "check-installed: $dir carries the LV2 host probe"
 
+# the meter the adapter run reads an instrument with: installed, and it names the failure when it has no JACK
+[ -x "$dir/jack_peak" ] || fail "the package installs no jack_peak"
+
 # the sync's units: shipped, the timer and the path unit enabled by the install, and no sweep run inside it
 for unit in plugin-qualify-sync.service plugin-qualify-sync.timer plugin-qualify-sync.path; do
   [ -f "/usr/lib/systemd/system/$unit" ] || [ -f "/lib/systemd/system/$unit" ] || fail "the package installs no $unit"

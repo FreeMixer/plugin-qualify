@@ -25,8 +25,10 @@ import {
   type JalvRun,
   type ModHostRun,
   JALV_HOSTED_MS,
+  admissionRating,
 } from "./host-admission.js";
 import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { pinVerdictOf } from "./pins-file.js";
 import { judgeProbeOutput } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { writeFileSync } from "node:fs";
@@ -319,6 +321,100 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
     const watching: AdmissionRuns = { ...SKIPPED, adapter: (u) => (asked.push(u), { installed: true, steps: [] }) };
     qualifyTargets([{ format: "clap", uri: `urn:clap:${clap.plugin.id}` }], { rates: [48000], run: clapRun, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: watching });
     expect(asked).toEqual([]);
+  });
+
+  // Surge XT's LV2 under omx-clap-host 0.25.1 answered add and remove, took notes, and gave -inf dBFS: the admission read it as
+  // admitted, and with the measurement behind it the verdict read qualified
+  describe("an instrument under a held note", () => {
+    const steps = [{ cmd: "add" as const, resp: 0 }, { cmd: "remove" as const, resp: 0 }];
+    const output = readFixture("success-msi");
+    const lv2 = { ...output, plugin: { ...output.plugin, format: "lv2" as const, id: "urn:x:synth" } };
+    const judged = (sound?: ModHostRun["sound"]) =>
+      judgeProbeOutput(lv2, [withoutMemoryBudget(OMX_CLAP_HOST_PROFILE)], {
+        admissions: { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, { installed: true, steps, ...(sound === undefined ? {} : { sound }) }) },
+      }).hosts[0]!;
+
+    it("one that gives nothing does not read as qualified, and is not refused", () => {
+      for (const peak of [0, 1e-7, 1e-6]) {
+        const h = judged({ peak });
+        expect(h.verdict).toMatchObject({ measured: true, rating: "unknown", qualified: false, deciding: "omx-clap-host.silent-under-note" });
+        expect(h.arm).toBe("run");
+        expect(pinVerdictOf(h.verdict.rating)).toBeUndefined();
+      }
+    });
+    it("one that sounds qualifies on its measurement", () => {
+      expect(judged({ peak: 0.21 }).verdict).toMatchObject({ measured: true, rating: "suitable", qualified: true });
+      expect(judged({ peak: 2e-6 }).verdict).toMatchObject({ qualified: true });
+    });
+    it("a level that could not be read is not read as sound", () => {
+      expect(judged({ unmeasured: "no jack_peak" }).verdict).toMatchObject({ rating: "unknown", qualified: false, deciding: "omx-clap-host.level-unmeasured" });
+      expect(judged({}).verdict).toMatchObject({ qualified: false, deciding: "omx-clap-host.level-unmeasured" });
+    });
+    it("a plugin that was not played stands on its measurement", () => {
+      expect(judged().verdict).toMatchObject({ rating: "suitable", qualified: true });
+    });
+    it("a recorded silent run judges the same on a re-judge", () => {
+      const silent = classifyProtocolRun(ADAPTER_HOST, { installed: true, steps, sound: { peak: 0 } });
+      expect(silent).toMatchObject({ measured: true, admitted: false, code: "omx-clap-host.silent-under-note", params: { peak: 0 } });
+      expect(admissionRating({ host: "omx-clap-host", measured: true, admitted: false, code: silent.code!, params: {} })).toBe("unknown");
+      expect(admissionRating({ host: "omx-clap-host", measured: true, admitted: false, code: "omx-clap-host.resp-512", params: {} })).toBe("unsuitable");
+    });
+  });
+
+  describe("tools/mod-host-admit.mjs plays an instrument under a stand-in omx-clap-host", () => {
+    const dir = mkdtempSync(join(tmpdir(), "adapter-admit-"));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    const write = (name: string, body: string): string => {
+      const p = join(dir, name);
+      writeFileSync(p, body);
+      chmodSync(p, 0o755);
+      return p;
+    };
+    write(
+      "omx-clap-host",
+      `#!${process.execPath}
+const net = require("node:net");
+const fs = require("node:fs");
+const port = Number(process.argv[process.argv.indexOf("-p") + 1]);
+net.createServer((c) => c.on("data", (d) => {
+  const line = d.toString().replace(/\\0$/, "");
+  fs.appendFileSync(process.env.STAND_LOG, line + "\\n");
+  c.write((line.startsWith("audio_ports") ? 'resp 0 in:main:1:2:stereo:"in":in_1,in_2 out:main:1:2:stereo:"out one":out_1,out_2 out:aux:1:2:stereo:"Scene A":aux_out_1_1,aux_out_1_2' : "resp 0") + "\\0");
+})).listen(port, "127.0.0.1");
+`,
+    );
+    write("omx-clap-scan", '#!/bin/sh\nprintf "plugin\\trdf:type\\tlv2:Plugin\\n"\n[ "$STAND_CLASS" = instrument ] && printf "plugin\\trdf:type\\tlv2:InstrumentPlugin\\n"\nexit 0\n');
+    const meter = write("jack_peak", '#!/bin/sh\nprintf "%s\\n" "$@" > "$STAND_LOG.ports"\necho ready\ncat > /dev/null\necho "{\\"peak\\":$STAND_PEAK,\\"frames\\":48000}"\n');
+    const helper = join(dirname(fileURLToPath(import.meta.url)), "..", "tools", "mod-host-admit.mjs");
+    const log = join(dir, "log");
+    const admit = (env: Record<string, string>): { run: ModHostRun; sent: string[] } => {
+      rmSync(log, { force: true });
+      const r = spawnSync(process.execPath, [helper, "urn:x", "omx-clap-host"], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${dir}:${process.env["PATH"]}`, STAND_LOG: log, OMX_JACK_PEAK: meter, STAND_PEAK: "0.2", ...env },
+      });
+      return { run: JSON.parse(r.stdout) as ModHostRun, sent: readFileSync(log, "utf8").trim().split("\n") };
+    };
+
+    it("a note goes in between the add and the remove, every output port is read, and the figure comes back", () => {
+      const { run, sent } = admit({ STAND_CLASS: "instrument" });
+      expect(sent).toEqual(["add urn:x 0", "audio_ports 0", "note_on 0 0 60 100", "remove 0"]);
+      expect(readFileSync(`${log}.ports`, "utf8").trim().split("\n")).toEqual(["effect_0:out_1", "effect_0:out_2", "effect_0:aux_out_1_1", "effect_0:aux_out_1_2"]);
+      expect(run).toEqual({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }], sound: { peak: 0.2 } });
+    });
+    it("silence comes back as silence and the run does not admit", () => {
+      expect(classifyProtocolRun(ADAPTER_HOST, admit({ STAND_CLASS: "instrument", STAND_PEAK: "0" }).run).code).toBe("omx-clap-host.silent-under-note");
+    });
+    it("a meter that is not there is said, not taken for sound", () => {
+      const { run } = admit({ STAND_CLASS: "instrument", OMX_JACK_PEAK: join(dir, "absent") });
+      expect(run.sound?.unmeasured).toBeDefined();
+      expect(classifyProtocolRun(ADAPTER_HOST, run).code).toBe("omx-clap-host.level-unmeasured");
+    });
+    it("a plugin of no instrument class is not played", () => {
+      const { run, sent } = admit({ STAND_CLASS: "effect" });
+      expect(sent).toEqual(["add urn:x 0", "remove 0"]);
+      expect(run.sound).toBeUndefined();
+    });
   });
 
   it("a host that never started (no JACK server) is no evidence: the LV2 omx-clap-host verdict stays the measurement's", () => {
