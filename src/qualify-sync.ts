@@ -18,7 +18,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -298,6 +298,40 @@ export interface SyncItem {
   readonly files: readonly string[];
   /** The LV2 plugin's uri. */
   readonly uri?: string;
+  /** The LV2 plugin's binary as lilv loads it, an absolute path that may lie outside `root` (a complement's). */
+  readonly binary?: string;
+}
+
+/** One LV2 plugin as lilv resolves it over the whole search path: the bundle its version rule takes, and its binary. */
+export interface Lv2Resolved {
+  readonly uri: string;
+  readonly bundle: string;
+  readonly binary?: string | null;
+}
+
+/** The bundles lilv takes over `dirs`, or why it could not say. A stand-in in tests. */
+export type Lv2Resolve = (dirs: readonly string[]) => readonly Lv2Resolved[] | { readonly problem: string };
+
+/** lilv itself, one world over the whole search path (tools/lv2_resolve.py), as every host built on it resolves (#199). */
+export const LILV_RESOLVE: Lv2Resolve = (dirs) => {
+  const r = spawnSync("python3", [join(toolsDir(), "lv2_resolve.py")], {
+    encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 64 << 20, env: { ...process.env, LV2_PATH: dirs.join(":") },
+  });
+  if (r.error !== undefined || r.status !== 0) return { problem: (r.stderr ?? "").trim().split("\n").pop() || (r.error?.message ?? `exit ${String(r.status)}`) };
+  try {
+    return (JSON.parse(r.stdout) as { plugins: Lv2Resolved[] }).plugins;
+  } catch (e) {
+    return { problem: `lv2_resolve.py printed no JSON: ${(e as Error).message}` };
+  }
+};
+
+/** Whether `path` exists and is, through its links, the file `target` is. */
+function linksTo(path: string, target: string): boolean {
+  try {
+    return realpathSync(path) === realpathSync(target);
+  } catch {
+    return false;
+  }
 }
 
 const CLAP_SUFFIX = ".clap";
@@ -341,9 +375,13 @@ function clapFiles(dir: string, seen: Set<string>, problems: string[]): string[]
  * LV2 directories that declares it, as plugin-hostd finds it. A directory that cannot be read is a problem named, and
  * the others are still walked.
  */
-export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">): { items: SyncItem[]; problems: string[] } {
+export function discoverSyncItems(
+  settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">,
+  lv2Resolve?: Lv2Resolve,
+): { items: SyncItem[]; problems: string[]; notes: string[] } {
   const items: SyncItem[] = [];
   const problems: string[] = [];
+  const notes: string[] = [];
   const seen = new Set<string>();
   const clap = new Set<string>();
   for (const dir of settings.clapDirs) {
@@ -354,6 +392,11 @@ export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clap
       items.push({ key: `clap:${path}`, format: "clap", root: dirname(path), files: [basename(path)] });
     }
   }
+  // the bundle lilv takes for each plugin uri; without lilv, the first bundle found (and the log says so)
+  const resolved = lv2Resolve === undefined || settings.lv2Dirs.length === 0 ? undefined : lv2Resolve(settings.lv2Dirs);
+  const taken = new Map<string, Lv2Resolved>();
+  if (resolved !== undefined && "problem" in resolved) notes.push(`lilv could not resolve the LV2 plugins (${resolved.problem}); each is keyed by the first bundle found`);
+  else if (resolved !== undefined) for (const p of resolved) taken.set(p.uri, p);
   const lv2 = new Set<string>();
   for (const dir of settings.lv2Dirs) {
     let bundles: string[];
@@ -372,13 +415,20 @@ export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clap
         continue;
       }
       for (const p of manifestPlugins(ttl)) {
+        const lilv = taken.get(p.uri);
+        // lilv takes another bundle for this uri: this one is not the plugin a host loads
+        if (lilv !== undefined && resolve(lilv.bundle) !== resolve(bundle)) continue;
         if (lv2.has(p.uri)) continue;
         lv2.add(p.uri);
-        items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files: ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")], uri: p.uri });
+        const binary = lilv?.binary ?? (p.binary === undefined ? undefined : join(bundle, p.binary));
+        const files = ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")];
+        // a binary named by an absolute IRI (a complement's) is tracked through the bundle's link to it, when it has one
+        if (binary !== undefined && !files.includes(basename(binary)) && linksTo(join(bundle, basename(binary)), binary)) files.push(basename(binary));
+        items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files, uri: p.uri, ...(binary === undefined ? {} : { binary }) });
       }
     }
   }
-  return { items, problems };
+  return { items, problems, notes };
 }
 
 // --- the file set -----------------------------------------------------------------------------------------------------
@@ -512,6 +562,28 @@ export function recordedAsIs(item: SyncItem, entry: SyncEntry | undefined): { sa
   if (now === undefined) return { same: false };
   const same = now.length === entry.files.length && now.every((f) => entry.files.some((e) => e.path === f.path && e.sha256 === f.sha256));
   return { same, files: now };
+}
+
+/**
+ * The entry of an LV2 plugin a host now loads from another bundle than it was qualified in, when its binary is the
+ * same bytes (#199): the entry with the new bundle and the new bundle's file digests, its verdicts and records kept.
+ * `undefined` when the item is not that case: not LV2, no entry, the same bundle, a binary that cannot be read, or one
+ * whose bytes differ from the recorded binary's (then it is measured again).
+ */
+export function sameBinaryElsewhere(item: SyncItem, entry: SyncEntry | undefined): SyncEntry | undefined {
+  if (item.format !== "lv2" || entry === undefined || item.binary === undefined || resolve(entry.root) === resolve(item.root)) return undefined;
+  const was = entry.files.find((f) => basename(f.path) === basename(item.binary!));
+  if (was === undefined) return undefined;
+  let now: string;
+  try {
+    now = fileSha256(item.binary);
+  } catch {
+    return undefined;
+  }
+  if (now !== was.sha256) return undefined;
+  const files = digestFiles(item.root, item.files);
+  if (files === undefined) return undefined;
+  return { ...entry, root: item.root, files };
 }
 
 // --- one item ---------------------------------------------------------------------------------------------------------
@@ -1093,6 +1165,8 @@ export interface SyncRunOptions {
   readonly pinFilesRun?: PinFilesRun;
   /** The run of the probe runner in a memory-only pass, a stand-in in tests. */
   readonly probeRun?: ProbeRun;
+  /** How LV2 plugins are resolved to the bundle a host loads: lilv itself unless a test stands in (#199). */
+  readonly lv2Resolve?: Lv2Resolve;
   /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
   readonly wait?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -1209,8 +1283,9 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     // a change made while a pass ran is caught by one more pass, a few at most
     for (let pass = 0; pass < 3; pass++) {
       const signature = directoriesSignature(dirs);
-      const { items, problems } = discoverSyncItems(settings);
+      const { items, problems, notes } = discoverSyncItems(settings, options.lv2Resolve ?? LILV_RESOLVE);
       for (const p of problems) log(p);
+      if (pass === 0) for (const n of notes) log(n);
       unreadable = problems.length > 0;
       const found = new Set(items.map((i) => i.key));
       const entries: Record<string, SyncEntry> = {};
@@ -1226,6 +1301,19 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
         const recorded = recordedAsIs(item, entries[item.key]);
         if (recorded.same && options.force !== true) {
           if (pass === 0) count.skipped += entries[item.key]!.plugins.length;
+          continue;
+        }
+        // an LV2 plugin a host now loads from another bundle with the same binary (a complement that restates its TTL,
+        // #199): the record stands, keyed by its uri and its binary; only the bundle, its files and the pins' files move
+        const moved = options.force === true ? undefined : sameBinaryElsewhere(item, entries[item.key]);
+        if (moved !== undefined) {
+          entries[item.key] = { ...moved, plugins: moved.plugins.map((p) => ({ ...p, ...(p.pin === undefined ? {} : { pin: withHostdFiles(ctx, p.pin) }) })) };
+          if (item.format === "lv2") lv2Pinned.push(...entries[item.key]!.plugins.filter((p) => p.pin !== undefined).map((p) => p.uri));
+          if (pass === 0) count.skipped += moved.plugins.length;
+          log(`${item.key}: loaded from ${item.root} now, with the binary it was qualified with; its record stands and its pin's files follow the bundle`);
+          state = { schema: SYNC_STATE_SCHEMA, entries };
+          writeFileWhole(settings.stateFile, `${JSON.stringify(state, null, 1)}\n`);
+          writeFileWhole(settings.pinFile, syncPinsText(state));
           continue;
         }
         const files = recorded.files ?? digestFiles(item.root, item.files);

@@ -418,7 +418,7 @@ describe("discovery", () => {
     expect(problems).toEqual([]);
     expect(items).toEqual([
       { key: `clap:${join(root, "clap", "vendor", "a.clap")}`, format: "clap", root: join(root, "clap", "vendor"), files: ["a.clap"] },
-      { key: "lv2:urn:p", format: "lv2", root: join(root, "one", "p.lv2"), files: ["manifest.ttl", "p.so", "p.ttl"], uri: "urn:p" },
+      { key: "lv2:urn:p", format: "lv2", root: join(root, "one", "p.lv2"), files: ["manifest.ttl", "p.so", "p.ttl"], uri: "urn:p", binary: join(root, "one", "p.lv2", "p.so") },
     ]);
   });
 });
