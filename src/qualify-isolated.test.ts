@@ -149,6 +149,15 @@ describe("the step itself, on a private server", () => {
     expect(facts.midiInputsLinked, JSON.stringify(facts)).toBeGreaterThan(0);
   });
 
+  it("a drum kit, which answers only some keys with a short hit, is heard: isolated", (ctx) => {
+    if (!ready) {
+      if (process.env["CI"] !== undefined) throw new Error("jackd, plugin-hostd or native/build is missing: CI installs them");
+      ctx.skip("needs jackd, plugin-hostd and native/build");
+    }
+    const facts = spawnedIsolatedRunner()(`clap:${join(dirname(FIXTURE), "synth-drum.clap")}#${SYNTH_ID}-drum`, CELL, process.env);
+    expect(judgeIsolatedRun(facts).result, JSON.stringify(facts)).toBe(ISOLATED_RESULT.isolated);
+  });
+
   it("a pass runs the step plugin after plugin: the server of the last one leaves its name free", (ctx) => {
     if (!ready) {
       if (process.env["CI"] !== undefined) throw new Error("jackd, plugin-hostd or native/build is missing: CI installs them");

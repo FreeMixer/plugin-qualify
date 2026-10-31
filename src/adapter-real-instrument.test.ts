@@ -9,7 +9,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { ADAPTER_HOST, SPAWNED_ADMISSIONS, classifyProtocolRun } from "./host-admission.js";
@@ -28,6 +29,25 @@ const peakTool = nativeToolCandidates(JACK_PEAK_TOOL_NAME).find((p) => existsSyn
 const ready = peakTool !== undefined && installed("jackd") && installed(ADAPTER_HOST) && LV2_DIRS.some((d) => existsSync(join(d, "mda.lv2")));
 
 describe("the adapter pass on a real instrument", () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "native", "build", "fixtures", "lv2");
+
+  it("a drum kit, which answers only some keys with a short hit, is heard", (ctx) => {
+    if (!ready) {
+      if (process.env["CI"] !== undefined) throw new Error("jackd, omx-clap-host, jack_peak or mda-lv2 is missing: CI installs them");
+      ctx.skip("needs jackd, omx-clap-host, native/build and mda-lv2");
+    }
+    const server = startPrivateJack(CELL);
+    if (server === undefined) throw new Error("no private JACK server came up");
+    const state = mkdtempSync(join(tmpdir(), "adapter-drum-"));
+    try {
+      const run = SPAWNED_ADMISSIONS.adapter!("urn:plugin-qualify:fixture:lv2-synth-drum", { ...process.env, JACK_DEFAULT_SERVER: server.name, LV2_PATH: FIXTURES, OMX_JACK_PEAK: peakTool, [ADMIT_STATE_DIR_ENV]: state, HOME: state });
+      expect(run.sound?.peak, JSON.stringify(run)).toBeGreaterThan(SOUNDING_PEAK);
+    } finally {
+      server.stop();
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
   it("mda Piano is admitted and sounds under its held note", (ctx) => {
     if (!ready) {
       if (process.env["CI"] !== undefined) throw new Error("jackd, omx-clap-host, jack_peak or mda-lv2 is missing: CI installs them");

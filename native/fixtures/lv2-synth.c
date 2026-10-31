@@ -36,7 +36,14 @@ static void (*volatile fixture_free)(void *) = free;
 
 enum { PORT_MIDI, PORT_OUT_L, PORT_OUT_R, PORT_GAIN };
 
-struct voice { int key; double phase, step; };
+#ifdef FIXTURE_DRUM
+/* a drum kit: only these keys are mapped, and each hit lasts 20 ms */
+#define FIXTURE_DRUM_LOW 36
+#define FIXTURE_DRUM_HIGH 40
+#define FIXTURE_DRUM_HIT_S 0.02
+#endif
+
+struct voice { int key; double phase, step; long left; };
 
 struct synth {
   const LV2_Atom_Sequence *midi;
@@ -78,6 +85,9 @@ static void activate(LV2_Handle h) {
 }
 
 static void note_on(struct synth *s, int key) {
+#ifdef FIXTURE_DRUM
+  if (key < FIXTURE_DRUM_LOW || key > FIXTURE_DRUM_HIGH) return;
+#endif
 #ifdef FIXTURE_ALLOCATES_ON_NOTE
   fixture_free(fixture_malloc(256 * sizeof(double)));
 #endif
@@ -86,6 +96,9 @@ static void note_on(struct synth *s, int key) {
       s->voice[v].key = key;
       s->voice[v].phase = 0.0;
       s->voice[v].step = 2.0 * M_PI * 440.0 * pow(2.0, (key - 69) / 12.0) / s->rate;
+#ifdef FIXTURE_DRUM
+      s->voice[v].left = (long)(s->rate * FIXTURE_DRUM_HIT_S);
+#endif
       return;
     }
 }
@@ -111,6 +124,9 @@ static void render(struct synth *s, uint32_t from, uint32_t to) {
       if (s->voice[v].key >= 0) {
         y += sin(s->voice[v].phase) * 0.05;
         s->voice[v].phase += s->voice[v].step;
+#ifdef FIXTURE_DRUM
+        if (--s->voice[v].left <= 0) s->voice[v].key = -1;
+#endif
       }
     s->out[0][i] = s->out[1][i] = (float)y * k;
   }

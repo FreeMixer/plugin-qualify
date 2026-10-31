@@ -95,12 +95,12 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
-	$(BUILD)/fixtures/synth-strict.clap \
+	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
 	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
-	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
+	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so $(BUILD)/fixtures/lv2/synth-drum.lv2/synth.so \
 	$(BUILD)/fixtures/lv2/latency.lv2/latency.so $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl \
 	$(BUILD)/fixtures-faulty/synth-voice-memory.clap \
 	$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so $(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so
@@ -184,6 +184,9 @@ $(BUILD)/fixtures/synth-alloc.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ALLOCATES_ON_NOTE -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 $(BUILD)/fixtures/synth-midi.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_MIDI_ONLY -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+# a drum kit: only keys 36 to 40 answer, each with a 20 ms hit
+$(BUILD)/fixtures/synth-drum.clap: fixtures/synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_DRUM -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 # the same declaring its voice capacity through voice-info, at 8 and at 0: what the cost arm holds
 $(BUILD)/fixtures/synth-voices.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_VOICE_CAPACITY=8 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
@@ -250,6 +253,11 @@ $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl: fixtures/lv2-gain.c fixtures/spac
 	mkdir -p $(@D)
 	cp fixtures/spaced.lv2/manifest.ttl fixtures/spaced.lv2/gain.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_SPACED -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o "$(@D)/gain plugin.so" $<
+
+$(BUILD)/fixtures/lv2/synth-drum.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth-drum.lv2/manifest.ttl fixtures/synth-drum.lv2/synth.ttl
+	mkdir -p $(@D)
+	cp fixtures/synth-drum.lv2/manifest.ttl fixtures/synth-drum.lv2/synth.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_DRUM -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 
 $(BUILD)/fixtures/lv2/synth.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
 	mkdir -p $(@D)
