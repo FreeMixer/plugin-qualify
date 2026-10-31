@@ -36,7 +36,7 @@ import {
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
 import { halfPopulatedRefusal, locateNativeTools } from "./tool-paths.js";
-import { readIntegrity, readMemoryFootprint, type IntegrityMeasurement, type MemoryFootprint, type VoicesHeld } from "./measurement/format.js";
+import { readIntegrity, readMemoryFootprint, readTimingScheduling, type IntegrityMeasurement, type MemoryFootprint, type TimingScheduling, type VoicesHeld } from "./measurement/format.js";
 import { isVoiceBasis } from "./measurement/vocabulary.js";
 import { coreFraction } from "./cost-fields.js";
 
@@ -77,6 +77,8 @@ export interface ClapCostFigure {
   readonly blocks: number;
   /** For an instrument: the notes held while it was timed. Absent for an effect. */
   readonly voices?: VoicesHeld;
+  /** What these blocks were timed under. */
+  readonly scheduling?: TimingScheduling;
 }
 
 /** One rate the cost arm did not time, and why; an instrument's declared capacity is kept when it has one. */
@@ -267,6 +269,7 @@ function readCostAtRate(v: unknown, where: string, notes: boolean): ClapCostAtRa
   }
   const blocks = count(v, "blocks", where);
   if (blocks === 0) return bad(`${where} timed no block`);
+  const scheduling = readTimingScheduling(v["scheduling"]);
   return {
     nsPerSampleMedian: figure(v, "nsPerSampleMedian", where),
     nsPerSampleP95: figure(v, "nsPerSampleP95", where),
@@ -277,6 +280,7 @@ function readCostAtRate(v: unknown, where: string, notes: boolean): ClapCostAtRa
     ...(voices?.held === undefined || voices.basis === undefined
       ? {}
       : { voices: { held: voices.held, basis: voices.basis, ...(voices.capacity === undefined ? {} : { capacity: voices.capacity }) } }),
+    ...(scheduling === undefined ? {} : { scheduling }),
   };
 }
 
