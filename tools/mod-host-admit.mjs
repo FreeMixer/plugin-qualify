@@ -18,9 +18,12 @@ const STEP_MS = Number(process.env.OMX_ADMIT_STEP_MS ?? 0) || 10000;
 const ADDRESS_KB = process.env.OMX_ADMIT_ADDRESS_KB;
 const STATE_DIR = process.env.OMX_ADMIT_STATE_DIR;
 const INSTANCE = 0;
-// an instrument under the adapter is played: one note, held this long, its output read at its JACK ports
+// an instrument under the adapter is played: a wide range of keys, since a drum kit answers only the ones it maps, each
+// held, then this long; its output is read at its JACK ports from before the first note, so a short hit counts
 const NOTE_WINDOW_MS = 1000;
-const NOTE_ON = `note_on ${INSTANCE} 0 60 100`;
+const NOTE_FIRST = 36; // the same keys as native/isolated-signal.c plays
+const NOTE_COUNT = 30;
+const NOTE_VELOCITY = 100;
 const ADAPTER = "omx-clap-host";
 const COMMANDS = [
   ["add", `add ${uri} ${INSTANCE}`],
@@ -133,9 +136,11 @@ async function main() {
         ports.length === 0
           ? { problem: "no output port" }
           : await peakDuring(ports, async () => {
-              await ask(NOTE_ON);
+              // a host that stops answering costs one budget, not one for each key
+              for (let k = 0; k < NOTE_COUNT; k++) if ((await ask(`note_on ${INSTANCE} 0 ${NOTE_FIRST + k} ${NOTE_VELOCITY}`)) === undefined) break;
               await sleep(NOTE_WINDOW_MS);
             });
+      if (sound.peak !== undefined) sound.notes = NOTE_COUNT;
     }
     buffer = "";
     sock.write(`${line}\0`);
