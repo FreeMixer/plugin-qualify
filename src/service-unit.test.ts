@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const UNIT = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "packaging", "systemd", "plugin-qualify-sync.service"), "utf8");
+const environment = UNIT.split("\n").filter((l) => l.startsWith("Environment=")).map((l) => l.slice("Environment=".length));
 const service = new Map(
   UNIT.slice(UNIT.indexOf("[Service]"))
     .split("\n")
@@ -38,7 +39,13 @@ describe("plugin-qualify-sync.service limits", () => {
   it("keeps every temporary file under its own runtime directory, which systemd labels and removes (#192)", () => {
     // a hardened unit loses /tmp first: the sync's world, the scan's and the probe's directories go under /run/omx
     expect(service.get("RuntimeDirectory")).toBe("omx/plugin-qualify-sync");
-    expect(service.get("Environment")).toBe("TMPDIR=%t/omx/plugin-qualify-sync");
+    expect(environment).toContain("TMPDIR=%t/omx/plugin-qualify-sync");
+  });
+
+  it("gives the plugins a HOME, in a directory systemd makes: without one Surge XT is silent and its CLAP answers -503", () => {
+    const home = environment.find((e) => e.startsWith("HOME="))?.slice("HOME=".length);
+    expect(home).toBe("%S/omx/qualify-home");
+    expect(service.get("StateDirectory")?.split(/\s+/)).toContain("omx/qualify-home");
   });
 
   it("takes every temporary directory from os.tmpdir(), so the unit's TMPDIR places all of them (#192)", () => {
