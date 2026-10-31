@@ -96,6 +96,11 @@ export function owesIsolated(record: QualificationRecord): boolean {
   return PROBE_FAILED_HARD.has(record.probe.outcome) || record.verdicts.some((v) => v.measured && v.rating === "conditional");
 }
 
+/** Whether the isolated step saw this plugin running alone. A record's word alone never says so. */
+export function provenAlone(record: QualificationRecord): boolean {
+  return record.run?.steps.some((s) => s.step === RUN_STEP.isolated && s.result === ISOLATED_RESULT.isolated) === true;
+}
+
 /** The steps a record's outcome calls for. */
 export function stepsCalledFor(record: QualificationRecord): readonly string[] {
   return [

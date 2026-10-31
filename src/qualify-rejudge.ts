@@ -48,7 +48,7 @@ import {
   type RecordVerdict,
   type RunBlock,
 } from "./qualification-record.js";
-import { ISOLATED_RESULT, RUN_STEP, pinAfterStep } from "./qualify-isolated.js";
+import { ISOLATED_RESULT, RUN_STEP, pinAfterStep, provenAlone } from "./qualify-isolated.js";
 import { PI_CELLS, PROBE_MEMORY_ONLY_ENV, PROBE_NOTES_ENV } from "./qualify-declarations.js";
 import { SYNC_STATE_SCHEMA, digestFiles, recordStem, type SyncContext, type SyncEntry, type SyncPlugin, type SyncState } from "./qualify-sync.js";
 import type { SuitabilityRating } from "./rating.js";
@@ -56,6 +56,7 @@ import { writeFileWhole } from "./whole-file.js";
 
 /** The codes of a measurement a record owes. */
 export const OWED_CODE = {
+  isolatedStep: "qualify.sync.isolated-step-owed",
   /** An LV2 verdict of a host that runs it through the adapter, and no measured adapter run. */
   adapterRun: "qualify.sync.adapter-run-owed",
   /** A verdict decided by a run under its host (mod-host, jalv), and no run in the record. */
@@ -194,8 +195,11 @@ export function rejudgeRecord(record: QualificationRecord, probeBytes: Uint8Arra
   if (!read.ok) throw new RejudgeRefusal(`${record.probe.file}: ${read.code}: ${read.problem}`);
   const output = withMemoryRun(read.output, record);
   const { profiles, kept } = rejudgeProfiles(record, output, options.host);
-  const { reasons, owes } = runsOwed(record, output, profiles);
+  const { reasons, owes: runs } = runsOwed(record, output, profiles);
   const judgment = judgeProbeOutput(output, profiles, { admissions: admissionsOf(record), owed: reasons });
+  // decides no verdict: a record from before the steps that reads isolated stays offered, runs alone, and is not proven by the step
+  const readsIsolated = judgment.hosts.some((h) => h.verdict.measured && h.verdict.rating === "conditional");
+  const owes = readsIsolated && !provenAlone(record) ? [...runs, { measurement: "isolated-step" as const, code: OWED_CODE.isolatedStep }] : runs;
   const memory = record.memoryRun === undefined ? {} : { memory: { tool: record.memoryRun.tool, measuredAt: record.memoryRun.measuredAt } };
   const a = record.adapter;
   const adapterTaken = a?.versions === undefined || a.measuredAt === undefined ? {} : { adapter: { versions: a.versions, measuredAt: a.measuredAt } };

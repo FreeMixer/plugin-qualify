@@ -17,6 +17,7 @@ import type { ProbeRun } from "./probe-runner.js";
 import { MEMORY_PASS_NOT_MEASURED, OWED_CODE, OWED_SCHEMA, owedFile, rejudgeRecord } from "./qualify-rejudge.js";
 import type { QualificationRecord } from "./qualification-record.js";
 import { MEMORY_PASS_PROBE_NOTES } from "./qualify-declarations.js";
+import { provenAlone } from "./qualify-isolated.js";
 import { parseSyncArgs, runSync, summaryLine } from "./qualify-sync.js";
 import { CLAP_NOTES, CLAP_RT, FIXTURES, LV2_CLEAN, LV2_CRASHED, LV2_RT, adapterAdmitted, device, owesOf, probeFile, readJson, recordFile, rejudge, removeDevices, row, stored, type Device } from "./qualify-rejudge.support.js";
 
@@ -31,6 +32,25 @@ describe("--rejudge: a record judged unsuitable for RT violations", () => {
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "conditional", hosting: "isolated", measured: true, deciding: HOSTING_CODE.rtSafetyViolations });
     expect(d.pins()[0]!.verdict).toBe("isolated");
     expect(Object.values(d.state().entries)[0]!.plugins[0]).toMatchObject({ outcome: "qualified", code: HOSTING_CODE.rtSafetyViolations });
+  });
+
+  it("from before the steps: stays isolated and runs alone, is listed as owing the step, and the step clears it", async () => {
+    const d = device([CLAP_RT]);
+    await rejudge(d);
+    expect(d.pins()[0]!.verdict).toBe("isolated");
+    expect(d.record(CLAP_RT).tiers.isolated?.runsAlone).toBe(true);
+    const owed = readJson(owedFile(d.settings.stateFile)) as { owing: { owes: { measurement: string }[] }[] };
+    expect(owed.owing.flatMap((o) => o.owes.map((x) => x.measurement))).toContain("isolated-step");
+    expect(provenAlone(d.record(CLAP_RT))).toBe(false);
+
+    const alone = { started: true, added: true, alive: true, workers: 1, instancesInWorker: 1, latencyFrames: 128, cpuPercent: 3, xruns: 0, finite: true, silent: false };
+    const done = await runSync(d.settings, { isolatedOnly: true, isolatedRunner: () => alone, env: {}, log: () => {} });
+    expect(done?.isolatedOnly).toEqual({ isolated: 1, refused: 0, notRun: 0 });
+    expect(provenAlone(d.record(CLAP_RT))).toBe(true);
+    await rejudge(d);
+    const after = readJson(owedFile(d.settings.stateFile)) as { owing: { owes: { measurement: string }[] }[] };
+    expect(after.owing.flatMap((o) => o.owes.map((x) => x.measurement))).not.toContain("isolated-step");
+    expect(d.pins()[0]!.verdict).toBe("isolated");
   });
 
   it("is offered on the isolated tier and says it runs alone; `qualified` stays false, the interchange's meaning of it", async () => {
@@ -54,7 +74,7 @@ describe("--rejudge: a record judged unsuitable for RT violations", () => {
     await rejudge(d);
     const r = d.record(LV2_RT);
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "conditional", hosting: "isolated", arm: "run", deciding: HOSTING_CODE.rtSafetyViolations });
-    expect(owesOf(r)).toEqual([]);
+    expect(owesOf(r)).toEqual(["isolated-step"]);
     expect(row(r, "mod-host")).toMatchObject({ rating: "unsuitable", arm: "run", deciding: "mod-host.no-answer" });
     expect(d.pins()[0]!.verdict).toBe("isolated");
   });
@@ -177,7 +197,7 @@ describe("--rejudge: a tier lacking its adapter run", () => {
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "suitable", qualified: true, arm: "run" });
     expect(r.tiers.offeredOn).toEqual(["isolated"]);
     expect(r.tiers.isolated!.runsAlone).toBeUndefined();
-    expect(owesOf(r)).toEqual([]);
+    expect(owesOf(r)).toEqual(["isolated-step"]);
     expect(d.pins()[0]!.verdict).toBe("in-process");
   });
 
@@ -225,7 +245,7 @@ describe("--rejudge: a second run", () => {
     await new Promise((r) => setTimeout(r, 20));
     const summary = await rejudge(d);
     expect(paths.map((p) => [p, readFileSync(p, "utf8"), statSync(p).mtimeMs])).toEqual(before);
-    expect(summary!.rejudge).toEqual({ changed: 0, unchanged: 5, owing: 2 });
+    expect(summary!.rejudge).toEqual({ changed: 0, unchanged: 5, owing: 4 });
   });
 
   it("the function itself returns the record it was given", () => {

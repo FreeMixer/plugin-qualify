@@ -23,6 +23,7 @@ import {
   missingSteps,
   owesIsolated,
   pinAfterStep,
+  provenAlone,
   spawnedIsolatedRunner,
   stepsCalledFor,
   type IsolatedRunFacts,
@@ -101,6 +102,14 @@ describe("the steps a record's outcome calls for", () => {
 
   it("a record from before the steps lacks none: it owes a completion, not a new measurement", () => {
     expect(missingSteps(record())).toEqual([]);
+  });
+
+  it("only a step that saw it alone proves it: an old record's word does not, nor a refusal, nor a step not run", () => {
+    expect(provenAlone(record())).toBe(false);
+    const after = (facts: IsolatedRunFacts) => record({ run: { id: "r", steps: [...baseSteps(record()), judgeIsolatedRun(facts)] } });
+    expect(provenAlone(after(WELL))).toBe(true);
+    expect(provenAlone(after({ ...WELL, silent: true }))).toBe(false);
+    expect(provenAlone(after({ started: false }))).toBe(false);
   });
 });
 

@@ -238,8 +238,8 @@ export interface HistoryBlock {
 
 /** One measurement a record lacks, and what it keeps from being decided. */
 export interface OwedMeasurement {
-  /** `adapter-run`: the plugin under omx-clap-host's LV2 adapter. `host-run`: under the host named. `qualification`: the whole of it. */
-  readonly measurement: "adapter-run" | "host-run" | "qualification";
+  /** `adapter-run`: the plugin under omx-clap-host's LV2 adapter. `host-run`: under the host named. `qualification`: the whole of it. `isolated-step`: the plugin seen running alone. */
+  readonly measurement: "adapter-run" | "host-run" | "qualification" | "isolated-step";
   readonly host?: string;
   readonly code: string;
   readonly detail?: string;
