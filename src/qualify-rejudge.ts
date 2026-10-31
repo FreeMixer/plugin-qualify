@@ -46,7 +46,9 @@ import {
   type QualificationRecord,
   type RecordGridPoint,
   type RecordVerdict,
+  type RunBlock,
 } from "./qualification-record.js";
+import { ISOLATED_RESULT, RUN_STEP, pinAfterStep } from "./qualify-isolated.js";
 import { PI_CELLS, PROBE_MEMORY_ONLY_ENV, PROBE_NOTES_ENV } from "./qualify-declarations.js";
 import { SYNC_STATE_SCHEMA, digestFiles, recordStem, type SyncContext, type SyncEntry, type SyncPlugin, type SyncState } from "./qualify-sync.js";
 import type { SuitabilityRating } from "./rating.js";
@@ -263,9 +265,17 @@ const readRecord = (path: string): QualificationRecord | undefined => {
 const nameOf = (record: QualificationRecord): string => record.plugin.id;
 
 /** A state plugin with the verdict its record now holds for the host: the pin's files stay as they are, only its word follows. */
-function pluginWithVerdict(plugin: SyncPlugin, v: RecordVerdict): SyncPlugin {
+function pluginWithVerdict(plugin: SyncPlugin, v: RecordVerdict, run?: RunBlock): SyncPlugin {
   const { pin, code: _code, ...rest } = plugin;
   const word = v.measured ? pinVerdictOf(v.rating as SuitabilityRating) : undefined;
+  // a rating does not make a plugin isolated: a run seen alone does, and a re-judge measures nothing. A record from before
+  // the steps keeps its word until a completion has run it.
+  if (word === "isolated" && run !== undefined) {
+    const step = run.steps.find((s) => s.step === RUN_STEP.isolated);
+    const kept = pinAfterStep(pin, step ?? { step: RUN_STEP.isolated, result: ISOLATED_RESULT.notRun });
+    const refused = step?.result === ISOLATED_RESULT.refused;
+    return { ...rest, outcome: refused ? "refused" : outcomeOfVerdict(v), ...(refused && step.code !== undefined ? { code: step.code } : v.deciding === undefined ? {} : { code: v.deciding }), ...(kept === undefined ? {} : { pin: kept }) };
+  }
   return {
     ...rest,
     outcome: outcomeOfVerdict(v),
@@ -331,7 +341,7 @@ export function rejudgeState(ctx: SyncContext, state: SyncState, now: () => stri
     const plugins = entry.plugins.map((plugin) => {
       const record = plugin.record === undefined ? undefined : judged.get(basename(plugin.record));
       const v = record?.verdicts.find((x) => x.host === hostProfile.id);
-      if (v !== undefined) return pluginWithVerdict(plugin, v);
+      if (v !== undefined) return pluginWithVerdict(plugin, v, record?.run);
       if (record === undefined && plugin.outcome === "unmeasured" && plugin.record?.endsWith(RECORD_SUFFIX) !== true) {
         owing.push({ plugin: plugin.uri, ...(plugin.record === undefined ? {} : { record: basename(plugin.record) }), owes: [{ measurement: "qualification", code: OWED_CODE.noFigures }] });
       }

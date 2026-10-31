@@ -104,9 +104,11 @@ export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";
 export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
 export const LV2_HOST_PROBE_TOOL_ENV = "OMX_LV2_HOST_PROBE";
+export const ISOLATED_SIGNAL_TOOL_ENV = "OMX_ISOLATED_SIGNAL";
 
 /** The file names of the native tools, in every place they are looked for. */
 export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
+export const ISOLATED_SIGNAL_TOOL_NAME = "isolated_signal";
 export const LV2_MEASURE_TOOL_NAME = "lv2_measure";
 export const RT_INTERPOSE_NAME = "rt_interpose.so";
 export const LV2_HOST_PROBE_TOOL_NAME = "lv2_host_probe";
@@ -120,6 +122,7 @@ export const NATIVE_TOOLS: readonly { readonly name: string; readonly env: strin
   { name: LV2_MEASURE_TOOL_NAME, env: LV2_MEASURE_TOOL_ENV },
   { name: RT_INTERPOSE_NAME, env: RT_INTERPOSE_ENV },
   { name: LV2_HOST_PROBE_TOOL_NAME, env: LV2_HOST_PROBE_TOOL_ENV },
+  { name: ISOLATED_SIGNAL_TOOL_NAME, env: ISOLATED_SIGNAL_TOOL_ENV },
 ];
 
 /**

@@ -65,6 +65,30 @@ export interface AdapterBlock {
   }[];
 }
 
+/** What the isolated step measured over its window. */
+export interface IsolatedFigures {
+  /** The latency JACK reports at the plugin's output. */
+  readonly latencyFrames?: number;
+  /** The worker's CPU over the window, in percent of one core. */
+  readonly cpuPercent?: number;
+  readonly xruns?: number;
+}
+
+/** One step of a plugin's pass and how it ended. */
+export interface RunStep {
+  readonly step: string;
+  readonly result: string;
+  readonly code?: string;
+  readonly detail?: string;
+  readonly figures?: IsolatedFigures;
+}
+
+/** The pass that judged a record: its id, and every step that ran. */
+export interface RunBlock {
+  readonly id: string;
+  readonly steps: readonly RunStep[];
+}
+
 /** One tier of the console as a verdict: the host it is judged under and whether the plugin qualified there. */
 export interface TierVerdict {
   readonly host: string;
@@ -292,6 +316,8 @@ export interface QualificationRecord {
    * qualification of `plugin-qualify-sync` takes no soak, and says so here rather than leave it unstated.
    */
   readonly notMeasured?: readonly NotMeasured[];
+  /** The pass that judged it; absent on a record from before the steps, which owes what its outcome calls for. */
+  readonly run?: RunBlock;
   /** Who measured and when. */
   readonly tool: Readonly<Record<string, string>>;
   readonly measuredAt: string;
