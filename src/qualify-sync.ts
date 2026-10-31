@@ -34,6 +34,7 @@ import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./qualify-adapter-pass.js";
 import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { writeQualification, type NotMeasured } from "./qualification-record.js";
@@ -136,6 +137,8 @@ export interface SyncArgs {
   readonly rejudge: boolean;
   /** `--memory-only`: the footprint of each recorded plugin at the Pi's cells, merged into its record. */
   readonly memoryOnly: boolean;
+  /** `--adapter-only`: the run of each LV2 plugin under the adapter at the Pi's cells, merged into its record. */
+  readonly adapterOnly: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -154,6 +157,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let refreshPinsOnly = false;
   let rejudge = false;
   let memoryOnly = false;
+  let adapterOnly = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -164,6 +168,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--refresh-pins") refreshPinsOnly = true;
     else if (a === "--rejudge") rejudge = true;
     else if (a === "--memory-only") memoryOnly = true;
+    else if (a === "--adapter-only") adapterOnly = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -173,9 +178,9 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  if (rejudge && (memoryOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --force and --refresh-pins" };
-  if (memoryOnly && refreshPinsOnly) return { ok: false, error: "--memory-only and --refresh-pins are two different runs" };
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, help, values } };
+  if (rejudge && (memoryOnly || adapterOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --adapter-only, --force and --refresh-pins" };
+  if ([memoryOnly, adapterOnly, refreshPinsOnly].filter(Boolean).length > 1) return { ok: false, error: "--memory-only, --adapter-only and --refresh-pins are different runs: one at a time" };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, adapterOnly, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -191,6 +196,7 @@ export function syncHelpText(): string {
     "  --refresh-pins                      only bring every pin's files up to the ones plugin-hostd names, measuring nothing",
     "  --rejudge                           derive every record's verdicts, tiers and pin again from the figures it holds; measures nothing",
     "  --memory-only                       measure only the footprint of each recorded plugin at the Pi's cells and merge it; with --force, those already merged too",
+    "  --adapter-only                      run each LV2 plugin only under omx-clap-host's LV2 adapter at the Pi's cells, on private JACK servers, and merge it; with --force, those already done too",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
     ...rows,
@@ -1003,6 +1009,8 @@ export interface SyncSummary {
   readonly rejudge?: { readonly changed: number; readonly unchanged: number; readonly owing: number };
   /** `--memory-only`: the plugins measured, those whose footprints were already merged, and those no run could read. */
   readonly memoryOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
+  /** `--adapter-only`: the plugins run, those done already at these host versions, and those whose host could not be run. */
+  readonly adapterOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
 }
 
 /**
@@ -1039,7 +1047,7 @@ export function descriptorAccessProblems(dir: string): string[] {
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}${s.adapterOnly === undefined ? "" : `, adapter run ${String(s.adapterOnly.measured)}, already ${String(s.adapterOnly.already)}, failed ${String(s.adapterOnly.failed)}`}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
@@ -1089,6 +1097,10 @@ export interface SyncRunOptions {
   readonly rejudge?: boolean;
   /** `--memory-only`: take only the footprints; `force` takes those already merged again. */
   readonly memoryOnly?: boolean;
+  /** `--adapter-only`: take only the adapter runs; `force` takes those already done again. */
+  readonly adapterOnly?: boolean;
+  /** Stand-ins for the pass's hosts, in tests. */
+  readonly adapterPass?: AdapterPassOptions;
   /** The run of `plugin-hostd --pin-files`, a stand-in in tests. */
   readonly pinFilesRun?: PinFilesRun;
   /** The run of the probe runner in a memory-only pass, a stand-in in tests. */
@@ -1150,6 +1162,7 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     ...(refreshed === 0 ? {} : { refreshed }),
     ...(b.rejudge === undefined ? (a.rejudge === undefined ? {} : { rejudge: a.rejudge }) : { rejudge: b.rejudge }),
     ...(b.memoryOnly === undefined ? (a.memoryOnly === undefined ? {} : { memoryOnly: a.memoryOnly }) : { memoryOnly: b.memoryOnly }),
+    ...(b.adapterOnly === undefined ? (a.adapterOnly === undefined ? {} : { adapterOnly: a.adapterOnly }) : { adapterOnly: b.adapterOnly }),
   };
 }
 
@@ -1170,7 +1183,7 @@ function scannedBy(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">, entry: 
 async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promise<SyncSummary> {
   const log = options.log ?? (() => {});
   const env = options.env ?? process.env;
-  log(options.rejudge === true ? "re-judge begins: nothing is measured" : options.memoryOnly === true ? "memory-only pass begins" : options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
+  log(options.rejudge === true ? "re-judge begins: nothing is measured" : options.memoryOnly === true ? "memory-only pass begins" : options.adapterOnly === true ? "adapter-only pass begins" : options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
@@ -1187,6 +1200,12 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       if (JSON.stringify(r.state) !== JSON.stringify(fresh.state)) writeFileWhole(settings.stateFile, `${JSON.stringify(r.state, null, 1)}\n`);
       const summary = await sendRefreshed(settings, r.state, fresh.refreshed.length, started, log);
       return { ...summary, rejudge: { changed: r.changed, unchanged: r.unchanged, owing: r.owing.length } };
+    }
+    if (options.adapterOnly === true) {
+      const r: AdapterPassResult = adapterPass(ctx, fresh.state, { ...options.adapterPass, force: options.force === true });
+      log(`adapter runs under ${Object.entries(r.versions).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+      const summary = await sendRefreshed(settings, fresh.state, fresh.refreshed.length, started, log);
+      return { ...summary, adapterOnly: { measured: r.measured, already: r.already, failed: r.failed } };
     }
     if (options.memoryOnly === true) {
       const r: MemoryPassResult = memoryPass(ctx, fresh.state, { force: options.force === true, ...(options.probeRun === undefined ? {} : { run: options.probeRun }) });
