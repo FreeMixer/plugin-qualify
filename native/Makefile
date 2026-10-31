@@ -101,7 +101,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
-	$(BUILD)/fixtures/lv2/latency.lv2/latency.so \
+	$(BUILD)/fixtures/lv2/latency.lv2/latency.so $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl \
 	$(BUILD)/fixtures-faulty/synth-voice-memory.clap \
 	$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so $(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so
 
@@ -238,6 +238,13 @@ $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-uns
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # the instrument: MIDI in through an atom sequence, a stereo out, a sine per held note; and the same allocating on note on
+# a binary whose file name holds a space, named by a percent-encoded IRI (plugin-hostd#239): the manifest is the target, as
+# make cannot name the file
+$(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl: fixtures/lv2-gain.c fixtures/spaced.lv2/manifest.ttl fixtures/spaced.lv2/gain.ttl
+	mkdir -p $(@D)
+	cp fixtures/spaced.lv2/manifest.ttl fixtures/spaced.lv2/gain.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_SPACED -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o "$(@D)/gain plugin.so" $<
+
 $(BUILD)/fixtures/lv2/synth.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
 	mkdir -p $(@D)
 	cp fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl $(@D)/

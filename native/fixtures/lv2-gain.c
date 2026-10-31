@@ -20,6 +20,8 @@
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-leaks"
 #elif defined FIXTURE_ACTIVATE_MB
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-large-activate"
+#elif defined FIXTURE_SPACED
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-spaced"
 #elif defined FIXTURE_ALLOCATES
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-rt-unsafe"
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */

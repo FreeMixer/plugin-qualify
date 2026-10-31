@@ -67,7 +67,9 @@ export function hostdPinFiles(
   }
   if (root === undefined || names.length === 0) return { ok: false, detail: "plugin-hostd --pin-files printed no root or no file" };
   try {
-    const files = names.map((path) => ({ path, sha256: createHash("sha256").update(read(join(root!, path))).digest("hex") }));
+    // a name is the word of a pin, percent-encoded when the file's name needs it (Surge XT's libSurge%20XT.so): the pin
+    // keeps it as written, the file is the name it decodes to, as the daemon opens it
+    const files = names.map((path) => ({ path, sha256: createHash("sha256").update(read(join(root!, decodeURIComponent(path)))).digest("hex") }));
     return { ok: true, root, files: files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) };
   } catch (e) {
     return { ok: false, detail: `a file plugin-hostd names cannot be read: ${e instanceof Error ? e.message : String(e)}` };
