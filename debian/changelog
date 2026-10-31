@@ -1,3 +1,16 @@
+plugin-qualify (0.18.2) unstable; urgency=medium
+
+  * An lv2:InstrumentPlugin is played one held note in its run under the LV2
+    adapter, its output read at its JACK ports by jack_peak: a silent one
+    reads unknown, omx-clap-host.silent-under-note, not qualified and not
+    refused (#266).
+  * An LV2 file named by a percent-encoded IRI gets a pin, so Surge XT,
+    Pianoteq 9 and six others can have a record; this needs plugin-hostd
+    0.15.4 (#267, plugin-hostd#239).
+  * Each cost figure prints the scheduling policy it was timed under (#214).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sat, 31 Oct 2026 04:00:33 +0100
+
 plugin-qualify (0.18.1) unstable; urgency=medium
 
   * --rejudge derives every record's verdicts, tiers and pin word again from the figures it holds, under this version's rules, measuring nothing: an RT violation is conditional and isolated, and the record says when the figures were measured and by which runner. An LV2 record with no adapter run reads unknown and owes that run, listed in qualify-owed.json. A second run changes nothing.

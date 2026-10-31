@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.1
+Version:        0.18.2
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,16 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.2-1
+- An lv2:InstrumentPlugin is played one held note in its run under the LV2
+  adapter, its output read at its JACK ports by jack_peak: a silent one
+  reads unknown, omx-clap-host.silent-under-note, not qualified and not
+  refused (#266).
+- An LV2 file named by a percent-encoded IRI gets a pin, so Surge XT,
+  Pianoteq 9 and six others can have a record; this needs plugin-hostd
+  0.15.4 (#267, plugin-hostd#239).
+- Each cost figure prints the scheduling policy it was timed under (#214).
+
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.1-1
 - --rejudge derives every record's verdicts, tiers and pin word again from the figures it holds, under this version's rules, measuring nothing: an RT violation is conditional and isolated, and the record says when the figures were measured and by which runner. An LV2 record with no adapter run reads unknown and owes that run, listed in qualify-owed.json. A second run changes nothing.
 - --memory-only takes only the footprint of each plugin at 48000/128 and 48000/256, through the probe runner under the usual limits, and merges it into its record, leaving every other figure as it was. A leak needs a soak and is reported as not measured.
