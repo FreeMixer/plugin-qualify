@@ -347,7 +347,7 @@ class Lv2RoundTrip(unittest.TestCase):
     def test_every_fixture_plugin_is_written_and_none_refused(self):
         self.assertEqual(self.refused, [])
         self.assertEqual(sorted(self.docs()), sorted(self.rows))
-        self.assertEqual(len(self.rows), 14)
+        self.assertEqual(len(self.rows), 15)
 
     def test_each_file_is_named_by_id_version_and_its_binary_hash(self):
         plugins = self.scanner.w.get_all_plugins()

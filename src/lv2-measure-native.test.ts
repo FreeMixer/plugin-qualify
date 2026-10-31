@@ -7,7 +7,8 @@
  * tests skip, saying how to build.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -31,7 +32,7 @@ const UNSAFE = "urn:plugin-qualify:fixture:lv2-rt-unsafe";
 const SYNTH = "urn:plugin-qualify:fixture:lv2-synth";
 const SYNTH_ALLOC = "urn:plugin-qualify:fixture:lv2-synth-alloc";
 const BUILT = [MEASURE, ORACLE, PATH_ORACLE, INTERPOSER, join(LV2_FIXTURES, "rt-safe.lv2", "gain.so"),
-  join(LV2_FIXTURES, "synth.lv2", "synth.so"), join(LV2_FIXTURES, "synth-alloc.lv2", "synth.so")].every((p) => existsSync(p));
+  join(LV2_FIXTURES, "spaced.lv2", "manifest.ttl"), join(LV2_FIXTURES, "synth.lv2", "synth.so"), join(LV2_FIXTURES, "synth-alloc.lv2", "synth.so")].every((p) => existsSync(p));
 
 function live(name: string, body: () => void): void {
   it(name, (ctx) => {
@@ -105,6 +106,14 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     const pin = measure("--pin", SAFE);
     expect(pin.status).toBe(0);
     expect(pin.line["integrity"]).toEqual(line["integrity"]);
+  });
+
+  live("a binary named by a percent-encoded IRI is pinned by that word and by the file it decodes to (plugin-hostd#239)", () => {
+    const pin = measure("--pin", "urn:plugin-qualify:fixture:lv2-spaced");
+    expect(pin.status).toBe(0);
+    const files = (pin.line["integrity"] as { files: { path: string; sha256: string }[] }).files;
+    expect(files.map((f) => f.path)).toEqual(["gain%20plugin.so", "gain.ttl", "manifest.ttl"]);
+    expect(files[0]!.sha256).toBe(createHash("sha256").update(readFileSync(join(LV2_FIXTURES, "spaced.lv2", "gain plugin.so"))).digest("hex"));
   });
 
   // lilv refuses a relative segment ("attempt to map invalid URI") and left the measurer a null world to

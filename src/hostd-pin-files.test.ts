@@ -34,6 +34,12 @@ describe("hostdPinFiles", () => {
     expect(seen).toEqual([["/usr/lib/lv2", join(dir, "lv2")]]);
   });
 
+  it("hashes the file a percent-encoded name decodes to, and keeps the name as the pin's word", () => {
+    writeFileSync(join(bundle, "libSurge XT.so"), "bytes of the binary");
+    const run: PinFilesRun = () => ({ status: 0, stderr: "", stdout: `root ${bundle}\nfile libSurge%20XT.so\n` });
+    expect(hostdPinFiles("urn:x", [], {}, run)).toEqual({ ok: true, root: bundle, files: [{ path: "libSurge%20XT.so", sha256: sha("bytes of the binary") }] });
+  });
+
   it("names no files when plugin-hostd cannot, with its reason", () => {
     const r = hostdPinFiles("urn:x", [], {}, () => ({ status: 1, stdout: "", stderr: "plugin-hostd: urn:x: manifest.ttl is in no bundle of lv2_path naming the plugin\n" }));
     expect(r).toEqual({ ok: false, detail: "plugin-hostd: urn:x: manifest.ttl is in no bundle of lv2_path naming the plugin" });
