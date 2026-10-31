@@ -14,6 +14,11 @@ Type=oneshot
 # service in systemd's own domain (init_t), which may neither make V8's code pages executable nor write under /tmp,
 # and the run dies before its first line; executing /usr/bin/node takes the ordinary daemon transition.
 ExecStart=/usr/bin/node /usr/bin/plugin-qualify-sync --system --no-wait --settle-s 60
+# Its temporary files (the sync's world, the scan's and the probes' directories, all taken from os.tmpdir()) go
+# under /run/omx/plugin-qualify-sync, which systemd creates, labels and removes when the run ends: /tmp is the first
+# thing a hardened unit loses (#192). Its own subdirectory, so the removal never takes another unit's /run/omx.
+RuntimeDirectory=omx/plugin-qualify-sync
+Environment=TMPDIR=%t/omx/plugin-qualify-sync
 # /var/lib/omx and the descriptors in it are read by the console, another user (#221)
 StateDirectory=omx
 StateDirectoryMode=0755
