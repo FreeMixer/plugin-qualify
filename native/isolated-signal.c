@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com> */
-/* The isolated step's signal (plugin-qualify#249): a sine into every audio input of a JACK client, a note held on its MIDI
- * inputs for an instrument, and what comes out of its audio outputs over a window:
+/* The isolated step's signal (plugin-qualify#249): a sine into every audio input of a JACK client, notes held on its MIDI
+ * inputs for an instrument, and what comes out of its audio outputs over a window. The notes start once the links are made,
+ * which an instrument needs to hear them, and each third of the window adds one more, held, so a patch that is slow to start
+ * is never restarted:
  *   isolated_signal <client> <ms>
- * prints one JSON line, {"latencyFrames":n,"xruns":n,"finite":bool,"silent":bool}. Exit 2 when the server or the client's
+ * prints one JSON line, {"latencyFrames":n,"xruns":n,"finite":bool,"silent":bool,"midiInputsLinked":n}. Exit 2 when the server or the client's
  * ports could not be had: nothing was learned about the plugin. libjack is opened at run time, as jack_peak opens it: the
  * package needs it only on a machine with a JACK server. */
 #include <dlfcn.h>
@@ -20,7 +22,8 @@
 #define SINE_HZ 1000.0
 #define SINE_PEAK 0.25f
 #define SILENCE_PEAK 1e-5f
-#define NOTE 60
+static const unsigned char NOTES[] = {60, 64, 67};
+#define NOTE_COUNT ((int)(sizeof NOTES / sizeof NOTES[0]))
 #define NOTE_VELOCITY 100
 #define JACK_NO_START_SERVER 1
 #define JACK_PORT_IS_INPUT 1ul
@@ -52,7 +55,8 @@ static int (*p_midi_write)(void *, uint32_t, const unsigned char *, size_t);
 static port_t *g_out, *g_midi, *g_in[MAX_PORTS];
 static int g_inputs;
 static double g_phase, g_step;
-static atomic_int g_xruns, g_note_sent, g_nonfinite;
+static atomic_int g_xruns, g_notes_due, g_nonfinite;
+static int g_notes_sent;
 static _Atomic float g_peak;
 
 static int on_process(uint32_t n, void *arg) {
@@ -65,9 +69,10 @@ static int on_process(uint32_t n, void *arg) {
   }
   void *midi = p_port_buffer(g_midi, n);
   p_midi_clear(midi);
-  if (!atomic_exchange(&g_note_sent, 1)) {
-    unsigned char on[3] = {0x90, NOTE, NOTE_VELOCITY};
+  if (g_notes_sent < atomic_load(&g_notes_due)) {
+    unsigned char on[3] = {0x90, NOTES[g_notes_sent], NOTE_VELOCITY};
     p_midi_write(midi, 0, on, sizeof on);
+    g_notes_sent++;
   }
   float peak = g_peak;
   for (int p = 0; p < g_inputs; p++) {
@@ -151,16 +156,22 @@ int main(int argc, char **argv) {
     return 2;
   }
   for (int i = 0; ins != NULL && ins[i] != NULL; i++) p_connect(c, p_port_name(g_out), ins[i]);
-  for (int i = 0; midis != NULL && midis[i] != NULL; i++) p_connect(c, p_port_name(g_midi), midis[i]);
+  int midi_linked = 0;
+  for (int i = 0; midis != NULL && midis[i] != NULL; i++)
+    if (p_connect(c, p_port_name(g_midi), midis[i]) == 0) midi_linked++;
   for (int i = 0; i < g_inputs; i++) p_connect(c, outs[i], p_port_name(g_in[i]));
   long ms = atol(argv[2]);
-  struct timespec window = {ms / 1000, (ms % 1000) * 1000000L};
-  nanosleep(&window, NULL);
+  long part = ms / NOTE_COUNT;
+  struct timespec third = {part / 1000, (part % 1000) * 1000000L};
+  for (int n = 1; n <= NOTE_COUNT; n++) {
+    atomic_store(&g_notes_due, n);
+    nanosleep(&third, NULL);
+  }
   struct latency_range range = {0, 0};
   p_latency_range(p_port_by_name(c, outs[0]), JACK_CAPTURE_LATENCY, &range);
   float peak = g_peak;
-  printf("{\"latencyFrames\":%u,\"xruns\":%d,\"finite\":%s,\"silent\":%s}\n", range.max, atomic_load(&g_xruns),
-         atomic_load(&g_nonfinite) ? "false" : "true", peak < SILENCE_PEAK ? "true" : "false");
+  printf("{\"latencyFrames\":%u,\"xruns\":%d,\"finite\":%s,\"silent\":%s,\"midiInputsLinked\":%d}\n", range.max, atomic_load(&g_xruns),
+         atomic_load(&g_nonfinite) ? "false" : "true", peak < SILENCE_PEAK ? "true" : "false", midi_linked);
   p_free(outs);
   if (ins != NULL) p_free(ins);
   if (midis != NULL) p_free(midis);
