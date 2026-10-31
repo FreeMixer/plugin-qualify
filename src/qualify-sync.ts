@@ -503,6 +503,19 @@ export const SYNC_CODE = {
   notMeasured: "qualify.sync.not-measured",
 } as const;
 
+/**
+ * Why a plugin is unmeasured because of the machine it ran on rather than what it is (#192): an EACCES, EPERM or
+ * ENOSPC the run hit, or a measurement that could not run or wrote no document. Such a plugin is measured again by
+ * the next run although its files are unchanged; a reason of the plugin's own (probe.limit.not-implemented, no such
+ * plugin, a crash) is not. `undefined` for every other outcome.
+ */
+export function machineReason(p: Pick<SyncPlugin, "outcome" | "code" | "detail">): string | undefined {
+  if (p.outcome !== "unmeasured" || p.code !== SYNC_CODE.notMeasured) return undefined;
+  const errno = /\b(EACCES|EPERM|ENOSPC)\b/.exec(p.detail ?? "")?.[1];
+  if (errno !== undefined) return errno;
+  return /wrote no document|cannot run the probe runner/.test(p.detail ?? "") ? "the measurement wrote no document" : undefined;
+}
+
 /** What the quick qualification never measures, stated in every record it writes. */
 export const QUICK_NOT_MEASURED: readonly NotMeasured[] = [{ dimension: "stability", code: HOSTING_CODE.stabilityUnsoaked }];
 
@@ -1081,6 +1094,8 @@ export interface SyncSummary {
   readonly rejudge?: { readonly changed: number; readonly unchanged: number; readonly owing: number };
   /** `--memory-only`: the plugins measured, those whose footprints were already merged, and those no run could read. */
   readonly memoryOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
+  /** Every plugin the run measured was unmeasured for this one reason of the machine ({@link machineReason}): the run failed. */
+  readonly machineFailure?: string;
   /** `--adapter-only`: the plugins run, those done already at these host versions, and those whose host could not be run. */
   readonly adapterOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
 }
@@ -1299,6 +1314,9 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     const stateBefore = state;
     let unreadable = false;
     const lv2Pinned: string[] = [];
+    // the plugins measured this run, and how many of them the machine left unmeasured, by reason (#192)
+    let measuredHere = 0;
+    const byMachine = new Map<string, number>();
     // a change made while a pass ran is caught by one more pass, a few at most
     for (let pass = 0; pass < 3; pass++) {
       const signature = directoriesSignature(dirs);
@@ -1318,7 +1336,8 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       }
       for (const item of items) {
         const recorded = recordedAsIs(item, entries[item.key]);
-        if (recorded.same && options.force !== true) {
+        const retry = recorded.same ? entries[item.key]!.plugins.map(machineReason).find((r) => r !== undefined) : undefined;
+        if (recorded.same && options.force !== true && retry === undefined) {
           if (pass === 0) count.skipped += entries[item.key]!.plugins.length;
           continue;
         }
@@ -1335,6 +1354,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
           writeFileWhole(settings.pinFile, syncPinsText(state));
           continue;
         }
+        if (recorded.same && retry !== undefined) log(`${item.key}: unmeasured last run by the machine (${retry}); measured again`);
         const files = recorded.files ?? digestFiles(item.root, item.files);
         if (files === undefined) {
           log(`${item.key}: a file of it cannot be read; skipped this run`);
@@ -1356,6 +1376,11 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
         if (item.format === "lv2") lv2Pinned.push(...entry.plugins.filter((p) => p.pin !== undefined).map((p) => p.uri));
         for (const p of entry.plugins) {
           count[p.outcome]++;
+          measuredHere++;
+          // a reason of the machine is said once: the plugins after the first are counted, not listed
+          const why = machineReason(p);
+          if (why !== undefined) byMachine.set(why, (byMachine.get(why) ?? 0) + 1);
+          if (why !== undefined && byMachine.get(why)! > 1) continue;
           log(`${p.uri}: ${p.outcome}${p.code === undefined ? "" : ` (${p.code})`}${p.detail === undefined ? "" : `: ${p.detail}`}`);
         }
         state = { schema: SYNC_STATE_SCHEMA, entries };
@@ -1389,8 +1414,13 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     const replies = "replies" in sent ? sent.replies : [];
     for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
     const taken = replies.filter((r) => r === "resp 0").length;
+    for (const [why, n] of byMachine) if (n > 1) log(`${String(n)} plugins unmeasured by the machine (${why}); the first is listed above`);
+    const [only] = byMachine.size === 1 ? [...byMachine] : [];
+    const machineFailure = only !== undefined && only[1] === measuredHere ? only[0] : undefined;
+    if (machineFailure !== undefined) log(`every plugin this run measured was left unmeasured by the machine (${machineFailure}): the run failed`);
     return {
       ...count,
+      ...(machineFailure === undefined ? {} : { machineFailure }),
       seconds: (Date.now() - started) / 1000,
       ...(taken === 0 ? {} : { sent: taken }),
       ...(fresh.refreshed.length === 0 ? {} : { refreshed: fresh.refreshed.length }),

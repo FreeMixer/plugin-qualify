@@ -55,6 +55,8 @@ try {
   if (summary !== undefined) {
     process.stdout.write(`${summaryLine(summary)}\n`);
     log(`pins in ${s.pinFile}${summary.sent ? `, ${String(summary.sent)} sent to plugin-hostd` : ""}`);
+    // every plugin left unmeasured by one reason of the machine: the run failed, and the unit says so (#192)
+    if (summary.machineFailure !== undefined) process.exit(1);
   }
 } catch (e) {
   log(`the run stopped: ${e.message}`);
