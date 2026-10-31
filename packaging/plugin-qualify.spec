@@ -132,6 +132,10 @@ fi
   silent refusal says how many MIDI inputs were linked.
 - A silent refusal from the tool before this is run again by the next
   --isolated-only. One that heard the notes is not.
+- The held note test plays 30 keys from 36, each held, read from before the first,
+  in the adapter pass and the isolated step, so a drum kit that maps only some
+  keys is not read as silent. A silent-under-note from one key is run again by
+  --adapter-only.
 
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.3-1
 - The isolated step runs for every plugin of a pass: a private jackd is now
