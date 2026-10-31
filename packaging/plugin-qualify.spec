@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.2
+Version:        0.18.3
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,16 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.3-1
+- The isolated step runs for every plugin of a pass: a private jackd is now
+  reaped when it ends, so the next plugin's server can start. On a Raspberry
+  Pi 5 only the first of 152 steps had run.
+- A step that could not run is run again by the next --isolated-only and
+  replaced in the record.
+- plugin-qualify-sync.service gives the plugins a HOME, /var/lib/omx/qualify-home.
+  Without one Surge XT is silent under jalv and the LV2 adapter and its CLAP
+  answers -503, and a sync from the unit judged it by that.
+
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.2-1
 - An lv2:InstrumentPlugin is played one held note in its run under the LV2
   adapter, its output read at its JACK ports by jack_peak: a silent one

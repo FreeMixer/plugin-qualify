@@ -1,3 +1,16 @@
+plugin-qualify (0.18.3) unstable; urgency=medium
+
+  * The isolated step runs for every plugin of a pass: a private jackd is now
+    reaped when it ends, so the next plugin's server can start. On a Raspberry
+    Pi 5 only the first of 152 steps had run.
+  * A step that could not run is run again by the next --isolated-only and
+    replaced in the record.
+  * plugin-qualify-sync.service gives the plugins a HOME, /var/lib/omx/qualify-home.
+    Without one Surge XT is silent under jalv and the LV2 adapter and its CLAP
+    answers -503, and a sync from the unit judged it by that.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sat, 31 Oct 2026 08:25:59 +0100
+
 plugin-qualify (0.18.2) unstable; urgency=medium
 
   * An lv2:InstrumentPlugin is played one held note in its run under the LV2
