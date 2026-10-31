@@ -20,7 +20,7 @@ const STATE_DIR = process.env.OMX_ADMIT_STATE_DIR;
 const INSTANCE = 0;
 // an instrument under the adapter is played: one note, held this long, its output read at its JACK ports
 const NOTE_WINDOW_MS = 1000;
-const NOTE_ON = `note_on ${INSTANCE} 0 60 100`;
+const NOTE_ON = `note_off ${INSTANCE} 0 60`;
 const ADAPTER = "omx-clap-host";
 const COMMANDS = [
   ["add", `add ${uri} ${INSTANCE}`],
