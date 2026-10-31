@@ -20,8 +20,12 @@ ExecStart=/usr/bin/node /usr/bin/plugin-qualify-sync --system --no-wait --settle
 RuntimeDirectory=omx/plugin-qualify-sync
 Environment=TMPDIR=%t/omx/plugin-qualify-sync
 # /var/lib/omx and the descriptors in it are read by the console, another user (#221)
-StateDirectory=omx
+StateDirectory=omx omx/qualify-home
 StateDirectoryMode=0755
+# A plugin reads and writes under its HOME, and a system unit has none: without it Surge XT is silent under jalv and the
+# adapter and its CLAP answers -503, and the sync would judge the plugin by that. One of its own, on disk, so the first run
+# of a plugin fills no real user's home and no memory under /run.
+Environment=HOME=%S/omx/qualify-home
 UMask=0022
 # The audio comes first, and the machine stays reachable: the lowest CPU priority and the disk only when nothing else
 # wants it; at most two cores' worth of CPU (on a four-core machine two stay free, so sshd and the console answer
