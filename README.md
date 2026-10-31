@@ -661,6 +661,11 @@ plugin-qualify-sync --system --adapter-only  # the runs, at the cells a Pi runs
 plugin-qualify-sync --system --rejudge       # the verdicts they decide
 ```
 
+`--isolated-only` runs the isolated step a record still owes: a plugin rated conditional, or one that crashed or hung in
+the probe, added alone under a plugin-hostd of its own on a private JACK server, with a sine through it for 3 seconds. The
+record's `run` keeps its id and gains the step, and the pin follows it; nothing else is measured. A step the machine could
+not run stays owed.
+
 `--adapter-only` starts each LV2 plugin the state holds under a fresh omx-clap-host, `add` then `remove` through the LV2
 adapter, once per cell: 48 kHz in blocks of 128 and 256 frames. Each cell has a private JACK server (`jackd -d dummy`, so
 `jackd` must be installed), so the device's live server is never touched. A command has `budget_s` seconds, the host's

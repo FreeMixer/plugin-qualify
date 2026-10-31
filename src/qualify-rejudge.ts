@@ -46,7 +46,9 @@ import {
   type QualificationRecord,
   type RecordGridPoint,
   type RecordVerdict,
+  type RunBlock,
 } from "./qualification-record.js";
+import { ISOLATED_RESULT, RUN_STEP, pinAfterStep, provenAlone } from "./qualify-isolated.js";
 import { PI_CELLS, PROBE_MEMORY_ONLY_ENV, PROBE_NOTES_ENV } from "./qualify-declarations.js";
 import { SYNC_STATE_SCHEMA, digestFiles, recordStem, type SyncContext, type SyncEntry, type SyncPlugin, type SyncState } from "./qualify-sync.js";
 import type { SuitabilityRating } from "./rating.js";
@@ -54,6 +56,7 @@ import { writeFileWhole } from "./whole-file.js";
 
 /** The codes of a measurement a record owes. */
 export const OWED_CODE = {
+  isolatedStep: "qualify.sync.isolated-step-owed",
   /** An LV2 verdict of a host that runs it through the adapter, and no measured adapter run. */
   adapterRun: "qualify.sync.adapter-run-owed",
   /** A verdict decided by a run under its host (mod-host, jalv), and no run in the record. */
@@ -192,8 +195,11 @@ export function rejudgeRecord(record: QualificationRecord, probeBytes: Uint8Arra
   if (!read.ok) throw new RejudgeRefusal(`${record.probe.file}: ${read.code}: ${read.problem}`);
   const output = withMemoryRun(read.output, record);
   const { profiles, kept } = rejudgeProfiles(record, output, options.host);
-  const { reasons, owes } = runsOwed(record, output, profiles);
+  const { reasons, owes: runs } = runsOwed(record, output, profiles);
   const judgment = judgeProbeOutput(output, profiles, { admissions: admissionsOf(record), owed: reasons });
+  // decides no verdict: a record from before the steps that reads isolated stays offered, runs alone, and is not proven by the step
+  const readsIsolated = judgment.hosts.some((h) => h.verdict.measured && h.verdict.rating === "conditional");
+  const owes = readsIsolated && !provenAlone(record) ? [...runs, { measurement: "isolated-step" as const, code: OWED_CODE.isolatedStep }] : runs;
   const memory = record.memoryRun === undefined ? {} : { memory: { tool: record.memoryRun.tool, measuredAt: record.memoryRun.measuredAt } };
   const a = record.adapter;
   const adapterTaken = a?.versions === undefined || a.measuredAt === undefined ? {} : { adapter: { versions: a.versions, measuredAt: a.measuredAt } };
@@ -263,9 +269,17 @@ const readRecord = (path: string): QualificationRecord | undefined => {
 const nameOf = (record: QualificationRecord): string => record.plugin.id;
 
 /** A state plugin with the verdict its record now holds for the host: the pin's files stay as they are, only its word follows. */
-function pluginWithVerdict(plugin: SyncPlugin, v: RecordVerdict): SyncPlugin {
+function pluginWithVerdict(plugin: SyncPlugin, v: RecordVerdict, run?: RunBlock): SyncPlugin {
   const { pin, code: _code, ...rest } = plugin;
   const word = v.measured ? pinVerdictOf(v.rating as SuitabilityRating) : undefined;
+  // a rating does not make a plugin isolated: a run seen alone does, and a re-judge measures nothing. A record from before
+  // the steps keeps its word until a completion has run it.
+  if (word === "isolated" && run !== undefined) {
+    const step = run.steps.find((s) => s.step === RUN_STEP.isolated);
+    const kept = pinAfterStep(pin, step ?? { step: RUN_STEP.isolated, result: ISOLATED_RESULT.notRun });
+    const refused = step?.result === ISOLATED_RESULT.refused;
+    return { ...rest, outcome: refused ? "refused" : outcomeOfVerdict(v), ...(refused && step.code !== undefined ? { code: step.code } : v.deciding === undefined ? {} : { code: v.deciding }), ...(kept === undefined ? {} : { pin: kept }) };
+  }
   return {
     ...rest,
     outcome: outcomeOfVerdict(v),
@@ -331,7 +345,7 @@ export function rejudgeState(ctx: SyncContext, state: SyncState, now: () => stri
     const plugins = entry.plugins.map((plugin) => {
       const record = plugin.record === undefined ? undefined : judged.get(basename(plugin.record));
       const v = record?.verdicts.find((x) => x.host === hostProfile.id);
-      if (v !== undefined) return pluginWithVerdict(plugin, v);
+      if (v !== undefined) return pluginWithVerdict(plugin, v, record?.run);
       if (record === undefined && plugin.outcome === "unmeasured" && plugin.record?.endsWith(RECORD_SUFFIX) !== true) {
         owing.push({ plugin: plugin.uri, ...(plugin.record === undefined ? {} : { record: basename(plugin.record) }), owes: [{ measurement: "qualification", code: OWED_CODE.noFigures }] });
       }

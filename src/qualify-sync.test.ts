@@ -353,8 +353,9 @@ describe("a sweep over a good CLAP, one that crashes at load, one that hangs and
     const r = sync(m.flags());
     expect(r.status, r.stderr).toBe(0);
     expect(r.summary).toEqual({ qualified: 2, skipped: 0, refused: 0, crashed: 1, hung: 1, unmeasured: 0 });
-    // the hanger was ended at its budget, not at the runner's own default
-    expect(r.ms).toBeLessThan(30_000);
+    // the hanger was ended at its budget, not at the runner's own default; its isolated step adds a private server's start
+    // and stop and one more budget (about 8 s on CI: 26 s before the step, 34 s with it)
+    expect(r.ms).toBeLessThan(45_000);
     const state = JSON.parse(readFileSync(join(m.out, "state.json"), "utf8")) as SyncState;
     const outcome = (key: string) => state.entries[key]?.plugins.map((p) => [p.outcome, p.code]);
     expect(outcome(`clap:${join(m.clap, "crashes-at-load.clap")}`)).toEqual([["crashed", "qualify.sync.scan-crashed"]]);
@@ -370,6 +371,9 @@ describe("a sweep over a good CLAP, one that crashes at load, one that hangs and
     expect(pins[1]!.files.map((f) => f.path)).toEqual(["gain.so", "gain.ttl", "manifest.ttl"]);
     // every record says the soak was not measured; the crasher's says nothing was
     const records = readdirSync(join(m.out, "qualification"));
+    // the hanger took the isolated step in this same pass, and its record says so
+    const judged = records.filter((f) => f.endsWith(".qualification.json")).map((f) => JSON.parse(readFileSync(join(m.out, "qualification", f), "utf8")));
+    expect(judged.filter((j) => j.probe.outcome === "probe.timeout").flatMap((j) => j.run.steps.map((x: { step: string }) => x.step))).toContain("isolated");
     const good = JSON.parse(readFileSync(join(m.out, "qualification", records.find((f) => f.startsWith(GOOD_ID) && f.endsWith(".qualification.json"))!), "utf8"));
     expect(good.notMeasured).toEqual([{ dimension: "stability", code: "hosting.stability.unsoaked" }]);
     expect(good.verdicts[0].rating).toBe("suitable");

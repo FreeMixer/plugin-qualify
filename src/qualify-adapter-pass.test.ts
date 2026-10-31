@@ -235,8 +235,10 @@ describe("--adapter-only then --rejudge", () => {
     expect(row(d.record(LV2_CLEAN), "omx-clap-host").rating).toBe("unknown");
     await pass(d, stand([]));
     const summary = await rejudge(d);
-    expect(readJson<{ owing: unknown[] }>(owedFile(d.settings.stateFile)).owing).toEqual([]);
-    expect(summary!.rejudge!.owing).toBe(0);
+    // the adapter runs are done; the plugin that reads isolated still owes the step that sees it alone
+    const owing = readJson<{ owing: { plugin: string; owes: { measurement: string }[] }[] }>(owedFile(d.settings.stateFile)).owing;
+    expect(owing.map((o) => o.owes.map((x) => x.measurement))).toEqual([["isolated-step"]]);
+    expect(summary!.rejudge!.owing).toBe(1);
     const clean = d.record(LV2_CLEAN);
     expect(row(clean, "omx-clap-host")).toMatchObject({ rating: "suitable", qualified: true, arm: "run" });
     expect(clean.tiers.offeredOn).toEqual(["isolated"]);

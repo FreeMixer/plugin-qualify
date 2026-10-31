@@ -89,6 +89,30 @@ describe("the host class", () => {
 });
 
 describe("a distributed record", () => {
+  const editRecord = (m: { share: string }, change: (r: Record<string, unknown>) => Record<string, unknown>): void => {
+    const dir = join(m.share, CLASS, SET);
+    const name = readdirSync(dir).find((f) => f.endsWith(".qualification.json"))!;
+    const path = join(dir, name);
+    writeFileSync(path, JSON.stringify(change(JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)));
+  };
+
+  it("with a run that lacks a step its outcome calls for is refused, and the plugin is measured here", async () => {
+    const m = machine("run-lacks-step");
+    writeFixtureSet(m.share, CLASS, SET, m.clap);
+    editRecord(m, (r) => ({ ...r, run: { id: "r", steps: [{ step: "scan", result: "ok" }, { step: "probe", result: "probe.ok" }] } }));
+    const { summary, lines } = await sync(m.settings);
+    expect(lines.some((l) => /its record lacks the steps describe, rt-safety; measured here/.test(l)), lines.join("\n")).toBe(true);
+    expect(summary.distributed).toBe(0);
+  });
+
+  it("with no run is from before the steps: it is taken, and keeps its word", async () => {
+    const m = machine("no-run");
+    writeFixtureSet(m.share, CLASS, SET, m.clap);
+    editRecord(m, ({ run: _run, ...r }) => r);
+    const { summary } = await sync(m.settings);
+    expect(summary.distributed).toBe(1);
+  });
+
   it("applies on a matching SHA-256: the plugin is not measured, its record is the device's own with the provenance kept, its pin is written", async () => {
     const m = machine("applies");
     writeFixtureSet(m.share, CLASS, SET, m.clap);

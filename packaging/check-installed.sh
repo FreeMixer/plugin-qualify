@@ -70,6 +70,7 @@ echo "check-installed: $dir measures LV2 plugins with no setting"
 # the LV2 host probe a console runs on the plugin it exports: installed, and it tells a plugin lilv
 # cannot find (exit 2) from one that failed a claim (exit 1)
 [ -x "$dir/lv2_host_probe" ] || fail "the package installs no lv2_host_probe"
+[ -x "$dir/isolated_signal" ] || fail "the package installs no isolated_signal"
 set +e
 bare "$dir/lv2_host_probe" "$lv2/rt-safe.lv2" urn:plugin-qualify:fixture:no-such-plugin > "$out/probe.txt" 2>&1
 rc=$?

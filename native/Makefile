@@ -89,7 +89,7 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
 
-all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
@@ -136,6 +136,9 @@ $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-option
 # the search path's oracle, never installed
 $(BUILD)/lv2_measure_path_test: lv2_measure_path.test.c lv2-measure-path.c lv2-measure-path.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror -I. $(LDFLAGS) -o $@ lv2_measure_path.test.c lv2-measure-path.c
+
+$(BUILD)/isolated_signal: isolated-signal.c | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
@@ -277,12 +280,13 @@ deps:
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/jack_peak
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
 	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
 	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
+	install -m 0755 $(BUILD)/isolated_signal $(DESTDIR)$(LIBEXECDIR)/isolated_signal
 	install -m 0755 $(BUILD)/jack_peak $(DESTDIR)$(LIBEXECDIR)/jack_peak
 
 clean:
