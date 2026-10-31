@@ -75,13 +75,19 @@ const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
+/**
+ * jackd under a shell that waits for it. A pass is synchronous, so this process cannot reap a child; an unreaped jackd
+ * that had a client stays in JACK's server table as alive, and the next start under its name reads "server already active".
+ */
+const REAPING_JACKD = `trap 'kill -TERM $p 2>/dev/null; wait $p' TERM; jackd "$@" & p=$!; wait $p`;
+
 /** `jackd` on a name of its own and the dummy driver, at the cell's rate and quantum; `undefined` when none came up. */
 export const startPrivateJack: JackStarter = (cell) => {
   const name = `omx-qualify-${String(process.pid)}-${String(cell.quantum)}`;
   let child: ChildProcess;
   let ended = false;
   try {
-    child = spawn("jackd", ["-r", "-n", name, "-d", "dummy", "-r", String(cell.rate), "-p", String(cell.quantum)], { stdio: "ignore", detached: true });
+    child = spawn("sh", ["-c", REAPING_JACKD, "sh", "-r", "-n", name, "-d", "dummy", "-r", String(cell.rate), "-p", String(cell.quantum)], { stdio: "ignore", detached: true });
   } catch {
     return undefined;
   }

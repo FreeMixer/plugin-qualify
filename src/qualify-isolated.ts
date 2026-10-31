@@ -190,11 +190,13 @@ function runIdOf(record: QualificationRecord, dir: string): string | undefined {
  * measured. `undefined` when it owes none, or has no run id to extend. Writes the record whole.
  */
 export function completeIsolated(path: string, record: QualificationRecord, uri: string, cell: GridCell, runner: IsolatedRunner, env: Readonly<Record<string, string | undefined>>): { readonly record: QualificationRecord; readonly step: RunStep } | undefined {
-  if (!owesIsolated(record) || record.run?.steps.some((s) => s.step === RUN_STEP.isolated) === true) return undefined;
+  const isStep = (s: RunStep): boolean => s.step === RUN_STEP.isolated;
+  // a step that could not run decided nothing, so a pass tries it again and it takes that one's place
+  if (!owesIsolated(record) || record.run?.steps.some((s) => isStep(s) && s.result !== ISOLATED_RESULT.notRun) === true) return undefined;
   const id = runIdOf(record, join(path, ".."));
   if (id === undefined) return undefined;
   const step = judgeIsolatedRun(runner(uri, cell, env));
-  const run: RunBlock = { id, steps: [...(record.run?.steps ?? baseSteps(record)), step] };
+  const run: RunBlock = { id, steps: [...(record.run?.steps ?? baseSteps(record)).filter((s) => !isStep(s)), step] };
   const next = { ...record, run };
   writeFileWhole(path, `${JSON.stringify(next, null, 2)}\n`);
   return { record: next, step };
