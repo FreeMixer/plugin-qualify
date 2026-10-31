@@ -57,6 +57,9 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_VOICE_CAPACITY && FIXTURE_VOICE_CAPACITY == 0
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-no-voices"
 #define FIXTURE_NAME "synth declaring no voices"
+#elif defined FIXTURE_DRUM
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-drum"
+#define FIXTURE_NAME "synth answering only some keys"
 #elif defined FIXTURE_VOICE_CAPACITY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-voices"
 #define FIXTURE_NAME "synth declaring its voices"
@@ -84,7 +87,14 @@ static const clap_plugin_descriptor_t descriptor = {
   .features = features,
 };
 
-struct voice { int key; double phase, step; };
+#ifdef FIXTURE_DRUM
+/* a drum kit: only these keys are mapped, and each hit lasts 20 ms */
+#define FIXTURE_DRUM_LOW 36
+#define FIXTURE_DRUM_HIGH 40
+#define FIXTURE_DRUM_HIT_S 0.02
+#endif
+
+struct voice { int key; double phase, step; long left; };
 
 struct synth {
   clap_plugin_t plugin;
@@ -118,6 +128,9 @@ static void synth_reset(const clap_plugin_t *p) {
 }
 
 static void note_on(struct synth *s, int key) {
+#ifdef FIXTURE_DRUM
+  if (key < FIXTURE_DRUM_LOW || key > FIXTURE_DRUM_HIGH) return;
+#endif
 #ifdef FIXTURE_VOICE_MB
   {
     const size_t bytes = (size_t)FIXTURE_VOICE_MB << 20;
@@ -137,6 +150,9 @@ static void note_on(struct synth *s, int key) {
       s->voice[v].key = key;
       s->voice[v].phase = 0.0;
       s->voice[v].step = 2.0 * M_PI * 440.0 * pow(2.0, (key - 69) / 12.0) / s->rate;
+#ifdef FIXTURE_DRUM
+      s->voice[v].left = (long)(s->rate * FIXTURE_DRUM_HIT_S);
+#endif
       return;
     }
 }
@@ -201,6 +217,9 @@ static clap_process_status synth_process(const clap_plugin_t *p, const clap_proc
       if (s->voice[v].key >= 0) {
         y += sin(s->voice[v].phase) * 0.1;
         s->voice[v].phase += s->voice[v].step;
+#ifdef FIXTURE_DRUM
+        if (--s->voice[v].left <= 0) s->voice[v].key = -1;
+#endif
       }
     for (uint32_t c = 0; c < out->channel_count; c++) {
       double in = 0.0;

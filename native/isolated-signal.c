@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com> */
 /* The isolated step's signal (plugin-qualify#249): a sine into every audio input of a JACK client, notes held on its MIDI
- * inputs for an instrument, and what comes out of its audio outputs over a window. The notes start once the links are made,
- * which an instrument needs to hear them, and each third of the window adds one more, held, so a patch that is slow to start
- * is never restarted:
+ * inputs for an instrument, and what comes out of its audio outputs over a window, read from before the first note. The
+ * notes start once the links are made, which an instrument needs to hear them, and walk a wide range of keys across the
+ * window, each held: a drum kit answers only its mapped keys, and a patch slow to start is never restarted:
  *   isolated_signal <client> <ms>
  * prints one JSON line, {"latencyFrames":n,"xruns":n,"finite":bool,"silent":bool,"midiInputsLinked":n}. Exit 2 when the server or the client's
  * ports could not be had: nothing was learned about the plugin. libjack is opened at run time, as jack_peak opens it: the
@@ -22,8 +22,9 @@
 #define SINE_HZ 1000.0
 #define SINE_PEAK 0.25f
 #define SILENCE_PEAK 1e-5f
-static const unsigned char NOTES[] = {60, 64, 67};
-#define NOTE_COUNT ((int)(sizeof NOTES / sizeof NOTES[0]))
+/* the same keys as tools/mod-host-admit.mjs plays */
+#define NOTE_FIRST 36
+#define NOTE_COUNT 30
 #define NOTE_VELOCITY 100
 #define JACK_NO_START_SERVER 1
 #define JACK_PORT_IS_INPUT 1ul
@@ -70,7 +71,7 @@ static int on_process(uint32_t n, void *arg) {
   void *midi = p_port_buffer(g_midi, n);
   p_midi_clear(midi);
   if (g_notes_sent < atomic_load(&g_notes_due)) {
-    unsigned char on[3] = {0x90, NOTES[g_notes_sent], NOTE_VELOCITY};
+    unsigned char on[3] = {0x90, (unsigned char)(NOTE_FIRST + g_notes_sent), NOTE_VELOCITY};
     p_midi_write(midi, 0, on, sizeof on);
     g_notes_sent++;
   }
@@ -162,10 +163,10 @@ int main(int argc, char **argv) {
   for (int i = 0; i < g_inputs; i++) p_connect(c, outs[i], p_port_name(g_in[i]));
   long ms = atol(argv[2]);
   long part = ms / NOTE_COUNT;
-  struct timespec third = {part / 1000, (part % 1000) * 1000000L};
+  struct timespec step = {part / 1000, (part % 1000) * 1000000L};
   for (int n = 1; n <= NOTE_COUNT; n++) {
     atomic_store(&g_notes_due, n);
-    nanosleep(&third, NULL);
+    nanosleep(&step, NULL);
   }
   struct latency_range range = {0, 0};
   p_latency_range(p_port_by_name(c, outs[0]), JACK_CAPTURE_LATENCY, &range);

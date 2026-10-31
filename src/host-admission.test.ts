@@ -398,9 +398,10 @@ net.createServer((c) => c.on("data", (d) => {
 
     it("a note goes in between the add and the remove, every output port is read, and the figure comes back", () => {
       const { run, sent } = admit({ STAND_CLASS: "instrument" });
-      expect(sent).toEqual(["add urn:x 0", "audio_ports 0", "note_on 0 0 60 100", "remove 0"]);
+      const keys = Array.from({ length: 30 }, (_, k) => `note_on 0 0 ${String(36 + k)} 100`);
+      expect(sent).toEqual(["add urn:x 0", "audio_ports 0", ...keys, "remove 0"]);
       expect(readFileSync(`${log}.ports`, "utf8").trim().split("\n")).toEqual(["effect_0:out_1", "effect_0:out_2", "effect_0:aux_out_1_1", "effect_0:aux_out_1_2"]);
-      expect(run).toEqual({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }], sound: { peak: 0.2 } });
+      expect(run).toEqual({ installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: 0 }], sound: { notes: 30, peak: 0.2 } });
     });
     it("silence comes back as silence and the run does not admit", () => {
       expect(classifyProtocolRun(ADAPTER_HOST, admit({ STAND_CLASS: "instrument", STAND_PEAK: "0" }).run).code).toBe("omx-clap-host.silent-under-note");
