@@ -72,6 +72,8 @@ export interface IsolatedFigures {
   /** The worker's CPU over the window, in percent of one core. */
   readonly cpuPercent?: number;
   readonly xruns?: number;
+  /** How many MIDI inputs of the plugin the step's notes were linked to. */
+  readonly midiInputsLinked?: number;
 }
 
 /** One step of a plugin's pass and how it ended. */

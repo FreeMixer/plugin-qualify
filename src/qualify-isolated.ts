@@ -80,16 +80,20 @@ export function judgeIsolatedRun(run: IsolatedRunFacts): RunStep {
   if ((run.workers ?? 0) < 1) return step(ISOLATED_RESULT.refused, ISOLATED_CODE.noWorker);
   if (run.workers !== 1 || run.instancesInWorker !== 1) return step(ISOLATED_RESULT.refused, ISOLATED_CODE.notAlone);
   if (run.finite !== true) return step(ISOLATED_RESULT.refused, ISOLATED_CODE.nonFinite);
-  if (run.silent !== false) return step(ISOLATED_RESULT.refused, ISOLATED_CODE.silent);
+  if (run.silent !== false) {
+    const linked = run.midiInputsLinked;
+    return step(ISOLATED_RESULT.refused, ISOLATED_CODE.silent, linked === undefined ? undefined : linked === 0 ? "no note input to link: a sine played at its audio inputs" : `notes held on ${String(linked)} MIDI input${linked === 1 ? "" : "s"} and a sine at its audio inputs`);
+  }
   return step(ISOLATED_RESULT.isolated);
 }
 
 function figuresOf(run: IsolatedRunFacts): IsolatedFigures | undefined {
-  if (run.latencyFrames === undefined && run.cpuPercent === undefined && run.xruns === undefined) return undefined;
+  if (run.latencyFrames === undefined && run.cpuPercent === undefined && run.xruns === undefined && run.midiInputsLinked === undefined) return undefined;
   return {
     ...(run.latencyFrames === undefined ? {} : { latencyFrames: run.latencyFrames }),
     ...(run.cpuPercent === undefined ? {} : { cpuPercent: run.cpuPercent }),
     ...(run.xruns === undefined ? {} : { xruns: run.xruns }),
+    ...(run.midiInputsLinked === undefined ? {} : { midiInputsLinked: run.midiInputsLinked }),
   };
 }
 
@@ -193,8 +197,10 @@ function runIdOf(record: QualificationRecord, dir: string): string | undefined {
  */
 export function completeIsolated(path: string, record: QualificationRecord, uri: string, cell: GridCell, runner: IsolatedRunner, env: Readonly<Record<string, string | undefined>>): { readonly record: QualificationRecord; readonly step: RunStep } | undefined {
   const isStep = (s: RunStep): boolean => s.step === RUN_STEP.isolated;
-  // a step that could not run decided nothing, so a pass tries it again and it takes that one's place
-  if (!owesIsolated(record) || record.run?.steps.some((s) => isStep(s) && s.result !== ISOLATED_RESULT.notRun) === true) return undefined;
+  // a step that could not run decided nothing, and neither did silence before the notes were played where a plugin could
+  // hear them: a step of that tool does not say how many inputs it linked. A pass tries these again, and it takes their place
+  const decided = (s: RunStep): boolean => s.result !== ISOLATED_RESULT.notRun && !(s.code === ISOLATED_CODE.silent && s.figures?.midiInputsLinked === undefined);
+  if (!owesIsolated(record) || record.run?.steps.some((s) => isStep(s) && decided(s)) === true) return undefined;
   const id = runIdOf(record, join(path, ".."));
   if (id === undefined) return undefined;
   const step = judgeIsolatedRun(runner(uri, cell, env));

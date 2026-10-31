@@ -34,7 +34,7 @@ const scratch = mkdtempSync(join(tmpdir(), "qualify-isolated-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const CELL = { rate: 48000, quantum: 128 };
-const WELL: IsolatedRunFacts = { started: true, added: true, alive: true, workers: 1, instancesInWorker: 1, latencyFrames: 128, cpuPercent: 12.5, xruns: 0, finite: true, silent: false };
+const WELL: IsolatedRunFacts = { started: true, added: true, alive: true, workers: 1, instancesInWorker: 1, latencyFrames: 128, cpuPercent: 12.5, xruns: 0, finite: true, silent: false, midiInputsLinked: 1 };
 const pin = { uri: "urn:p", integrity: {}, verdict: "isolated" as const };
 
 function record(over: { rating?: string; outcome?: string; run?: QualificationRecord["run"] } = {}): QualificationRecord {
@@ -51,7 +51,7 @@ function record(over: { rating?: string; outcome?: string; run?: QualificationRe
 
 describe("the decision table", () => {
   it("a plugin added, alive, alone and sounding is isolated, with the figures", () => {
-    expect(judgeIsolatedRun(WELL)).toEqual({ step: "isolated", result: "isolated", figures: { latencyFrames: 128, cpuPercent: 12.5, xruns: 0 } });
+    expect(judgeIsolatedRun(WELL)).toEqual({ step: "isolated", result: "isolated", figures: { latencyFrames: 128, cpuPercent: 12.5, xruns: 0, midiInputsLinked: 1 } });
   });
 
   it.each([
@@ -67,6 +67,11 @@ describe("the decision table", () => {
     const step = judgeIsolatedRun(facts);
     expect(step.result).toBe(ISOLATED_RESULT.refused);
     expect(step.code).toBe(code);
+  });
+
+  it("silent says whether a note was linked", () => {
+    expect(judgeIsolatedRun({ ...WELL, silent: true }).detail).toBe("notes held on 1 MIDI input and a sine at its audio inputs");
+    expect(judgeIsolatedRun({ ...WELL, silent: true, midiInputsLinked: 0 }).detail).toBe("no note input to link: a sine played at its audio inputs");
   });
 
   it("a machine that could not run it decides nothing about the plugin", () => {
@@ -201,6 +206,13 @@ describe("the completion of a record already judged", () => {
     expect(done?.step.result).toBe(ISOLATED_RESULT.isolated);
     const isolatedSteps = (JSON.parse(readFileSync(path, "utf8")) as QualificationRecord).run?.steps.filter((s) => s.step === "isolated");
     expect(isolatedSteps).toEqual([done?.step]);
+    // silence from the tool that played its note before the link says nothing; silence that heard the notes does
+    const { midiInputsLinked: _linked, ...beforeTheLink } = WELL;
+    const unheard = judgeIsolatedRun({ ...beforeTheLink, silent: true });
+    const old = record({ run: { id: "r", steps: [...baseSteps(record()), unheard] } });
+    expect(completeIsolated(write(old, "unheard.qualification.json"), old, "urn:p", CELL, () => WELL, {})?.step.result).toBe(ISOLATED_RESULT.isolated);
+    const heard = record({ run: { id: "r", steps: [...baseSteps(record()), judgeIsolatedRun({ ...WELL, silent: true })] } });
+    expect(completeIsolated(write(heard, "heard.qualification.json"), heard, "urn:p", CELL, () => WELL, {})).toBeUndefined();
     const refused = judgeIsolatedRun({ started: true, added: false });
     const seen = record({ run: { id: "r", steps: [...baseSteps(record()), refused] } });
     expect(completeIsolated(write(seen, "seen.qualification.json"), seen, "urn:p", CELL, () => WELL, {})).toBeUndefined();
