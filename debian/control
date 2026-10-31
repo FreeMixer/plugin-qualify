@@ -10,7 +10,7 @@ Build-Depends: debhelper-compat (= 13),
                liblilv-dev,
                lv2-dev,
                libjack-jackd2-dev,
-               plugin-hostd-dev (>= 0.1.4),
+               plugin-hostd-dev (>= 0.15.3),
                libomx-contract-dev (>= 3.4.0),
                libomx-clap-lv2-dev (>= 0.13.0),
                libomxdsp-dev (>= 0.21.0)

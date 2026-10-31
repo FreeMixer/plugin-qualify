@@ -309,6 +309,20 @@ export interface MemoryFootprint {
   readonly unmeasuredDetail?: string;
 }
 
+/** The scheduling a cost was timed under, read on the thread that ran the clock. */
+export interface TimingScheduling {
+  /** One of plugin-hostd's probe policy names: `other`, `fifo`... */
+  readonly policy: string;
+  readonly priority: number;
+}
+
+/** The scheduling a measurer printed, or `undefined` unless both its fields are there. */
+export function readTimingScheduling(value: unknown): TimingScheduling | undefined {
+  if (!isRecord(value) || typeof value.policy !== "string" || value.policy === "") return undefined;
+  const priority = finiteNumber(value.priority);
+  return priority === undefined ? undefined : { policy: value.policy, priority };
+}
+
 /** One rate's cost reading. Per SAMPLE, so it is independent of the block size. */
 export interface CostAtRate {
   readonly nsPerSampleMedian: number;
@@ -327,6 +341,8 @@ export interface CostAtRate {
   readonly silentOutput?: boolean;
   /** 1.4: for an instrument, the notes held while it was timed. Absent for an effect. */
   readonly voices?: VoicesHeld;
+  /** What these blocks were timed under; a figure from before the measurers printed it has none. */
+  readonly scheduling?: TimingScheduling;
   /** 1.6: this instance's memory footprint at the same rate. */
   readonly memory?: MemoryFootprint;
 }
@@ -964,6 +980,7 @@ function readCostAtRate(value: unknown): CostAtRate | undefined {
     ...optional("warmupNsPerSampleMedian", finiteNumber(value.warmupNsPerSampleMedian)),
     ...optional("silentOutput", booleanValue(value.silentOutput)),
     ...optional("voices", readVoicesHeld(value.voices)),
+    ...optional("scheduling", readTimingScheduling(value.scheduling)),
     ...optional("memory", readMemoryFootprint(value.memory)),
   };
 }

@@ -21,7 +21,7 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(jack)
-BuildRequires: pkgconfig(plugin-hostd) >= 0.1.4
+BuildRequires: pkgconfig(plugin-hostd) >= 0.15.3
 BuildRequires: pkgconfig(omx-contract) >= 3.4.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
