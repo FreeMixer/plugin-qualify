@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.0
+Version:        0.18.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,13 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.1-1
+- --rejudge derives every record's verdicts, tiers and pin word again from the figures it holds, under this version's rules, measuring nothing: an RT violation is conditional and isolated, and the record says when the figures were measured and by which runner. An LV2 record with no adapter run reads unknown and owes that run, listed in qualify-owed.json. A second run changes nothing.
+- --memory-only takes only the footprint of each plugin at 48000/128 and 48000/256, through the probe runner under the usual limits, and merges it into its record, leaving every other figure as it was. A leak needs a soak and is reported as not measured.
+- An LV2 plugin's run under the adapter also decides its verdict on the Raspberry Pi boards.
+- --adapter-only runs each LV2 plugin only under omx-clap-host's LV2 adapter, at 48000/128 and 48000/256 on private JACK servers, and merges the block with the host versions into its record, leaving every other figure as it was. A crash or a timeout is a recorded outcome; a pass cut short resumes. --rejudge then clears the list of owed runs and gives those records their real verdicts.
+- An RT-unsafe plugin is offered on the isolated tier: tiers.offeredOn holds isolated for a conditional verdict, with runsAlone on the tier.
+
 * Fri Oct 30 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.0-1
 - Qualification measures and judges memory: the footprint of an instance, its growth over a soak and a hard limit, read against each host's budget as hosting.memory.* verdicts (#114). Needs plugin-hostd 0.15.3 and omx-clap-core 0.25.1.
 - An allocation, lock or syscall while an instrument is played rates conditional, isolated in the pin like the same violation in the run; it is no longer refused. A process error under notes is still unsuitable (#196).
