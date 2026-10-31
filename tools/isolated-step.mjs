@@ -107,6 +107,7 @@ async function main() {
     xruns: heard.xruns,
     finite: heard.finite,
     silent: heard.silent,
+    midiInputsLinked: heard.midiInputsLinked,
     ...(ticksBefore === undefined || ticksAfter === undefined ? {} : { cpuPercent: ((ticksAfter - ticksBefore) * 100000) / CLOCK_TICKS / windowMs }),
   };
 }
