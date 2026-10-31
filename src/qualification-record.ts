@@ -43,6 +43,28 @@ export interface RecordVerdict {
   readonly reasons: readonly RecordReason[];
 }
 
+/**
+ * An LV2 plugin's run under the adapter. The top is what the judge reads. `--adapter-only` adds the versions of the hosts
+ * it ran under, when, and how each cell went.
+ */
+export interface AdapterBlock {
+  readonly host: string;
+  readonly measured: boolean;
+  readonly admitted: boolean;
+  readonly code?: string;
+  readonly params: Readonly<Record<string, string | number>>;
+  readonly versions?: Readonly<Record<string, string>>;
+  readonly measuredAt?: string;
+  readonly cells?: readonly {
+    readonly rate: number;
+    readonly quantum: number;
+    readonly measured: boolean;
+    readonly admitted: boolean;
+    readonly code?: string;
+    readonly params: Readonly<Record<string, string | number>>;
+  }[];
+}
+
 /** One tier of the console as a verdict: the host it is judged under and whether the plugin qualified there. */
 export interface TierVerdict {
   readonly host: string;
@@ -50,9 +72,15 @@ export interface TierVerdict {
   readonly qualified: boolean;
   readonly rating: string;
   readonly deciding?: string;
+  /** The isolated tier of a `conditional` plugin: it is offered, and runs alone in a worker of its own, never grouped. */
+  readonly runsAlone?: true;
 }
 
-/** The console's two tiers (what the console's roster offers): offered where the verdict qualified, dimmed with the reason when neither did. */
+/**
+ * The console's two tiers (what the console's roster offers): in-process where its verdict qualified; isolated where its
+ * verdict qualified or is `conditional`, which pins `isolated` and runs alone (`runsAlone`); dimmed with the reason when
+ * neither. `qualified` stays `rating === "suitable"`, as the interchange's reader holds it.
+ */
 export interface RecordTiers {
   readonly inProcess?: TierVerdict;
   readonly isolated?: TierVerdict;
@@ -208,6 +236,8 @@ export interface RejudgedBlock {
     readonly runId: string;
     /** The footprints, when a memory-only pass took them later than the rest. */
     readonly memory?: { readonly tool: Readonly<Record<string, string>>; readonly measuredAt: string };
+    /** The adapter run, when an adapter-only pass took it later than the rest. */
+    readonly adapter?: { readonly versions: Readonly<Record<string, string>>; readonly measuredAt: string };
   };
   /** What these verdicts could not decide and left `unknown`; absent when nothing is owed. */
   readonly owes?: readonly OwedMeasurement[];
@@ -238,7 +268,7 @@ export interface QualificationRecord {
    * An LV2 plugin run under plugin-hostd's LV2 adapter (omx-clap-host), as under mod-host: admitted, or refused with
    * its code, or `measured: false` when it was not tried. Beside the verdicts, which it does not change (#223).
    */
-  readonly adapter?: { readonly host: string; readonly measured: boolean; readonly admitted: boolean; readonly code?: string; readonly params: Readonly<Record<string, string | number>> };
+  readonly adapter?: AdapterBlock;
   readonly tiers: RecordTiers;
   /** The cost reasons at each host's rate and quantum, beside the verdicts; an instrument's with the notes it held. */
   readonly cost: readonly {
@@ -314,13 +344,14 @@ function tierOf(judgment: Judgment, host: string | undefined): TierVerdict | und
 export function tiersOf(judgment: Judgment): RecordTiers {
   const inProcess = tierOf(judgment, IN_PROCESS_TIER_HOST);
   const isolated = tierOf(judgment, ISOLATED_TIER_HOST[judgment.output.plugin.format]);
+  const runsAlone = isolated?.measured === true && isolated.rating === "conditional";
   const offeredOn: ("in-process" | "isolated")[] = [];
   if (inProcess?.qualified === true) offeredOn.push("in-process");
-  if (isolated?.qualified === true) offeredOn.push("isolated");
+  if (isolated?.qualified === true || runsAlone) offeredOn.push("isolated");
   const why = [inProcess, isolated].flatMap((t) => (t === undefined ? [] : [`${t.host}: ${t.deciding ?? t.rating}`]));
   return {
     ...(inProcess === undefined ? {} : { inProcess }),
-    ...(isolated === undefined ? {} : { isolated }),
+    ...(isolated === undefined ? {} : { isolated: { ...isolated, ...(runsAlone ? { runsAlone: true as const } : {}) } }),
     offeredOn,
     ...(offeredOn.length === 0 ? { dimmed: why.length === 0 ? "no tier was judged" : why.join("; ") } : {}),
   };

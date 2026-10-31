@@ -166,6 +166,14 @@ export const PROBE_MEMORY_ONLY_ENV = "OMX_PROBE_MEMORY_ONLY";
 export const PROBE_NOTES_ENV = "OMX_PROBE_NOTES";
 export const MEMORY_PASS_PROBE_NOTES = 16;
 
+/**
+ * What `tools/mod-host-admit.mjs` is told in an adapter-only pass: how long the host has for one command, its address
+ * space (`ulimit -v`, in KB) and the directory for the state files of the plugin it loads.
+ */
+export const ADMIT_STEP_MS_ENV = "OMX_ADMIT_STEP_MS";
+export const ADMIT_ADDRESS_KB_ENV = "OMX_ADMIT_ADDRESS_KB";
+export const ADMIT_STATE_DIR_ENV = "OMX_ADMIT_STATE_DIR";
+
 /** Seconds one `.clap` may take to qualify at every rate before the prober is killed. */
 export const CLAP_QUALIFY_TIMEOUT_S = 120;
 

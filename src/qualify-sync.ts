@@ -18,7 +18,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -34,6 +34,7 @@ import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
+import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./qualify-adapter-pass.js";
 import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { writeQualification, type NotMeasured } from "./qualification-record.js";
@@ -136,6 +137,8 @@ export interface SyncArgs {
   readonly rejudge: boolean;
   /** `--memory-only`: the footprint of each recorded plugin at the Pi's cells, merged into its record. */
   readonly memoryOnly: boolean;
+  /** `--adapter-only`: the run of each LV2 plugin under the adapter at the Pi's cells, merged into its record. */
+  readonly adapterOnly: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -154,6 +157,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let refreshPinsOnly = false;
   let rejudge = false;
   let memoryOnly = false;
+  let adapterOnly = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -164,6 +168,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--refresh-pins") refreshPinsOnly = true;
     else if (a === "--rejudge") rejudge = true;
     else if (a === "--memory-only") memoryOnly = true;
+    else if (a === "--adapter-only") adapterOnly = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -173,9 +178,9 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  if (rejudge && (memoryOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --force and --refresh-pins" };
-  if (memoryOnly && refreshPinsOnly) return { ok: false, error: "--memory-only and --refresh-pins are two different runs" };
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, help, values } };
+  if (rejudge && (memoryOnly || adapterOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --adapter-only, --force and --refresh-pins" };
+  if ([memoryOnly, adapterOnly, refreshPinsOnly].filter(Boolean).length > 1) return { ok: false, error: "--memory-only, --adapter-only and --refresh-pins are different runs: one at a time" };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, adapterOnly, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -191,6 +196,7 @@ export function syncHelpText(): string {
     "  --refresh-pins                      only bring every pin's files up to the ones plugin-hostd names, measuring nothing",
     "  --rejudge                           derive every record's verdicts, tiers and pin again from the figures it holds; measures nothing",
     "  --memory-only                       measure only the footprint of each recorded plugin at the Pi's cells and merge it; with --force, those already merged too",
+    "  --adapter-only                      run each LV2 plugin only under omx-clap-host's LV2 adapter at the Pi's cells, on private JACK servers, and merge it; with --force, those already done too",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
     ...rows,
@@ -298,6 +304,40 @@ export interface SyncItem {
   readonly files: readonly string[];
   /** The LV2 plugin's uri. */
   readonly uri?: string;
+  /** The LV2 plugin's binary as lilv loads it, an absolute path that may lie outside `root` (a complement's). */
+  readonly binary?: string;
+}
+
+/** One LV2 plugin as lilv resolves it over the whole search path: the bundle its version rule takes, and its binary. */
+export interface Lv2Resolved {
+  readonly uri: string;
+  readonly bundle: string;
+  readonly binary?: string | null;
+}
+
+/** The bundles lilv takes over `dirs`, or why it could not say. A stand-in in tests. */
+export type Lv2Resolve = (dirs: readonly string[]) => readonly Lv2Resolved[] | { readonly problem: string };
+
+/** lilv itself, one world over the whole search path (tools/lv2_resolve.py), as every host built on it resolves (#199). */
+export const LILV_RESOLVE: Lv2Resolve = (dirs) => {
+  const r = spawnSync("python3", [join(toolsDir(), "lv2_resolve.py")], {
+    encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 64 << 20, env: { ...process.env, LV2_PATH: dirs.join(":") },
+  });
+  if (r.error !== undefined || r.status !== 0) return { problem: (r.stderr ?? "").trim().split("\n").pop() || (r.error?.message ?? `exit ${String(r.status)}`) };
+  try {
+    return (JSON.parse(r.stdout) as { plugins: Lv2Resolved[] }).plugins;
+  } catch (e) {
+    return { problem: `lv2_resolve.py printed no JSON: ${(e as Error).message}` };
+  }
+};
+
+/** Whether `path` exists and is, through its links, the file `target` is. */
+function linksTo(path: string, target: string): boolean {
+  try {
+    return realpathSync(path) === realpathSync(target);
+  } catch {
+    return false;
+  }
 }
 
 const CLAP_SUFFIX = ".clap";
@@ -341,9 +381,13 @@ function clapFiles(dir: string, seen: Set<string>, problems: string[]): string[]
  * LV2 directories that declares it, as plugin-hostd finds it. A directory that cannot be read is a problem named, and
  * the others are still walked.
  */
-export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">): { items: SyncItem[]; problems: string[] } {
+export function discoverSyncItems(
+  settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">,
+  lv2Resolve?: Lv2Resolve,
+): { items: SyncItem[]; problems: string[]; notes: string[] } {
   const items: SyncItem[] = [];
   const problems: string[] = [];
+  const notes: string[] = [];
   const seen = new Set<string>();
   const clap = new Set<string>();
   for (const dir of settings.clapDirs) {
@@ -354,6 +398,11 @@ export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clap
       items.push({ key: `clap:${path}`, format: "clap", root: dirname(path), files: [basename(path)] });
     }
   }
+  // the bundle lilv takes for each plugin uri; without lilv, the first bundle found (and the log says so)
+  const resolved = lv2Resolve === undefined || settings.lv2Dirs.length === 0 ? undefined : lv2Resolve(settings.lv2Dirs);
+  const taken = new Map<string, Lv2Resolved>();
+  if (resolved !== undefined && "problem" in resolved) notes.push(`lilv could not resolve the LV2 plugins (${resolved.problem}); each is keyed by the first bundle found`);
+  else if (resolved !== undefined) for (const p of resolved) taken.set(p.uri, p);
   const lv2 = new Set<string>();
   for (const dir of settings.lv2Dirs) {
     let bundles: string[];
@@ -372,13 +421,20 @@ export function discoverSyncItems(settings: Pick<SyncSettings, "lv2Dirs" | "clap
         continue;
       }
       for (const p of manifestPlugins(ttl)) {
+        const lilv = taken.get(p.uri);
+        // lilv takes another bundle for this uri: this one is not the plugin a host loads
+        if (lilv !== undefined && resolve(lilv.bundle) !== resolve(bundle)) continue;
         if (lv2.has(p.uri)) continue;
         lv2.add(p.uri);
-        items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files: ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")], uri: p.uri });
+        const binary = lilv?.binary ?? (p.binary === undefined ? undefined : join(bundle, p.binary));
+        const files = ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")];
+        // a binary named by an absolute IRI (a complement's) is tracked through the bundle's link to it, when it has one
+        if (binary !== undefined && !files.includes(basename(binary)) && linksTo(join(bundle, basename(binary)), binary)) files.push(basename(binary));
+        items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files, uri: p.uri, ...(binary === undefined ? {} : { binary }) });
       }
     }
   }
-  return { items, problems };
+  return { items, problems, notes };
 }
 
 // --- the file set -----------------------------------------------------------------------------------------------------
@@ -525,6 +581,28 @@ export function recordedAsIs(item: SyncItem, entry: SyncEntry | undefined): { sa
   if (now === undefined) return { same: false };
   const same = now.length === entry.files.length && now.every((f) => entry.files.some((e) => e.path === f.path && e.sha256 === f.sha256));
   return { same, files: now };
+}
+
+/**
+ * The entry of an LV2 plugin a host now loads from another bundle than it was qualified in, when its binary is the
+ * same bytes (#199): the entry with the new bundle and the new bundle's file digests, its verdicts and records kept.
+ * `undefined` when the item is not that case: not LV2, no entry, the same bundle, a binary that cannot be read, or one
+ * whose bytes differ from the recorded binary's (then it is measured again).
+ */
+export function sameBinaryElsewhere(item: SyncItem, entry: SyncEntry | undefined): SyncEntry | undefined {
+  if (item.format !== "lv2" || entry === undefined || item.binary === undefined || resolve(entry.root) === resolve(item.root)) return undefined;
+  const was = entry.files.find((f) => basename(f.path) === basename(item.binary!));
+  if (was === undefined) return undefined;
+  let now: string;
+  try {
+    now = fileSha256(item.binary);
+  } catch {
+    return undefined;
+  }
+  if (now !== was.sha256) return undefined;
+  const files = digestFiles(item.root, item.files);
+  if (files === undefined) return undefined;
+  return { ...entry, root: item.root, files };
 }
 
 // --- one item ---------------------------------------------------------------------------------------------------------
@@ -1018,6 +1096,8 @@ export interface SyncSummary {
   readonly memoryOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
   /** Every plugin the run measured was unmeasured for this one reason of the machine ({@link machineReason}): the run failed. */
   readonly machineFailure?: string;
+  /** `--adapter-only`: the plugins run, those done already at these host versions, and those whose host could not be run. */
+  readonly adapterOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
 }
 
 /**
@@ -1054,7 +1134,7 @@ export function descriptorAccessProblems(dir: string): string[] {
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}${s.adapterOnly === undefined ? "" : `, adapter run ${String(s.adapterOnly.measured)}, already ${String(s.adapterOnly.already)}, failed ${String(s.adapterOnly.failed)}`}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
@@ -1104,10 +1184,16 @@ export interface SyncRunOptions {
   readonly rejudge?: boolean;
   /** `--memory-only`: take only the footprints; `force` takes those already merged again. */
   readonly memoryOnly?: boolean;
+  /** `--adapter-only`: take only the adapter runs; `force` takes those already done again. */
+  readonly adapterOnly?: boolean;
+  /** Stand-ins for the pass's hosts, in tests. */
+  readonly adapterPass?: AdapterPassOptions;
   /** The run of `plugin-hostd --pin-files`, a stand-in in tests. */
   readonly pinFilesRun?: PinFilesRun;
   /** The run of the probe runner in a memory-only pass, a stand-in in tests. */
   readonly probeRun?: ProbeRun;
+  /** How LV2 plugins are resolved to the bundle a host loads: lilv itself unless a test stands in (#199). */
+  readonly lv2Resolve?: Lv2Resolve;
   /** False under `--no-wait`: a run in progress is not waited for; the holder runs once more at its end instead. */
   readonly wait?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -1165,6 +1251,7 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     ...(refreshed === 0 ? {} : { refreshed }),
     ...(b.rejudge === undefined ? (a.rejudge === undefined ? {} : { rejudge: a.rejudge }) : { rejudge: b.rejudge }),
     ...(b.memoryOnly === undefined ? (a.memoryOnly === undefined ? {} : { memoryOnly: a.memoryOnly }) : { memoryOnly: b.memoryOnly }),
+    ...(b.adapterOnly === undefined ? (a.adapterOnly === undefined ? {} : { adapterOnly: a.adapterOnly }) : { adapterOnly: b.adapterOnly }),
   };
 }
 
@@ -1185,7 +1272,7 @@ function scannedBy(settings: Pick<SyncSettings, "lv2Dirs" | "clapDirs">, entry: 
 async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promise<SyncSummary> {
   const log = options.log ?? (() => {});
   const env = options.env ?? process.env;
-  log(options.rejudge === true ? "re-judge begins: nothing is measured" : options.memoryOnly === true ? "memory-only pass begins" : options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
+  log(options.rejudge === true ? "re-judge begins: nothing is measured" : options.memoryOnly === true ? "memory-only pass begins" : options.adapterOnly === true ? "adapter-only pass begins" : options.refreshOnly === true ? "pin refresh begins" : "sync run begins");
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
@@ -1202,6 +1289,12 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       if (JSON.stringify(r.state) !== JSON.stringify(fresh.state)) writeFileWhole(settings.stateFile, `${JSON.stringify(r.state, null, 1)}\n`);
       const summary = await sendRefreshed(settings, r.state, fresh.refreshed.length, started, log);
       return { ...summary, rejudge: { changed: r.changed, unchanged: r.unchanged, owing: r.owing.length } };
+    }
+    if (options.adapterOnly === true) {
+      const r: AdapterPassResult = adapterPass(ctx, fresh.state, { ...options.adapterPass, force: options.force === true });
+      log(`adapter runs under ${Object.entries(r.versions).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+      const summary = await sendRefreshed(settings, fresh.state, fresh.refreshed.length, started, log);
+      return { ...summary, adapterOnly: { measured: r.measured, already: r.already, failed: r.failed } };
     }
     if (options.memoryOnly === true) {
       const r: MemoryPassResult = memoryPass(ctx, fresh.state, { force: options.force === true, ...(options.probeRun === undefined ? {} : { run: options.probeRun }) });
@@ -1227,8 +1320,9 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     // a change made while a pass ran is caught by one more pass, a few at most
     for (let pass = 0; pass < 3; pass++) {
       const signature = directoriesSignature(dirs);
-      const { items, problems } = discoverSyncItems(settings);
+      const { items, problems, notes } = discoverSyncItems(settings, options.lv2Resolve ?? LILV_RESOLVE);
       for (const p of problems) log(p);
+      if (pass === 0) for (const n of notes) log(n);
       unreadable = problems.length > 0;
       const found = new Set(items.map((i) => i.key));
       const entries: Record<string, SyncEntry> = {};
@@ -1245,6 +1339,19 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
         const retry = recorded.same ? entries[item.key]!.plugins.map(machineReason).find((r) => r !== undefined) : undefined;
         if (recorded.same && options.force !== true && retry === undefined) {
           if (pass === 0) count.skipped += entries[item.key]!.plugins.length;
+          continue;
+        }
+        // an LV2 plugin a host now loads from another bundle with the same binary (a complement that restates its TTL,
+        // #199): the record stands, keyed by its uri and its binary; only the bundle, its files and the pins' files move
+        const moved = options.force === true ? undefined : sameBinaryElsewhere(item, entries[item.key]);
+        if (moved !== undefined) {
+          entries[item.key] = { ...moved, plugins: moved.plugins.map((p) => ({ ...p, ...(p.pin === undefined ? {} : { pin: withHostdFiles(ctx, p.pin) }) })) };
+          if (item.format === "lv2") lv2Pinned.push(...entries[item.key]!.plugins.filter((p) => p.pin !== undefined).map((p) => p.uri));
+          if (pass === 0) count.skipped += moved.plugins.length;
+          log(`${item.key}: loaded from ${item.root} now, with the binary it was qualified with; its record stands and its pin's files follow the bundle`);
+          state = { schema: SYNC_STATE_SCHEMA, entries };
+          writeFileWhole(settings.stateFile, `${JSON.stringify(state, null, 1)}\n`);
+          writeFileWhole(settings.pinFile, syncPinsText(state));
           continue;
         }
         if (recorded.same && retry !== undefined) log(`${item.key}: unmeasured last run by the machine (${retry}); measured again`);
