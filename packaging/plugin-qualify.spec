@@ -135,6 +135,13 @@ fi
   Pianoteq 9 and six others can have a record; this needs plugin-hostd
   0.15.4 (#267, plugin-hostd#239).
 - Each cost figure prints the scheduling policy it was timed under (#214).
+- verdict=isolated means the plugin was seen running alone: a plugin rated
+  conditional, or one that crashed or hung in the probe, takes an isolated
+  step in the same pass, on a private JACK server under a plugin-hostd of
+  its own, with a sine through it for 3 seconds. Every record carries the
+  steps that judged it, and a new record missing a step is refused (#249).
+- A record from before the steps keeps its word and owes the step, listed in
+  qualify-owed.json; --isolated-only runs only that step (#249).
 
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.1-1
 - --rejudge derives every record's verdicts, tiers and pin word again from the figures it holds, under this version's rules, measuring nothing: an RT violation is conditional and isolated, and the record says when the figures were measured and by which runner. An LV2 record with no adapter run reads unknown and owes that run, listed in qualify-owed.json. A second run changes nothing.
