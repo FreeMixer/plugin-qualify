@@ -23,7 +23,9 @@
 #include <lv2/midi/midi.h>
 #include <lv2/urid/urid.h>
 
-#ifdef FIXTURE_ALLOCATES_ON_NOTE
+#ifdef FIXTURE_DRUM
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth-drum"
+#elif defined FIXTURE_ALLOCATES_ON_NOTE
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth-alloc"
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
 static void *(*volatile fixture_malloc)(size_t) = malloc;
