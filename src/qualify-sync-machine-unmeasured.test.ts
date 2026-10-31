@@ -96,17 +96,17 @@ describe("a plugin the machine left unmeasured (#192)", () => {
     rmSync(m.deny);
     const again = await runSync(r.settings, { env: m.env, log: () => {} });
     expect(again).toMatchObject({ skipped: 0, qualified: 2 });
-    expect(again.machineFailure).toBeUndefined();
+    expect(again?.machineFailure).toBeUndefined();
     const third = await runSync(r.settings, { env: m.env, log: () => {} });
     expect(third).toMatchObject({ skipped: 2, qualified: 0 });
   });
 
   it("only the machine's reasons count: an errno, or a measurement that wrote no document", () => {
-    const u = (code: string, detail?: string) => ({ uri: "x", outcome: "unmeasured" as const, code, ...(detail === undefined ? {} : { detail }) });
+    const u = (code: string, detail?: string) => ({ outcome: "unmeasured" as const, code, ...(detail === undefined ? {} : { detail }) });
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe exited 2 measuring x, and wrote no document: open: ENOSPC"))).toBe("ENOSPC");
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe exited 2 measuring x, and wrote no document"))).toBe("the measurement wrote no document");
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe: no such plugin x"))).toBeUndefined();
     expect(machineReason(u("probe.limit.not-implemented"))).toBeUndefined();
-    expect(machineReason({ uri: "x", outcome: "qualified" })).toBeUndefined();
+    expect(machineReason({ outcome: "qualified" })).toBeUndefined();
   });
 });
