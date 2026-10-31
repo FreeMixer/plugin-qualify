@@ -719,11 +719,13 @@ function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgmen
       const step = judgeIsolatedRun(runner(uri, isolatedCell(record, host), ctx.env));
       steps.push(step);
       pin = pinAfterStep(pin, step);
+      // a crash or a hang in the probe stays what it was unless the step saw the plugin run: only a rating waited on the step
       if (step.result === ISOLATED_RESULT.refused) {
-        outcome = "refused";
-        code = step.code;
+        if (outcome === "qualified") {
+          outcome = "refused";
+          code = step.code;
+        }
       } else if (step.result === ISOLATED_RESULT.notRun) {
-        // a crash in the probe stays what it was: only a rating waited on the step
         if (outcome === "qualified") {
           outcome = "unmeasured";
           code = step.code;
