@@ -82,7 +82,7 @@ export interface ModHostRun {
    * An instrument under the adapter, played one held note at its JACK ports: the peak in linear magnitude, or why it could
    * not be read. Absent for a plugin that is no instrument, and for any plugin under mod-host.
    */
-  readonly sound?: { readonly peak?: number; readonly unmeasured?: string };
+  readonly sound?: { readonly peak?: number; readonly problem?: string };
 }
 
 /** At or under this magnitude (-120 dBFS) a held note is taken as digital silence: clap-qualify's own SILENCE. */
@@ -118,8 +118,8 @@ export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAd
   }
   if (run.steps.length === 0) return refused(host, "no-answer");
   if (run.sound !== undefined) {
-    const { peak, unmeasured } = run.sound;
-    if (peak === undefined) return { host, measured: true, admitted: false, code: ADAPTER_LEVEL_UNMEASURED_CODE, params: { problem: unmeasured ?? "no figure" } };
+    const { peak, problem } = run.sound;
+    if (peak === undefined) return { host, measured: true, admitted: false, code: ADAPTER_LEVEL_UNMEASURED_CODE, params: { problem: problem ?? "no figure" } };
     if (!(peak > SILENT_PEAK)) return { host, measured: true, admitted: false, code: ADAPTER_SILENT_CODE, params: { peak } };
   }
   return admitted(host);

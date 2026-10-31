@@ -347,7 +347,7 @@ describe("the run under plugin-hostd's LV2 adapter", () => {
       expect(judged({ peak: 2e-6 }).verdict).toMatchObject({ qualified: true });
     });
     it("a level that could not be read is not read as sound", () => {
-      expect(judged({ unmeasured: "no jack_peak" }).verdict).toMatchObject({ rating: "unknown", qualified: false, deciding: "omx-clap-host.level-unmeasured" });
+      expect(judged({ problem: "no jack_peak" }).verdict).toMatchObject({ rating: "unknown", qualified: false, deciding: "omx-clap-host.level-unmeasured" });
       expect(judged({}).verdict).toMatchObject({ qualified: false, deciding: "omx-clap-host.level-unmeasured" });
     });
     it("a plugin that was not played stands on its measurement", () => {
@@ -407,7 +407,7 @@ net.createServer((c) => c.on("data", (d) => {
     });
     it("a meter that is not there is said, not taken for sound", () => {
       const { run } = admit({ STAND_CLASS: "instrument", OMX_JACK_PEAK: join(dir, "absent") });
-      expect(run.sound?.unmeasured).toBeDefined();
+      expect(run.sound?.problem).toBeDefined();
       expect(classifyProtocolRun(ADAPTER_HOST, run).code).toBe("omx-clap-host.level-unmeasured");
     });
     it("a plugin of no instrument class is not played", () => {

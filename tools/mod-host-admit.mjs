@@ -70,10 +70,10 @@ function outputPorts(reply) {
 const PEAK_TOOL_DIRS = [fileURLToPath(new URL("../native/build/", import.meta.url)), "/usr/libexec/plugin-qualify/", "/usr/lib/plugin-qualify/"];
 const peakTool = () => process.env.OMX_JACK_PEAK || PEAK_TOOL_DIRS.map((d) => `${d}jack_peak`).find((p) => existsSync(p));
 
-// the peak on `ports` while `during` runs: { peak } in linear magnitude, or { unmeasured } with why
+// the peak on `ports` while `during` runs: { peak } in linear magnitude, or { problem } with why
 async function peakDuring(ports, during) {
   const tool = peakTool();
-  if (tool === undefined) return { unmeasured: "no jack_peak" };
+  if (tool === undefined) return { problem: "no jack_peak" };
   const meter = spawn(tool, ports, { stdio: ["pipe", "pipe", "pipe"] });
   let out = "";
   let err = "";
@@ -88,7 +88,7 @@ async function peakDuring(ports, during) {
   if (!out.includes("ready")) {
     meter.kill("SIGKILL");
     await ended;
-    return { unmeasured: err.trim() || "jack_peak did not start" };
+    return { problem: err.trim() || "jack_peak did not start" };
   }
   await during();
   meter.stdin.end();
@@ -97,7 +97,7 @@ async function peakDuring(ports, during) {
   try {
     return { peak: JSON.parse(out.slice(out.indexOf("ready") + 5)).peak };
   } catch {
-    return { unmeasured: err.trim() || "jack_peak gave no figure" };
+    return { problem: err.trim() || "jack_peak gave no figure" };
   }
 }
 
@@ -131,7 +131,7 @@ async function main() {
       const ports = outputPorts((await ask(`audio_ports ${INSTANCE}`)) ?? "");
       sound =
         ports.length === 0
-          ? { unmeasured: "no output port" }
+          ? { problem: "no output port" }
           : await peakDuring(ports, async () => {
               await ask(NOTE_ON);
               await sleep(NOTE_WINDOW_MS);
