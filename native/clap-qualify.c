@@ -424,6 +424,7 @@ struct port_set {
 };
 
 #include "rss-kb.h"
+#include "timing-sched.h"
 
 /* how the cost arm chose how many notes to hold */
 enum voice_basis { BASIS_NONE, BASIS_DECLARED, BASIS_PROBE };
@@ -439,6 +440,7 @@ struct cost_at {
   enum voice_basis basis;
   int has_capacity;
   uint32_t capacity;
+  struct timing_sched sched; /* read on the timing thread, as the blocks were timed */
 };
 
 /* one rate of the footprint: what the resident set grew by at each step of one instance's life, in KB, and a second
@@ -925,6 +927,7 @@ static void cost_rate(const clap_plugin_t *p, double rate, uint32_t frames, uint
   uint32_t seed = 0x636f73u;
   const uint32_t total = COST_WARMUP_BLOCKS + blocks;
   int64_t steady = 0;
+  c->sched = timing_sched_read();
   for (uint32_t b = 0; b < total; b++) {
     if (b == 0)
       for (uint32_t k = 0; k < c->held; k++) note_key(clap_dialect, 0, 1, held_key(k, c->held), HELD_VELOCITY);
@@ -1214,6 +1217,7 @@ static void put_cost(const struct facts *f, uint32_t frames) {
     } else {
       fprintf(g_out, "\"nsPerSampleMedian\":%.6g,\"nsPerSampleP95\":%.6g,\"nsPerSampleMin\":%.6g,\"nsPerSampleMax\":%.6g,"
               "\"warmupNsPerSampleMedian\":%.6g,\"blocks\":%u", c->median, c->p95, c->min, c->max, c->warmup_median, c->blocks);
+      if (c->sched.policy) fprintf(g_out, ",\"scheduling\":{\"policy\":\"%s\",\"priority\":%d}", c->sched.policy, c->sched.priority);
     }
     if (f->cost_notes && (c->basis != BASIS_NONE || c->has_capacity)) {
       fprintf(g_out, ",\"voices\":{");

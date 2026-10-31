@@ -34,7 +34,7 @@ PKG_CONFIG ?= pkg-config
 BUILD ?= build
 
 CLAP_REF := 1.2.6
-PLUGIN_HOSTD_REF := v0.7.0
+PLUGIN_HOSTD_REF := v0.15.3
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
 OMX_CONTRACT_VERSION := 3.4.0
@@ -109,11 +109,11 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
-$(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h | $(BUILD)
+$(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
-LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h
+LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)

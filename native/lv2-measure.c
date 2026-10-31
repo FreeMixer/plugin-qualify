@@ -693,6 +693,7 @@ static int count_threads(void) {
 
 /* A plugin that leaks shows in the resident set long before it crashes. */
 #include "rss-kb.h"
+#include "timing-sched.h"
 
 static const char *rt_kind_name(int k) {
   switch (k) {
@@ -883,6 +884,7 @@ struct cost_at {
   const char *detail;
   double median, p95, min, max, warmup_median;
   uint32_t blocks, held;
+  struct timing_sched sched; /* read on the timing thread, as the blocks were timed */
 };
 
 static int64_t now_ns(void) {
@@ -1012,6 +1014,7 @@ static void measure_cost(struct host *H, double rate, uint32_t block, struct cos
     return;
   }
   lilv_instance_activate(r->inst);
+  C->sched = timing_sched_read();
   unsigned seed = 0x636f73u;
   for (uint32_t b = 0; b < total; b++) {
     rig_sweep(r, (float)((b * 7u) % 101u) / 100.0f, 0);
@@ -1179,6 +1182,7 @@ static void emit_cost(double rate, const struct cost_at *C, uint32_t block, int 
     fprintf(jout, "\"nsPerSampleMedian\":%.6g,\"nsPerSampleP95\":%.6g,\"nsPerSampleMin\":%.6g,\"nsPerSampleMax\":%.6g,"
                   "\"warmupNsPerSampleMedian\":%.6g,\"blocks\":%u",
             C->median, C->p95, C->min, C->max, C->warmup_median, C->blocks);
+    if (C->sched.policy) fprintf(jout, ",\"scheduling\":{\"policy\":\"%s\",\"priority\":%d}", C->sched.policy, C->sched.priority);
   }
   if (instrument && C->held) fprintf(jout, ",\"voices\":{\"held\":%u,\"basis\":\"probe\"}", C->held);
   fprintf(jout, ",\"memory\":{");

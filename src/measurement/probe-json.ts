@@ -35,7 +35,7 @@ import type {
   PluginTopology,
 } from "./format.js";
 import { booleanValue, finiteNumber, isRecord, nonEmptyString, optional, positiveNumber } from "./guards.js";
-import { readVoicesHeld } from "./format.js";
+import { readTimingScheduling, readVoicesHeld } from "./format.js";
 import type { MeasurementDimension } from "./vocabulary.js";
 
 /** One free-text prober failure, and the vocabulary term it means. */
@@ -201,6 +201,7 @@ function readCost(value: unknown): CostMeasurement | undefined {
         ...optional("warmupNsPerSampleMedian", finiteNumber(reading.warmupNsPerSampleMedian)),
         ...optional("silentOutput", booleanValue(reading.silentOutput)),
         ...optional("voices", readVoicesHeld(reading.voices)),
+        ...optional("scheduling", readTimingScheduling(reading.scheduling)),
       };
     }
   }
