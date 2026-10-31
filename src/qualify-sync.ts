@@ -39,7 +39,7 @@ import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingStep
 import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
-import { DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, MEMORY_PASS_PROBE_NOTES, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
+import { ADMIT_STEP_MS_ENV, DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, MEMORY_PASS_PROBE_NOTES, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
 
@@ -704,6 +704,9 @@ function writeUnmeasuredRecord(ctx: SyncContext, item: SyncItem, files: readonly
   return path;
 }
 
+/** The step's environment: each of its commands has the sync's budget. */
+const isolatedEnv = (ctx: SyncContext): Readonly<Record<string, string | undefined>> => ({ ...ctx.env, [ADMIT_STEP_MS_ENV]: String(ctx.settings.budgetS * 1000) });
+
 /** Each judged run of a pass as the plugins it qualified: the record written, the pin taken, the outcome. */
 function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgment: Judgment }[], describeProblem?: string): SyncPlugin[] {
   const host = ctx.settings.hostProfile.id;
@@ -716,7 +719,7 @@ function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgmen
       // in this same pass: a record's verdict=isolated is a run seen alone, never a rating alone
       const uri = pin?.uri ?? judgment.output.plugin.id;
       const runner = ctx.isolatedRunner ?? spawnedIsolatedRunner();
-      const step = judgeIsolatedRun(runner(uri, isolatedCell(record, host), ctx.env));
+      const step = judgeIsolatedRun(runner(uri, isolatedCell(record, host), isolatedEnv(ctx)));
       steps.push(step);
       pin = pinAfterStep(pin, step);
       // a crash or a hang in the probe stays what it was unless the step saw the plugin run: only a rating waited on the step
@@ -881,7 +884,7 @@ export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly sta
           ctx.log(`${p.uri}: its record does not read; no isolated step`);
           return p;
         }
-        const done = completeIsolated(path, record, p.pin?.uri ?? record.plugin.id, isolatedCell(record, host), runner, ctx.env);
+        const done = completeIsolated(path, record, p.pin?.uri ?? record.plugin.id, isolatedCell(record, host), runner, isolatedEnv(ctx));
         if (done === undefined) return p;
         ctx.log(`${p.uri}: isolated step ${done.step.result}${done.step.code === undefined ? "" : ` (${done.step.code})`}`);
         const pin = pinAfterStep(p.pin, done.step);

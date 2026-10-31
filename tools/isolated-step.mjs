@@ -16,7 +16,8 @@ const signalTool = process.env.OMX_ISOLATED_SIGNAL;
 const hostd = process.env.PLUGIN_HOSTD ?? "plugin-hostd";
 const port = 40000 + (process.pid % 20000);
 const CONNECT_TRIES = 50;
-const COMMAND_MS = 30000;
+// the sync gives each command its budget: a plugin that hangs in add ends there
+const COMMAND_MS = Number(process.env.OMX_ADMIT_STEP_MS ?? 0) || 30000;
 const INSTANCE = 0;
 const CLOCK_TICKS = 100;
 const WORKER_SPAWN = -503;
