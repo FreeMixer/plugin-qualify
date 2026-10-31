@@ -161,7 +161,10 @@ export const SPAWNED_ADMISSIONS: AdmissionRuns = {
     return JSON.parse(r.stdout) as ModHostRun;
   },
   jalv(uri, env) {
-    const r = spawnSync("jalv", ["-n", "plugin-qualify", uri], { encoding: "utf8", timeout: JALV_HOSTED_MS, input: "", ...(env === undefined ? {} : { env: { ...env } }) });
+    // SIGKILL at the deadline: jalv hosting some plugins ignores SIGTERM, and one stuck in jack_client_open never reaches
+    // the loop that reads the flag TERM sets, so a TERM left spawnSync waiting with it (#187). Alive at the deadline is
+    // all the verdict asks, so nothing is lost by not letting it exit cleanly.
+    const r = spawnSync("jalv", ["-n", "plugin-qualify", uri], { encoding: "utf8", timeout: JALV_HOSTED_MS, killSignal: "SIGKILL", input: "", ...(env === undefined ? {} : { env: { ...env } }) });
     const code = (r.error as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") return { installed: false, stillRunning: false, status: null, signal: null, stderr: "" };
     return { installed: true, stillRunning: code === "ETIMEDOUT", status: r.status, signal: code === "ETIMEDOUT" ? null : r.signal, stderr: r.stderr ?? "" };

@@ -24,6 +24,7 @@ import {
   type AdmittedHost,
   type JalvRun,
   type ModHostRun,
+  JALV_HOSTED_MS,
 } from "./host-admission.js";
 import { JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { judgeProbeOutput } from "./probe-judge.js";
@@ -116,6 +117,26 @@ describe("what jalv did decides", () => {
     const broken: AdmissionRuns = { modHost: () => { throw new Error("socket"); }, jalv: SKIPPED.jalv };
     expect(admitPlugin("mod-host", "urn:x", broken)).toMatchObject({ measured: false, admitted: false, code: "mod-host.admission-failed" });
   });
+});
+
+describe("the jalv run ends at its deadline (#187)", () => {
+  // jalv hosting some plugins ignores SIGTERM (973 of 979 needed SIGKILL in the desk coverage run of 2026-10-26),
+  // and one stuck in jack_client_open never reads the flag TERM sets: the deadline must end the process itself
+  it("a jalv that ignores SIGTERM is alive at the deadline, and the run returns at it", () => {
+    const bin = mkdtempSync(join(tmpdir(), "jalv-ignores-term-"));
+    try {
+      writeFileSync(join(bin, "jalv"), `#!${process.execPath}\nprocess.on("SIGTERM", () => {});\nsetInterval(() => {}, 1000);\n`);
+      chmodSync(join(bin, "jalv"), 0o755);
+      const started = Date.now();
+      const run = SPAWNED_ADMISSIONS.jalv("urn:x", { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` });
+      const took = Date.now() - started;
+      expect(run).toMatchObject({ installed: true, stillRunning: true });
+      expect(classifyJalvRun(run)).toMatchObject({ measured: true, admitted: true });
+      expect(took).toBeLessThan(JALV_HOSTED_MS + 2000);
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
 
 describe("the verdict and the tiers", () => {
