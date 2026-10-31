@@ -439,8 +439,10 @@ death on mod-host the next admission starts a fresh host. `plugin-qualify judge`
 that holds no run, so its `jalv` and `mod-host` entries stay `arm: "declaration"`.
 
 **The console's two tiers.** Every record carries `tiers`: the *in-process* verdict (`openmixer-console`) and the
-*isolated* verdict (`omx-clap-host`, an LV2 plugin through plugin-hostd's LV2 adapter), `offeredOn` (the tiers whose
-verdict qualified) and, when neither did, `dimmed` with the reason. An LV2 plugin is run once under the adapter, and
+*isolated* verdict (`omx-clap-host`, an LV2 plugin through plugin-hostd's LV2 adapter), `offeredOn` (`in-process` when its
+verdict qualified, `isolated` when its verdict qualified or is `conditional`) and, when neither, `dimmed` with the reason. A
+`conditional` plugin, RT-unsafe for instance, is offered on the isolated tier with `runsAlone: true`: it runs in a worker of
+its own, never grouped, and its pin says `isolated`. An LV2 plugin is run once under the adapter, and
 that run decides its `omx-clap-host` verdict as a mod-host run decides mod-host's. A plugin that kills the isolated
 host and qualifies in-process is offered in-process only. The tiers are judged for every plugin whether or not
 `--host-profile` names them; mod-host and jalv are run only when `--host-profile` asks for them.
@@ -625,7 +627,7 @@ with the measurement it needs:
 
 | `measurement` | code | what pays it |
 |---|---|---|
-| `adapter-run` | `qualify.sync.adapter-run-owed` | a run under the LV2 adapter; today, qualifying the plugin again |
+| `adapter-run` | `qualify.sync.adapter-run-owed` | `--adapter-only`, then `--rejudge` |
 | `host-run` | `qualify.sync.host-run-owed` | a run under that host; today, qualifying the plugin again with `--host-profile` |
 | `qualification` | `qualify.sync.bytes-changed`, `qualify.sync.figures-unreadable`, `qualify.sync.no-figures` | qualifying the plugin again; the next run does so for changed bytes |
 
@@ -648,6 +650,25 @@ declares its voice capacity holds that many notes; one that does not holds `memo
 which runner took them and when. A cell whose run failed holds a reason and no figure. A plugin whose footprints are
 already merged is skipped, so a pass cut short can be run again; `--force` takes them again. The pass judges nothing:
 `--rejudge` afterwards does.
+
+The adapter runs a record owes are taken apart as well:
+
+```bash
+plugin-qualify-sync --system --adapter-only  # the runs, at the cells a Pi runs
+plugin-qualify-sync --system --rejudge       # the verdicts they decide
+```
+
+`--adapter-only` starts each LV2 plugin the state holds under a fresh omx-clap-host, `add` then `remove` through the LV2
+adapter, once per cell: 48 kHz in blocks of 128 and 256 frames. Each cell has a private JACK server (`jackd -d dummy`, so
+`jackd` must be installed), so the device's live server is never touched. A command has `budget_s` seconds, the host's
+address space is limited as a direct spawn's is, and it is killed with whatever it started. Only the record's `adapter`
+block changes: `versions` (omx-clap-host and plugin-hostd, read from `--version`), `measuredAt`, `cells`, and at its top
+what the judge reads. A crash or a command that gets no answer in time is the plugin's recorded outcome, at the cell it
+happened, and reads `unsuitable` at the next `--rejudge`. A host that could not be run decides nothing: the block says
+`measured: false`, and the run stays owed and is tried again. The pass refuses to start, writing nothing, when a host does
+not say its version or there is no `jackd`. A plugin whose block was taken at these host versions is skipped, so a pass
+cut short can be run again; a host upgrade or `--force` takes them again. A plugin whose probe failed is skipped: it has
+no verdict a run could decide.
 
 **A leak is not measured.** Growth over time takes a soak, which this pass does not run: every record it writes names
 `memoryGrowth` under `notMeasured`, and the last line says `leaks not measured`.

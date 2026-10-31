@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import type { HostProfile } from "./host-profiles.js";
+import { ADMIT_STEP_MS_ENV } from "./qualify-declarations.js";
 
 /** The profile ids whose verdict is measured by a run. */
 export const ADMITTED_HOSTS = ["mod-host", "jalv"] as const;
@@ -147,7 +148,10 @@ const MOD_HOST_ADMIT = fileURLToPath(new URL("../tools/mod-host-admit.mjs", impo
 /** The runs against the installed hosts. */
 export const SPAWNED_ADMISSIONS: AdmissionRuns = {
   adapter(uri, env) {
-    const r = spawnSync(process.execPath, [MOD_HOST_ADMIT, uri, ADAPTER_HOST], { encoding: "utf8", timeout: MOD_HOST_ADMISSION_MS, ...(env === undefined ? {} : { env: { ...env } }) });
+    // two commands at the limit the pass gives each, and the tool's own start and end: it kills the host itself first
+    const stepMs = Number(env?.[ADMIT_STEP_MS_ENV] ?? 0);
+    const timeout = stepMs > 0 ? 2 * stepMs + 15000 : MOD_HOST_ADMISSION_MS;
+    const r = spawnSync(process.execPath, [MOD_HOST_ADMIT, uri, ADAPTER_HOST], { encoding: "utf8", timeout, killSignal: "SIGKILL", ...(env === undefined ? {} : { env: { ...env } }) });
     if (r.error !== undefined || r.status !== 0) {
       throw new Error(`${ADAPTER_HOST} admission of ${uri} gave no answer (${r.error?.message ?? `exit ${String(r.status)}`}): ${(r.stderr ?? "").trim()}`);
     }

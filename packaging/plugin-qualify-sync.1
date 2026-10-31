@@ -3,7 +3,7 @@
 plugin-qualify-sync \- qualify every plugin on the machine once, and again when its files change
 .SH SYNOPSIS
 .B plugin-qualify-sync
-[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-rejudge\fR | \fB\-\-memory\-only\fR] [\fB\-\-no\-distributed\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
+[\fB\-\-system\fR] [\fB\-\-force\fR] [\fB\-\-rejudge\fR | \fB\-\-memory\-only\fR | \fB\-\-adapter\-only\fR] [\fB\-\-no\-distributed\fR] [\fB\-\-config\fR \fIfile\fR] [\fB\-\-\fIsetting\fR \fIvalue\fR]...
 .SH DESCRIPTION
 Finds every CLAP and LV2 plugin on the search paths and gives each new or changed one the quick
 qualification: its pin, the real-time safety sweep, cost and latency, and its descriptor. A plugin whose
@@ -31,7 +31,7 @@ The last line on standard output counts the plugins: qualified, skipped, refused
 unmeasured, taken from the distributed records, and the seconds the run took.
 .PP
 After an upgrade the figures in the records are carried across and judged again rather than measured again:
-\fB\-\-rejudge\fR and \fB\-\-memory\-only\fR below.
+\fB\-\-rejudge\fR, \fB\-\-memory\-only\fR and \fB\-\-adapter\-only\fR below.
 .SH OPTIONS
 .TP
 .B \-\-system
@@ -54,6 +54,13 @@ Measure only the footprint of each plugin the state holds, at 48000 Hz in blocks
 runner under the usual limits, and merge it into its record. No other figure changes. It judges nothing; run
 \fB\-\-rejudge\fR after it. A plugin already merged is skipped; with \fB\-\-force\fR it is measured again.
 A leak needs a soak and is not measured: the record says so under \fBnotMeasured\fR, and the last line says so.
+.TP
+.B \-\-adapter\-only
+Run each LV2 plugin the state holds only under omx\-clap\-host's LV2 adapter, at 48000 Hz in blocks of 128 and 256 frames,
+each cell on a private JACK server (\fBjackd\fR must be installed; the live server is never used), and put the block in its
+record with the host versions. No other figure changes; run \fB\-\-rejudge\fR after it. A crash or a timeout is the
+plugin's recorded outcome. It refuses to start when a host does not say its version. A plugin done at these host
+versions is skipped; with \fB\-\-force\fR it is run again.
 .TP
 .B \-\-no\-distributed
 Read no distributed record.

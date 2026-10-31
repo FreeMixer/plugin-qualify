@@ -195,6 +195,8 @@ export function rejudgeRecord(record: QualificationRecord, probeBytes: Uint8Arra
   const { reasons, owes } = runsOwed(record, output, profiles);
   const judgment = judgeProbeOutput(output, profiles, { admissions: admissionsOf(record), owed: reasons });
   const memory = record.memoryRun === undefined ? {} : { memory: { tool: record.memoryRun.tool, measuredAt: record.memoryRun.measuredAt } };
+  const a = record.adapter;
+  const adapterTaken = a?.versions === undefined || a.measuredAt === undefined ? {} : { adapter: { versions: a.versions, measuredAt: a.measuredAt } };
   const { rejudged: prior, ...rest } = record;
   const next = (at: string): QualificationRecord => ({
     ...rest,
@@ -204,7 +206,7 @@ export function rejudgeRecord(record: QualificationRecord, probeBytes: Uint8Arra
     rejudged: {
       at,
       by: options.by,
-      figures: { tool: record.tool, measuredAt: record.measuredAt, runId: read.output.run.id, ...memory },
+      figures: { tool: record.tool, measuredAt: record.measuredAt, runId: read.output.run.id, ...memory, ...adapterTaken },
       ...(owes.length === 0 ? {} : { owes }),
     },
   });

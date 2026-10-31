@@ -7,111 +7,20 @@
  * pass runs through a stand-in for the probe runner that writes a document and says what it was asked; the probers as
  * built are in `memory-footprint-native.test.ts`.
  */
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { HOSTING_CODE } from "./hosting-codes.js";
-import { parsePinLine } from "./pins-file.js";
 import { fixtureJson } from "./probe-output-fixtures.js";
 import type { ProbeRun } from "./probe-runner.js";
-import { sha256Hex } from "./probe-output.js";
 import { MEMORY_PASS_NOT_MEASURED, OWED_CODE, OWED_SCHEMA, owedFile, rejudgeRecord } from "./qualify-rejudge.js";
 import type { QualificationRecord } from "./qualification-record.js";
 import { MEMORY_PASS_PROBE_NOTES } from "./qualify-declarations.js";
-import { SYNC_STATE_SCHEMA, parseSyncArgs, resolveSyncSettings, runSync, summaryLine, type SyncEntry, type SyncPlugin, type SyncSettings, type SyncState } from "./qualify-sync.js";
+import { parseSyncArgs, runSync, summaryLine } from "./qualify-sync.js";
+import { CLAP_NOTES, CLAP_RT, FIXTURES, LV2_CLEAN, LV2_CRASHED, LV2_RT, adapterAdmitted, device, owesOf, probeFile, readJson, recordFile, rejudge, removeDevices, row, stored, type Device } from "./qualify-rejudge.support.js";
 
-const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "records-0.16.1");
-const CLAP_RT = "in.lsp-plug.impulse_responses_mono@unversioned-d5235d2f5f53.custom";
-const CLAP_NOTES = "in.lsp-plug.trigger_midi_mono@unversioned-d5235d2f5f53.custom";
-const LV2_RT = "https___github.com_lucianodato_noise-repellent@unversioned-c3b5e21dd9a7.default";
-const LV2_CRASHED = "http___example.org_raffo@unversioned-2060c09ff626.default";
-const LV2_CLEAN = "http___lv2plug.in_plugins_eg-amp@unversioned-f046a60efd45.default";
-
-const scratch = mkdtempSync(join(tmpdir(), "qualify-rejudge-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-let devices = 0;
-
-const recordFile = (stem: string): string => `${stem}.qualification.json`;
-const probeFile = (stem: string): string => `${stem}.probe.json`;
-const readJson = <T = QualificationRecord>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T;
-const stored = (stem: string): QualificationRecord => readJson(join(FIXTURES, recordFile(stem)));
-const adapterAdmitted = { host: "omx-clap-host", measured: true, admitted: true, params: {} };
-
-interface Device {
-  readonly settings: SyncSettings;
-  readonly dir: string;
-  readonly record: (stem: string) => QualificationRecord;
-  readonly pins: () => ReturnType<typeof parsePinLine>[];
-  readonly state: () => SyncState;
-}
-
-/**
- * A device holding the given records, with a state that names each, its files on disk as they were recorded and its pin
- * the word the record's run gave. `patch` changes a record before it is stored (an adapter run a later plugin-qualify took).
- */
-function device(stems: readonly string[], options: { patch?: (r: QualificationRecord) => QualificationRecord; host?: string } = {}): Device {
-  const root = join(scratch, `device-${String(++devices)}`);
-  const dir = join(root, "qualification");
-  mkdirSync(dir, { recursive: true });
-  const entries: Record<string, SyncEntry> = {};
-  for (const stem of stems) {
-    copyFileSync(join(FIXTURES, probeFile(stem)), join(dir, probeFile(stem)));
-    const record = (options.patch ?? ((r) => r))(stored(stem));
-    writeFileSync(join(dir, recordFile(stem)), `${JSON.stringify(record, null, 2)}\n`);
-    const bundle = join(root, "plugins", stem);
-    mkdirSync(bundle, { recursive: true });
-    writeFileSync(join(bundle, "plugin.bin"), stem);
-    const st = statSync(join(bundle, "plugin.bin"));
-    const file = { path: "plugin.bin", sha256: sha256Hex(Buffer.from(stem)), size: st.size, mtimeMs: st.mtimeMs, ino: st.ino };
-    const uri = record.plugin.format === "clap" ? `clap:${join(bundle, "plugin.clap")}#${record.plugin.id}` : record.plugin.id;
-    const was = record.verdicts.find((v) => v.host === "omx-clap-host")!;
-    const plugin: SyncPlugin = {
-      uri,
-      outcome: was.rating === "unsuitable" ? "refused" : was.measured ? "qualified" : "crashed",
-      ...(was.deciding === undefined ? {} : { code: was.deciding }),
-      pin: { uri, integrity: { files: [{ path: file.path, sha256: file.sha256 }], layout: { scheme: "omx-layout/1", sha256: "0".repeat(64) } }, ...(was.rating === "unsuitable" ? { verdict: "refused" as const } : was.rating === "suitable" ? { verdict: "in-process" as const } : {}) },
-      record: join(dir, recordFile(stem)),
-    };
-    entries[`${record.plugin.format}:${stem}`] = { format: record.plugin.format as "clap" | "lv2", root: bundle, files: [file], plugins: [plugin], qualifiedAt: "2026-10-28T20:00:00.000Z", seconds: 1 };
-  }
-  const stateFile = join(root, "qualify-sync.json");
-  const state: SyncState = { schema: SYNC_STATE_SCHEMA, entries };
-  writeFileSync(stateFile, `${JSON.stringify(state, null, 1)}\n`);
-  const args = parseSyncArgs([]);
-  if (!args.ok) throw new Error(args.error);
-  const conf = new Map([
-    ["qualification_dir", dir],
-    ["state_file", stateFile],
-    ["pin_file", join(root, "qualified.pins")],
-    ["descriptor_dir", join(root, "descriptors")],
-    ["lv2_path", join(root, "none")],
-    ["lv2_extra", ""],
-    ["clap_path", join(root, "none")],
-    ["hostd_port", "0"],
-    ["budget_s", "17"],
-    ["memory_limit", "2G"],
-    ...(options.host === undefined ? [] : [["host_profile", options.host] as [string, string]]),
-  ]);
-  const r = resolveSyncSettings(conf, args.args, {}, scratch);
-  if (!r.ok) throw new Error(r.error);
-  return {
-    settings: r.settings,
-    dir,
-    record: (stem) => readJson(join(dir, recordFile(stem))),
-    pins: () => readFileSync(r.settings.pinFile, "utf8").split("\n").map(parsePinLine).filter((p) => p !== undefined),
-    state: () => readJson<SyncState>(stateFile),
-  };
-}
-
-/** The re-judge as a device runs it, with no tool to measure with and plugin-hostd naming no pin's files. */
-const rejudge = (d: Device) =>
-  runSync(d.settings, { rejudge: true, env: { OMX_PROBE_RUNNER: "/nonexistent", OMX_CLAP_QUALIFY: "/nonexistent" }, pinFilesRun: () => ({ status: 1, stdout: "", stderr: "" }) });
-
-const row = (r: QualificationRecord, host: string) => r.verdicts.find((v) => v.host === host)!;
-const owesOf = (r: QualificationRecord) => r.rejudged?.owes?.map((o) => o.measurement) ?? [];
+afterAll(removeDevices);
 
 describe("--rejudge: a record judged unsuitable for RT violations", () => {
   it("in run: conditional, isolated, pinned isolated, and the state says qualified with the code", async () => {
@@ -122,6 +31,15 @@ describe("--rejudge: a record judged unsuitable for RT violations", () => {
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "conditional", hosting: "isolated", measured: true, deciding: HOSTING_CODE.rtSafetyViolations });
     expect(d.pins()[0]!.verdict).toBe("isolated");
     expect(Object.values(d.state().entries)[0]!.plugins[0]).toMatchObject({ outcome: "qualified", code: HOSTING_CODE.rtSafetyViolations });
+  });
+
+  it("is offered on the isolated tier and says it runs alone; `qualified` stays false, the interchange's meaning of it", async () => {
+    const d = device([CLAP_RT]);
+    await rejudge(d);
+    const { tiers } = d.record(CLAP_RT);
+    expect(tiers.offeredOn).toEqual(["isolated"]);
+    expect(tiers.isolated).toMatchObject({ host: "omx-clap-host", rating: "conditional", qualified: false, runsAlone: true });
+    expect(tiers.dimmed).toBeUndefined();
   });
 
   it("under notes: the same", async () => {
@@ -258,6 +176,7 @@ describe("--rejudge: a tier lacking its adapter run", () => {
     const r = d.record(LV2_CLEAN);
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "suitable", qualified: true, arm: "run" });
     expect(r.tiers.offeredOn).toEqual(["isolated"]);
+    expect(r.tiers.isolated!.runsAlone).toBeUndefined();
     expect(owesOf(r)).toEqual([]);
     expect(d.pins()[0]!.verdict).toBe("in-process");
   });
