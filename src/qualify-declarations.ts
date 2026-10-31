@@ -104,12 +104,15 @@ export const CLAP_QUALIFY_TOOL_ENV = "OMX_CLAP_QUALIFY";
 export const LV2_MEASURE_TOOL_ENV = "OMX_LV2_MEASURE";
 export const RT_INTERPOSE_ENV = "OMX_RT_INTERPOSE";
 export const LV2_HOST_PROBE_TOOL_ENV = "OMX_LV2_HOST_PROBE";
+/** `native/jack-peak.c`, the level of an instrument under a held note in the adapter run (`tools/mod-host-admit.mjs`). */
+export const JACK_PEAK_TOOL_ENV = "OMX_JACK_PEAK";
 
 /** The file names of the native tools, in every place they are looked for. */
 export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
 export const LV2_MEASURE_TOOL_NAME = "lv2_measure";
 export const RT_INTERPOSE_NAME = "rt_interpose.so";
 export const LV2_HOST_PROBE_TOOL_NAME = "lv2_host_probe";
+export const JACK_PEAK_TOOL_NAME = "jack_peak";
 
 /**
  * The ONE list of the native tools the packages install, each with the setting that names it.
@@ -120,6 +123,7 @@ export const NATIVE_TOOLS: readonly { readonly name: string; readonly env: strin
   { name: LV2_MEASURE_TOOL_NAME, env: LV2_MEASURE_TOOL_ENV },
   { name: RT_INTERPOSE_NAME, env: RT_INTERPOSE_ENV },
   { name: LV2_HOST_PROBE_TOOL_NAME, env: LV2_HOST_PROBE_TOOL_ENV },
+  { name: JACK_PEAK_TOOL_NAME, env: JACK_PEAK_TOOL_ENV },
 ];
 
 /**
