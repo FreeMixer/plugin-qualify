@@ -116,6 +116,8 @@ describe("the steps a record's outcome calls for", () => {
 describe("the step itself, on a private server", () => {
   const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "..", "native", "build", "fixtures", "rt-safe.clap");
   const ID = "org.freemixer.plugin-qualify.fixture.rt-safe";
+  const SYNTH = join(dirname(FIXTURE), "synth.clap");
+  const SYNTH_ID = "org.freemixer.plugin-qualify.fixture.synth";
   const installed = (tool: string): boolean => spawnSync("sh", ["-c", `command -v ${tool}`]).status === 0;
   const ready = existsSync(FIXTURE) && installed("jackd") && installed("plugin-hostd");
 
@@ -129,6 +131,17 @@ describe("the step itself, on a private server", () => {
     expect(step.result, JSON.stringify(facts)).toBe(ISOLATED_RESULT.isolated);
     expect(facts.xruns).toBeGreaterThanOrEqual(0);
     expect(facts.cpuPercent).toBeGreaterThanOrEqual(0);
+  });
+
+  it("an instrument, silent until it hears a note, gets the note and sounds: isolated", (ctx) => {
+    if (!ready) {
+      if (process.env["CI"] !== undefined) throw new Error("jackd, plugin-hostd or native/build is missing: CI installs them");
+      ctx.skip("needs jackd, plugin-hostd and native/build");
+    }
+    const facts = spawnedIsolatedRunner()(`clap:${SYNTH}#${SYNTH_ID}`, CELL, process.env);
+    const step = judgeIsolatedRun(facts);
+    expect(step.result, JSON.stringify(facts)).toBe(ISOLATED_RESULT.isolated);
+    expect(facts.midiInputsLinked, JSON.stringify(facts)).toBeGreaterThan(0);
   });
 
   it("a pass runs the step plugin after plugin: the server of the last one leaves its name free", (ctx) => {

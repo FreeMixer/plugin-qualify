@@ -59,6 +59,8 @@ export interface IsolatedRunFacts {
   readonly xruns?: number;
   readonly finite?: boolean;
   readonly silent?: boolean;
+  /** How many of the plugin's MIDI inputs the notes were linked to; none for a plugin that has none. */
+  readonly midiInputsLinked?: number;
 }
 
 export type IsolatedRunner = (uri: string, cell: GridCell, env: Readonly<Record<string, string | undefined>>) => IsolatedRunFacts;
