@@ -60,13 +60,21 @@ static char *plugin_version(LilvWorld *world, const LilvPlugin *plugin) {
   return version;
 }
 
-/* a file of the bundle by its IRI: its path relative to the bundle root, or NULL with why */
+/* a file's path as the word of a pin: one word, a separator of pin_set or whitespace percent-encoded, as plugin-hostd reads it
+ * (libSurge XT.so is libSurge%20XT.so); malloc'd */
+static char *pin_word(const char *rel) {
+  char *word = malloc(strlen(rel) * 3 + 1), *o = word;
+  if (!word) return NULL;
+  for (const char *c = rel; *c; c++)
+    if (*c == '%' || strchr(PHD_PIN_PATH_EXCLUDED, *c)) o += sprintf(o, "%%%02X", (unsigned char)*c);
+    else *o++ = *c;
+  *o = '\0';
+  return word;
+}
+
+/* a file of the bundle by its IRI: its path relative to the bundle root, the name on disk, or NULL with why */
 static char *bundle_relative(const char *bundle, const LilvNode *iri, const char **why) {
   const char *text = lilv_node_as_uri(iri);
-  if (strchr(text, '%')) {
-    *why = "a file the plugin loads is named by a percent-encoded IRI, which plugin-hostd does not decode";
-    return NULL;
-  }
   char *path = lilv_file_uri_parse(text, NULL);
   if (!path) {
     *why = "a file the plugin loads is not a file: IRI";
@@ -77,11 +85,6 @@ static char *bundle_relative(const char *bundle, const LilvNode *iri, const char
   if (strncmp(path, bundle, n) == 0 && path[n] != '\0') rel = strdup(path + n);
   lilv_free(path);
   if (!rel) *why = "a file the plugin loads lies outside its bundle";
-  else if (strpbrk(rel, PHD_PIN_PATH_EXCLUDED)) {
-    *why = "a file name holds a separator of pin_set or whitespace";
-    free(rel);
-    rel = NULL;
-  }
   return rel;
 }
 
@@ -219,7 +222,9 @@ void omx_lv2_pin_print(FILE *out, LilvWorld *world, const LilvPlugin *plugin) {
     fprintf(out, "\"files\":[");
     for (int i = 0; i < n; i++) {
       fprintf(out, "%s{\"path\":", i ? "," : "");
-      json_text(out, files[i].path);
+      char *word = pin_word(files[i].path);
+      json_text(out, word ? word : files[i].path);
+      free(word);
       fprintf(out, ",\"sha256\":\"%s\"}", files[i].sha256);
     }
     fprintf(out, "],\"layout\":{\"scheme\":\"%s\",\"sha256\":\"%s\"}", PHD_PIN_LAYOUT_SCHEME, layout);

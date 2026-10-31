@@ -4,8 +4,10 @@
 // One mod-host admission: a fresh `mod-host -n` on its own port, then `add` and `remove` of one plugin on its
 // socket. Prints one JSON line, {installed, steps:[{cmd, resp | died}]}, for src/host-admission.ts to classify. The host
 // is always killed at the end, so the next plugin gets a fresh one.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
+import { fileURLToPath } from "node:url";
 
 const uri = process.argv[2];
 // the host to admit under: mod-host, or omx-clap-host for plugin-hostd's LV2 adapter, which answers the same protocol
@@ -16,6 +18,10 @@ const STEP_MS = Number(process.env.OMX_ADMIT_STEP_MS ?? 0) || 10000;
 const ADDRESS_KB = process.env.OMX_ADMIT_ADDRESS_KB;
 const STATE_DIR = process.env.OMX_ADMIT_STATE_DIR;
 const INSTANCE = 0;
+// an instrument under the adapter is played: one note, held this long, its output read at its JACK ports
+const NOTE_WINDOW_MS = 1000;
+const NOTE_ON = `note_on ${INSTANCE} 0 60 100`;
+const ADAPTER = "omx-clap-host";
 const COMMANDS = [
   ["add", `add ${uri} ${INSTANCE}`],
   ["remove", `remove ${INSTANCE}`],
@@ -49,6 +55,52 @@ async function connect() {
   return undefined;
 }
 
+// the LV2 class says it is an instrument; the note port and the audio input say nothing, a synth can have both, an effect
+// can have both. omx-clap-scan comes with omx-clap-host: without an answer from it this is not known to be an instrument
+function isInstrument() {
+  const r = spawnSync("omx-clap-scan", ["--fields", `lv2:${uri}`], { encoding: "utf8", timeout: STEP_MS });
+  return r.status === 0 && /^plugin\trdf:type\tlv2:InstrumentPlugin$/m.test(r.stdout);
+}
+
+// the JACK output ports of the instance, from audio_ports's reply: resp 0 [dry] in:... out:main:1:2:stereo:"out":out_1,out_2
+function outputPorts(reply) {
+  return [...reply.matchAll(/ out:[^ "]*"[^"]*":([^ ]+)/g)].flatMap((m) => m[1].split(",")).map((p) => `effect_${INSTANCE}:${p}`);
+}
+
+const PEAK_TOOL_DIRS = [fileURLToPath(new URL("../native/build/", import.meta.url)), "/usr/libexec/plugin-qualify/", "/usr/lib/plugin-qualify/"];
+const peakTool = () => process.env.OMX_JACK_PEAK || PEAK_TOOL_DIRS.map((d) => `${d}jack_peak`).find((p) => existsSync(p));
+
+// the peak on `ports` while `during` runs: { peak } in linear magnitude, or { problem } with why
+async function peakDuring(ports, during) {
+  const tool = peakTool();
+  if (tool === undefined) return { problem: "no jack_peak" };
+  const meter = spawn(tool, ports, { stdio: ["pipe", "pipe", "pipe"] });
+  let out = "";
+  let err = "";
+  const ended = new Promise((resolve) => {
+    meter.on("error", (e) => resolve(e.code ?? "error"));
+    meter.on("exit", (code) => resolve(code));
+  });
+  meter.stdout.on("data", (d) => (out += d.toString()));
+  meter.stderr.on("data", (d) => (err += d.toString()));
+  const until = Date.now() + STEP_MS;
+  while (!out.includes("ready") && Date.now() < until && meter.exitCode === null) await sleep(10);
+  if (!out.includes("ready")) {
+    meter.kill("SIGKILL");
+    await ended;
+    return { problem: err.trim() || "jack_peak did not start" };
+  }
+  await during();
+  meter.stdin.end();
+  await Promise.race([ended, sleep(STEP_MS)]);
+  meter.kill("SIGKILL");
+  try {
+    return { peak: JSON.parse(out.slice(out.indexOf("ready") + 5)).peak };
+  } catch {
+    return { problem: err.trim() || "jack_peak gave no figure" };
+  }
+}
+
 async function main() {
   if ((await Promise.race([spawnFailed, sleep(200).then(() => undefined)])) === "ENOENT" || shellNotFound) return { installed: false, steps: [] };
   const sock = await connect();
@@ -60,7 +112,31 @@ async function main() {
   sock.on("close", () => (closed = true));
   sock.on("error", () => (closed = true));
   const steps = [];
+  let sound;
+  // one line on the socket and its whole answer: undefined when none came in time
+  const ask = async (line) => {
+    buffer = "";
+    sock.write(`${line}\0`);
+    const until = Date.now() + STEP_MS;
+    while (Date.now() < until && !closed && hostEnd === undefined) {
+      const m = /resp -?\d+[^\0]*/.exec(buffer);
+      if (m !== null && buffer.includes("\0")) return m[0];
+      await sleep(20);
+    }
+    return undefined;
+  };
   for (const [cmd, line] of COMMANDS) {
+    // an instrument the adapter took: does a held note sound? A plugin that dies on the note dies at the remove below
+    if (cmd === "remove" && bin === ADAPTER && isInstrument()) {
+      const ports = outputPorts((await ask(`audio_ports ${INSTANCE}`)) ?? "");
+      sound =
+        ports.length === 0
+          ? { problem: "no output port" }
+          : await peakDuring(ports, async () => {
+              await ask(NOTE_ON);
+              await sleep(NOTE_WINDOW_MS);
+            });
+    }
     buffer = "";
     sock.write(`${line}\0`);
     const until = Date.now() + STEP_MS;
@@ -80,7 +156,7 @@ async function main() {
     if (resp < 0) break;
   }
   sock.destroy();
-  return { installed: true, steps };
+  return { installed: true, steps, ...(sound === undefined ? {} : { sound }) };
 }
 
 const result = await main();

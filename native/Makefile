@@ -4,7 +4,7 @@
 # The CLAP prober, the LV2 measurer, the interposer both run under and the fixture plugins their tests
 # qualify.
 #
-#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/rt_interpose.so,
+#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
@@ -89,7 +89,7 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
 
-all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
@@ -101,7 +101,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so \
-	$(BUILD)/fixtures/lv2/latency.lv2/latency.so \
+	$(BUILD)/fixtures/lv2/latency.lv2/latency.so $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl \
 	$(BUILD)/fixtures-faulty/synth-voice-memory.clap \
 	$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so $(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so
 
@@ -142,6 +142,9 @@ $(BUILD)/isolated_signal: isolated-signal.c | $(BUILD)
 
 $(BUILD)/lv2_host_probe: lv2-host-probe.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $< $(LILV_LIBS) -lpthread -lm
+
+$(BUILD)/jack_peak: jack-peak.c | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
@@ -241,6 +244,13 @@ $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-uns
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ALLOCATES -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 # the instrument: MIDI in through an atom sequence, a stereo out, a sine per held note; and the same allocating on note on
+# a binary whose file name holds a space, named by a percent-encoded IRI (plugin-hostd#239): the manifest is the target, as
+# make cannot name the file
+$(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl: fixtures/lv2-gain.c fixtures/spaced.lv2/manifest.ttl fixtures/spaced.lv2/gain.ttl
+	mkdir -p $(@D)
+	cp fixtures/spaced.lv2/manifest.ttl fixtures/spaced.lv2/gain.ttl $(@D)/
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_SPACED -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o "$(@D)/gain plugin.so" $<
+
 $(BUILD)/fixtures/lv2/synth.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
 	mkdir -p $(@D)
 	cp fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl $(@D)/
@@ -270,13 +280,14 @@ deps:
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
 	install -m 0755 $(BUILD)/rt_interpose.so $(DESTDIR)$(LIBEXECDIR)/rt_interpose.so
 	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
 	install -m 0755 $(BUILD)/isolated_signal $(DESTDIR)$(LIBEXECDIR)/isolated_signal
+	install -m 0755 $(BUILD)/jack_peak $(DESTDIR)$(LIBEXECDIR)/jack_peak
 
 clean:
 	rm -rf $(BUILD)

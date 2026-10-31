@@ -34,7 +34,7 @@ import {
   type HostingReason,
 } from "./hosting-suitability.js";
 import type { HostProfile } from "./host-profiles.js";
-import { runDecides, type HostAdmission } from "./host-admission.js";
+import { admissionRating, runDecides, type HostAdmission } from "./host-admission.js";
 import { PROBE_NOT_ATTEMPTED, PROBE_OK, type ProbeGridPoint, type ProbeOutput } from "./probe-output.js";
 import type { QualifyVerdict } from "./qualify-cli.js";
 import { RATING_SEVERITY, worstRating, type SuitabilityRating } from "./rating.js";
@@ -308,7 +308,7 @@ export function judgeProbeOutput(output: ProbeOutput, profiles: readonly HostPro
       if (!admission.measured || !admission.admitted) {
         // the host could not be run, or the plugin did not survive it: the run decides, whatever the declaration says
         const code = admission.code ?? `${admission.host}.not-admitted`;
-        const reason: RecordReason = { dimension: "hostAdmission", rating: admission.measured ? "unsuitable" : "unknown", code, params: admission.params };
+        const reason: RecordReason = { dimension: "hostAdmission", rating: admissionRating(admission), code, params: admission.params };
         return {
           verdict: { uri, host: profile.id, measured: admission.measured, rating: reason.rating, qualified: false, deciding: code },
           hosting: "isolated",
