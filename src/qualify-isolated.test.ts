@@ -130,6 +130,18 @@ describe("the step itself, on a private server", () => {
     expect(facts.xruns).toBeGreaterThanOrEqual(0);
     expect(facts.cpuPercent).toBeGreaterThan(0);
   });
+
+  it("a pass runs the step plugin after plugin: the server of the last one leaves its name free", (ctx) => {
+    if (!ready) {
+      if (process.env["CI"] !== undefined) throw new Error("jackd, plugin-hostd or native/build is missing: CI installs them");
+      ctx.skip("needs jackd, plugin-hostd and native/build");
+    }
+    const runner = spawnedIsolatedRunner();
+    for (const run of ["first", "second", "third"]) {
+      const facts = runner(`clap:${FIXTURE}#${ID}`, CELL, process.env);
+      expect(judgeIsolatedRun(facts).result, `${run}: ${JSON.stringify(facts)}`).toBe(ISOLATED_RESULT.isolated);
+    }
+  });
 });
 
 describe("the completion of a record already judged", () => {
@@ -166,6 +178,19 @@ describe("the completion of a record already judged", () => {
     const done = record({ run: { id: "r", steps: [...baseSteps(record()), judgeIsolatedRun(WELL)] } });
     expect(completeIsolated(write(done, "d.qualification.json"), done, "urn:p", CELL, runner, {})).toBeUndefined();
     expect(ran).toBe(0);
+  });
+
+  it("a step that could not run is tried again and replaced; one that ran is not", () => {
+    const notRun = judgeIsolatedRun({ started: false, problem: "no server" });
+    const before = record({ run: { id: "r", steps: [...baseSteps(record()), notRun] } });
+    const path = write(before, "again.qualification.json");
+    const done = completeIsolated(path, before, "urn:p", CELL, () => WELL, {});
+    expect(done?.step.result).toBe(ISOLATED_RESULT.isolated);
+    const isolatedSteps = (JSON.parse(readFileSync(path, "utf8")) as QualificationRecord).run?.steps.filter((s) => s.step === "isolated");
+    expect(isolatedSteps).toEqual([done?.step]);
+    const refused = judgeIsolatedRun({ started: true, added: false });
+    const seen = record({ run: { id: "r", steps: [...baseSteps(record()), refused] } });
+    expect(completeIsolated(write(seen, "seen.qualification.json"), seen, "urn:p", CELL, () => WELL, {})).toBeUndefined();
   });
 
   it("the pass moves each pin with its step, counts them, and a second pass runs nothing", () => {
