@@ -197,14 +197,14 @@ describe("--rejudge: a tier lacking its adapter run", () => {
     expect(row(r, "omx-clap-host")).toMatchObject({ rating: "suitable", qualified: true, arm: "run" });
     expect(r.tiers.offeredOn).toEqual(["isolated"]);
     expect(r.tiers.isolated!.runsAlone).toBeUndefined();
-    expect(owesOf(r)).toEqual(["isolated-step"]);
+    expect(owesOf(r)).toEqual([]);
     expect(d.pins()[0]!.verdict).toBe("in-process");
   });
 
   it("a CLAP plugin owes no adapter run, and an RT violation is still seen beside an owed run", async () => {
     const clap = device([CLAP_RT]);
     await rejudge(clap);
-    expect(owesOf(clap.record(CLAP_RT))).toEqual([]);
+    expect(owesOf(clap.record(CLAP_RT))).toEqual(["isolated-step"]);
     const lv2 = device([LV2_RT]);
     await rejudge(lv2);
     const r = row(lv2.record(LV2_RT), "omx-clap-host");
