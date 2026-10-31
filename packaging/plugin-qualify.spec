@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.3
+Version:        0.18.4
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,13 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.4-1
+- The isolated step no longer refuses instruments as silent: its notes start after
+  the MIDI links are made, and each third of the window adds one more, held. A
+  silent refusal says how many MIDI inputs were linked.
+- A silent refusal from the tool before this is run again by the next
+  --isolated-only. One that heard the notes is not.
+
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.3-1
 - The isolated step runs for every plugin of a pass: a private jackd is now
   reaped when it ends, so the next plugin's server can start. On a Raspberry
