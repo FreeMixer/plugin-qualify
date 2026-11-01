@@ -17,13 +17,17 @@
 /* leaks.lv2: built with -DFIXTURE_LEAKS_KB, run() also takes that many KB every block and never gives them back.
  * large-activate.lv2: built with -DFIXTURE_ACTIVATE_MB, activate() takes that many MiB, touched, held until cleanup.
  * activate-reads.lv2: built with -DFIXTURE_ACTIVATE_READS, activate() reads its gain control, as swh's IIR filters
- * (lowpass_iir and its kin) read theirs: a host that activates before it connects the ports crashes it. */
+ * (lowpass_iir and its kin) read theirs: a host that activates before it connects the ports crashes it.
+ * needs-display.lv2: built with -DFIXTURE_NEEDS_DISPLAY, instantiate() aborts when no display and no Qt platform is
+ * named, as a Qt plugin does (synthv1, samplv1, padthv1, drumkv1: "no Qt platform plugin could be initialized"). */
 #if defined FIXTURE_LEAKS_KB
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-leaks"
 #elif defined FIXTURE_ACTIVATE_MB
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-large-activate"
 #elif defined FIXTURE_ACTIVATE_READS
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-activate-reads"
+#elif defined FIXTURE_NEEDS_DISPLAY
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-needs-display"
 #elif defined FIXTURE_SPACED
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-spaced"
 #elif defined FIXTURE_ALLOCATES
@@ -48,6 +52,9 @@ struct gain {
 
 static LV2_Handle instantiate(const LV2_Descriptor *d, double rate, const char *path, const LV2_Feature *const *features) {
   (void)d; (void)rate; (void)path; (void)features;
+#ifdef FIXTURE_NEEDS_DISPLAY
+  if (getenv("QT_QPA_PLATFORM") == NULL && getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) abort();
+#endif
   return calloc(1, sizeof(struct gain));
 }
 

@@ -11,7 +11,7 @@
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
 #                            build/fixtures-faulty/synth-voice-memory.clap (apart, its memory fails any budget),
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency,activate-reads}.lv2,
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency,activate-reads,needs-display}.lv2,
 #                            build/fixtures-faulty/lv2/{leaks,large-activate}.lv2 (apart, as the faulty ones)
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
@@ -98,7 +98,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
 	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
-	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so \
+	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so $(BUILD)/fixtures/lv2/needs-display.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so $(BUILD)/fixtures/lv2/synth-drum.lv2/synth.so \
 	$(BUILD)/fixtures/lv2/latency.lv2/latency.so $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl \
@@ -249,6 +249,13 @@ $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so: fixtures/lv2-gain.c fixtures/r
 	sed 's/lv2-rt-safe/lv2-activate-reads/' fixtures/rt-safe.lv2/manifest.ttl > $(@D)/manifest.ttl
 	sed 's/lv2-rt-safe/lv2-activate-reads/' fixtures/rt-safe.lv2/gain.ttl > $(@D)/gain.ttl
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ACTIVATE_READS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+
+# and once more, aborting at instantiate where no display and no Qt platform is named, as a Qt plugin does
+$(BUILD)/fixtures/lv2/needs-display.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-safe.lv2/manifest.ttl fixtures/rt-safe.lv2/gain.ttl
+	mkdir -p $(@D)
+	sed 's/lv2-rt-safe/lv2-needs-display/' fixtures/rt-safe.lv2/manifest.ttl > $(@D)/manifest.ttl
+	sed 's/lv2-rt-safe/lv2-needs-display/' fixtures/rt-safe.lv2/gain.ttl > $(@D)/gain.ttl
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_NEEDS_DISPLAY -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so: fixtures/lv2-gain.c fixtures/rt-unsafe.lv2/manifest.ttl fixtures/rt-unsafe.lv2/gain.ttl
 	mkdir -p $(@D)

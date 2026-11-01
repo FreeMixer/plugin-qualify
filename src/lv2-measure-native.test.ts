@@ -86,6 +86,18 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(r.status, r.stderr).toBe(0);
   });
 
+  live("names Qt's offscreen platform where there is no display: a Qt plugin is measured, not aborted", () => {
+    // synthv1, samplv1, padthv1 and drumkv1 abort at instantiate without a display; the probe runs without one, the
+    // Zynthian's hosts under its X server, where they instantiate
+    expect(existsSync(join(LV2_FIXTURES, "needs-display.lv2", "gain.so"))).toBe(true);
+    const r = spawnSync(MEASURE, ["urn:plugin-qualify:fixture:lv2-needs-display", "48000", "64", "1", "1"], {
+      encoding: "utf8",
+      env: { PATH: process.env["PATH"], LV2_PATH: LV2_FIXTURES },
+    });
+    expect(r.signal, r.stderr).toBeNull();
+    expect(r.status, r.stderr).toBe(0);
+  });
+
   live("plays an instrument through its MIDI input and counts that apart: the allocating synth only once played", () => {
     const safe = measure(SYNTH, "48000", "512", "1", "1");
     const alloc = measure(SYNTH_ALLOC, "48000", "512", "1", "1");
