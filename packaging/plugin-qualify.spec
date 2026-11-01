@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.4
+Version:        0.18.5
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -126,6 +126,22 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sun Nov 01 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.5-1
+- Each rate is measured on an instance of its own. Reactivating one instance at
+  another rate crashed LSP's probes; the CLAP crashes rerun on a Raspberry Pi 5
+  went from 56 to 1.
+- A record says how the probe ended and its load, and the sync prints its counts
+  per plugin.
+- A private JACK server stops on its TERM. A TERM to the shell's process group
+  left jackd running, so every stop ended in a KILL that left the server's row in
+  JACK's registry. Once the eight rows were taken, every adapter run failed. The
+  rows of our own dead servers are freed before a start.
+- lv2_measure connects every port before it activates a plugin, as every host
+  does. Plugins that read a port in activate (swh's IIR filters) no longer crash
+  it.
+- lv2_measure names Qt's offscreen platform when there is no display, so a Qt
+  plugin instantiates instead of aborting (samplv1, drumkv1).
+
 * Sat Oct 31 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.4-1
 - The isolated step no longer refuses instruments as silent: its notes start after
   the MIDI links are made, and each third of the window adds one more, held. A
