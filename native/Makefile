@@ -92,7 +92,7 @@ CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror
 all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
-	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap \
+	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap $(BUILD)/fixtures-faulty/rate-pinned.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
@@ -165,6 +165,8 @@ $(BUILD)/fixtures/info-fails.clap: fixtures/gain.c | $(BUILD)/fixtures
 # a plugin that kills the host loading it, and one that never returns from process(): the sync's crash and hang
 $(BUILD)/fixtures-faulty/crashes-at-load.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_CRASHES_AT_LOAD -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
+$(BUILD)/fixtures-faulty/rate-pinned.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_RATE_PINNED -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 $(BUILD)/fixtures-faulty/hangs.clap: fixtures/gain.c | $(BUILD)/fixtures-faulty
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_HANGS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
