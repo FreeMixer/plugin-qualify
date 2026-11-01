@@ -18,6 +18,8 @@
  *   crashes-at-load.clap built with -DFIXTURE_CRASHES_AT_LOAD, the gain whose init() raises SIGSEGV: a host
  *                   that loads it dies before it can list a parameter.
  *   hangs.clap      built with -DFIXTURE_HANGS, the gain whose process() never returns.
+ *   rate-pinned.clap built with -DFIXTURE_RATE_PINNED, the gain that aborts when one instance is activated again at
+ *                   another rate than its first: what LSP's CLAP plugins do (docs/notes/lsp-reactivation-at-another-rate.md).
  *
  * Nothing else differs, so a verdict that tells them apart is the interposer's count and nothing else.
  */
@@ -40,6 +42,9 @@
 #elif defined FIXTURE_CRASHES_AT_LOAD
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.crashes-at-load"
 #define FIXTURE_NAME "gain that crashes when it is loaded"
+#elif defined FIXTURE_RATE_PINNED
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.rate-pinned"
+#define FIXTURE_NAME "gain that aborts when activated again at another rate"
 #elif defined FIXTURE_HANGS
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.hangs"
 #define FIXTURE_NAME "gain whose process never returns"
@@ -83,6 +88,9 @@ static const clap_plugin_descriptor_t descriptor = {
 struct gain {
   clap_plugin_t plugin;
   double gain;
+#ifdef FIXTURE_RATE_PINNED
+  double first_rate;  /* the rate this instance was first activated at, 0 before */
+#endif
 #ifdef FIXTURE_DELAY
   /* the last FIXTURE_DELAY + 1 input frames per channel, newest at `at` */
   float line[2][FIXTURE_DELAY + 1];
@@ -109,6 +117,13 @@ static bool gain_init(const clap_plugin_t *p) {
 static void gain_destroy(const clap_plugin_t *p) { free(p->plugin_data); }
 static bool gain_activate(const clap_plugin_t *p, double rate, uint32_t min, uint32_t max) {
   (void)p; (void)rate; (void)min; (void)max;
+#ifdef FIXTURE_RATE_PINNED
+  {
+    struct gain *g = p->plugin_data;
+    if (g->first_rate != 0.0 && g->first_rate != rate) abort();
+    g->first_rate = rate;
+  }
+#endif
 #ifdef FIXTURE_HOGS_MB
   struct gain *g = p->plugin_data;
   size_t bytes = (size_t)((double)FIXTURE_HOGS_MB * 1048576.0 * rate / 48000.0);

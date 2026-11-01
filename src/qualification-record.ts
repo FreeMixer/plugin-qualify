@@ -343,7 +343,36 @@ export interface QualificationRecord {
     readonly machineClass: Readonly<Record<string, string | boolean>>;
     /** Whether the machine met the protocol's optimised profile: a figure that did not is not a reference figure. */
     readonly meetsProtocol: boolean;
+    /** Each step whose child did not end well: the signal that killed it or the status it exited with, so a crash is
+     * told from the runner's own kill (a deadline or memory kill is SIGKILL). Absent when every child ended well. */
+    readonly ends?: readonly ProbeEnd[];
+    /** How loaded the machine was when the probe started; absent on a record written before it was taken. */
+    readonly load?: { readonly loadavg1: number; readonly cores: number };
   };
+}
+
+/** How one step's child ended, when not well. */
+export interface ProbeEnd {
+  readonly step: string;
+  readonly outcome: string;
+  readonly rate?: number;
+  readonly quantum?: number;
+  readonly signal?: string;
+  readonly exitStatus?: number;
+}
+
+/** The steps of a probe output whose child was killed by a signal or exited with a status other than 0. */
+export function probeEnds(output: ProbeOutput): readonly ProbeEnd[] {
+  return output.steps
+    .filter((s) => (s.signal !== undefined && s.signal !== null && s.signal !== "") || (s.exitStatus !== undefined && s.exitStatus !== 0))
+    .map((s) => ({
+      step: s.step,
+      outcome: s.outcome,
+      ...(s.rate === undefined ? {} : { rate: s.rate }),
+      ...(s.quantum === undefined ? {} : { quantum: s.quantum }),
+      ...(s.signal ? { signal: s.signal } : {}),
+      ...(s.exitStatus === undefined || s.exitStatus === 0 ? {} : { exitStatus: s.exitStatus }),
+    }));
 }
 
 /** One dimension a run did not measure, and the code that says so. */
@@ -431,6 +460,8 @@ export function buildQualificationRecord(
       complete: o.run.complete,
       machineClass: o.machine.class,
       meetsProtocol: o.machine.profile.meetsProtocol,
+      ...(probeEnds(o).length === 0 ? {} : { ends: probeEnds(o) }),
+      ...(judgment.load === undefined ? {} : { load: judgment.load }),
     },
   };
 }

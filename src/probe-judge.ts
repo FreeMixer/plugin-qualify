@@ -197,6 +197,8 @@ export interface HostJudgment {
 
 export interface Judgment {
   readonly output: ProbeOutput;
+  /** How loaded the machine was when the probe started (probe-runner's ProbeLoad); absent when not taken. */
+  readonly load?: { readonly loadavg1: number; readonly cores: number };
   /** An LV2 plugin's run under plugin-hostd's LV2 adapter, beside the verdicts (plugin-qualify#223). */
   readonly adapter?: HostAdmission;
   readonly hosts: readonly HostJudgment[];
