@@ -19,6 +19,7 @@ import { basename, join } from "node:path";
 
 import { ADAPTER_HOST, ADAPTER_SILENT_CODE, SPAWNED_ADMISSIONS, admitUnderAdapter, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { HOSTD_ENV } from "./hostd-pin-files.js";
+import { freeDeadJackSlots } from "./jack-registry.js";
 import { cellKey, type GridCell } from "./measurement-grid.js";
 import { defaultAddressSpaceLimit } from "./direct-limit.js";
 import { PROBE_OK } from "./probe-output.js";
@@ -36,7 +37,9 @@ export const NO_PRIVATE_SERVER = `${ADAPTER_HOST}.no-private-server`;
 const RECORD_SUFFIX = ".qualification.json";
 const SERVER_WAIT_MS = 5000;
 const SERVER_SETTLE_MS = 300;
-const SERVER_STOP_MS = 2000;
+// a TERM is waited for this long: jackd on a Pi can take seconds to end, and a jackd that is KILLed keeps its row in
+// JACK's server table for good (jack-registry.ts)
+const SERVER_STOP_MS = 10000;
 
 /** What a program answers to `--version`: its last word on the line that says `version`. */
 export function parseVersion(text: string): string | undefined {
@@ -78,14 +81,18 @@ const sleepSync = (ms: number): void => {
 /**
  * jackd under a shell that waits for it. A pass is synchronous, so this process cannot reap a child; an unreaped jackd
  * that had a client stays in JACK's server table as alive, and the next start under its name reads "server already active".
- * The shell outlives jackd whatever happens: a TERM reaches jackd once, and HUP is how a stop that gives up kills jackd alone.
- * Killed with its group, the shell could not reap it.
+ * The shell outlives jackd whatever happens: a TERM to the shell is passed to jackd's own pid, and HUP is how a stop that
+ * gives up kills jackd alone. Killed with its group, the shell could not reap it. A TERM to the group does not do: a jackd
+ * that is not its group's leader keeps running after it (measured on a Raspberry Pi 5 and on CI), and the stop's KILL then
+ * left its row in JACK's registry.
  */
-const REAPING_JACKD = `trap : TERM; trap 'kill -KILL $p 2>/dev/null' HUP; jackd "$@" & p=$!; while kill -0 $p 2>/dev/null; do wait $p; done`;
+const REAPING_JACKD = `trap 'kill -TERM $p 2>/dev/null' TERM; trap 'kill -KILL $p 2>/dev/null' HUP; jackd "$@" & p=$!; while kill -0 $p 2>/dev/null; do wait $p; done`;
 
 /** `jackd` on a name of its own and the dummy driver, at the cell's rate and quantum; `undefined` when none came up. */
 export const startPrivateJack: JackStarter = (cell) => {
   const name = `omx-qualify-${String(process.pid)}-${String(cell.quantum)}`;
+  // the rows of servers of ours that were killed, freed before this one asks for a row
+  freeDeadJackSlots();
   let child: ChildProcess;
   let ended = false;
   try {
@@ -110,7 +117,11 @@ export const startPrivateJack: JackStarter = (cell) => {
     }
   };
   const stop = (): void => {
-    signal("SIGTERM");
+    try {
+      if (child.pid !== undefined) process.kill(child.pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
     const until = Date.now() + SERVER_STOP_MS;
     while (running() && Date.now() < until) sleepSync(20);
     if (running()) {
@@ -124,6 +135,8 @@ export const startPrivateJack: JackStarter = (cell) => {
     }
     signal("SIGKILL");
     for (const d of serverDirs(name)) rmSync(d, { recursive: true, force: true });
+    // a jackd that had to be KILLed left its row: it is freed now, not by the next start
+    freeDeadJackSlots();
   };
   const until = Date.now() + SERVER_WAIT_MS;
   while (Date.now() < until) {
