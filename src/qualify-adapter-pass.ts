@@ -81,10 +81,12 @@ const sleepSync = (ms: number): void => {
 /**
  * jackd under a shell that waits for it. A pass is synchronous, so this process cannot reap a child; an unreaped jackd
  * that had a client stays in JACK's server table as alive, and the next start under its name reads "server already active".
- * The shell outlives jackd whatever happens: a TERM reaches jackd once, and HUP is how a stop that gives up kills jackd alone.
- * Killed with its group, the shell could not reap it.
+ * The shell outlives jackd whatever happens: a TERM to the shell is passed to jackd's own pid, and HUP is how a stop that
+ * gives up kills jackd alone. Killed with its group, the shell could not reap it. A TERM to the group does not do: a jackd
+ * that is not its group's leader keeps running after it (measured on a Raspberry Pi 5 and on CI), and the stop's KILL then
+ * left its row in JACK's registry.
  */
-const REAPING_JACKD = `trap : TERM; trap 'kill -KILL $p 2>/dev/null' HUP; jackd "$@" & p=$!; while kill -0 $p 2>/dev/null; do wait $p; done`;
+const REAPING_JACKD = `trap 'kill -TERM $p 2>/dev/null' TERM; trap 'kill -KILL $p 2>/dev/null' HUP; jackd "$@" & p=$!; while kill -0 $p 2>/dev/null; do wait $p; done`;
 
 /** `jackd` on a name of its own and the dummy driver, at the cell's rate and quantum; `undefined` when none came up. */
 export const startPrivateJack: JackStarter = (cell) => {
@@ -115,7 +117,11 @@ export const startPrivateJack: JackStarter = (cell) => {
     }
   };
   const stop = (): void => {
-    signal("SIGTERM");
+    try {
+      if (child.pid !== undefined) process.kill(child.pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
     const until = Date.now() + SERVER_STOP_MS;
     while (running() && Date.now() < until) sleepSync(20);
     if (running()) {
