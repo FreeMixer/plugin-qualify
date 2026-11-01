@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 
-import { SYNC_CONF, parseSyncArgs, parseSyncConf, resolveSyncSettings, runSync, summaryLine, syncHelpText } from "../dist/index.js";
+import { SYNC_CONF, parseSyncArgs, parseSyncConf, pluginCounts, pluginCountsLine, resolveSyncSettings, runSync, summaryLine, syncHelpText } from "../dist/index.js";
 
 const log = (line) => process.stderr.write(`plugin-qualify-sync: ${line}\n`);
 
@@ -54,6 +54,8 @@ try {
   const summary = await runSync(s, { force: parsed.args.force, wait: !parsed.args.noWait, refreshOnly: parsed.args.refreshPins, rejudge: parsed.args.rejudge, memoryOnly: parsed.args.memoryOnly, adapterOnly: parsed.args.adapterOnly, isolatedOnly: parsed.args.isolatedOnly, log });
   if (summary !== undefined) {
     process.stdout.write(`${summaryLine(summary)}\n`);
+    // the records counted per plugin over its offers: a CLAP plugin has a record per offer
+    process.stdout.write(`${pluginCountsLine(pluginCounts(s.qualificationDir))}\n`);
     log(`pins in ${s.pinFile}${summary.sent ? `, ${String(summary.sent)} sent to plugin-hostd` : ""}`);
     // every plugin left unmeasured by one reason of the machine: the run failed, and the unit says so (#192)
     if (summary.machineFailure !== undefined) process.exit(1);

@@ -1749,6 +1749,48 @@ static int scan(int n, char **paths) {
 
 /* ---- the program ---- */
 
+
+/* The parameters a sweep moves, read from this instance: a cookie belongs to the instance that gave it */
+static uint32_t param_rows(const clap_plugin_t *p, struct param_row *rows)
+{
+  const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
+  const uint32_t n_params = params ? params->count(p) : 0;
+  uint32_t n_rows = 0;
+
+  for (uint32_t i = 0; i < n_params && n_rows < MAX_PARAMS; i++) {
+    clap_param_info_t info;
+    memset(&info, 0, sizeof info);
+    if (!params->get_info(p, i, &info)) continue;
+    if (info.flags & CLAP_PARAM_IS_READONLY) continue;
+    if (!isfinite(info.min_value) || !isfinite(info.max_value)) continue;
+    rows[n_rows++] = (struct param_row){ info.id, info.min_value, info.max_value, info.cookie, (info.flags & CLAP_PARAM_IS_STEPPED) != 0 };
+  }
+  return n_rows;
+}
+
+/* Each rate is judged in an instance of its own, made for it, as a host at a fixed rate makes one: the instance before is
+ * destroyed and a new one made and initialised, and the rows of its parameters read again. A plugin that cannot be made
+ * again leaves *ok 0 and NULL. Reactivating one instance at another rate is a path of its own that hosts at a fixed rate
+ * never take, and it decides nothing here (docs/notes/lsp-reactivation-at-another-rate.md). */
+static const clap_plugin_t *instance_for_rate(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d,
+                                              const clap_plugin_t *before, struct param_row *rows, uint32_t *n_rows, int *ok)
+{
+  const clap_plugin_t *p;
+
+  if (before) before->destroy(before);
+  p = factory->create_plugin(factory, &g_clap_host, d->id);
+  if (!p || !p->init(p)) {
+    if (p) p->destroy(p);
+    g_host.plugin = NULL;
+    *ok = 0;
+    return NULL;
+  }
+  g_host.plugin = p;
+  g_host.plugin_thread_pool = p->get_extension(p, CLAP_EXT_THREAD_POOL);
+  *n_rows = param_rows(p, rows);
+  return p;
+}
+
 static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d, const char *path,
                           const char *sha256, const struct options *o) {
   static struct param_row rows[MAX_PARAMS];
@@ -1800,17 +1842,7 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   integrity_layout(p, &pin);
   const clap_plugin_note_ports_t *notes = p->get_extension(p, CLAP_EXT_NOTE_PORTS);
   f.note_inputs = notes ? notes->count(p, true) : 0;
-  const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
-  uint32_t n_rows = 0;
-  const uint32_t n_params = params ? params->count(p) : 0;
-  for (uint32_t i = 0; i < n_params && n_rows < MAX_PARAMS; i++) {
-    clap_param_info_t info;
-    memset(&info, 0, sizeof info);
-    if (!params->get_info(p, i, &info)) continue;
-    if (info.flags & CLAP_PARAM_IS_READONLY) continue;
-    if (!isfinite(info.min_value) || !isfinite(info.max_value)) continue;
-    rows[n_rows++] = (struct param_row){ info.id, info.min_value, info.max_value, info.cookie, (info.flags & CLAP_PARAM_IS_STEPPED) != 0 };
-  }
+  uint32_t n_rows = param_rows(p, rows);
   f.params = n_rows;
 
   struct interposer ip;
@@ -1820,8 +1852,10 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
     int clap_d = 0, midi_d = 0;
     f.latency_note = note_dialect(p, &clap_d, &midi_d) ? (clap_d ? 0 : 1) : -1;
   }
-  for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++)
+  for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++) {
+    if (r > 0 && !(p = instance_for_rate(factory, d, p, rows, &n_rows, &f.headless_ok))) break;
     measure_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, f.interposer ? &ip : NULL, &f, r);
+  }
   if (f.interposer) {
     ip.counts(&f.allocations, &f.locks, &f.syscalls);
     f.n_events = ip.events(f.events, OMX_RT_EV_MAX);
@@ -1830,8 +1864,10 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   f.note_dialect = f.headless_ok ? note_dialect(p, &clap_dialect, &midi_too) : NULL;
   if (f.note_dialect) {
     if (f.interposer) ip.reset();
-    for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++)
+    for (uint32_t r = 0; r < o->n_rates && f.headless_ok; r++) {
+      if (!(p = instance_for_rate(factory, d, p, rows, &n_rows, &f.headless_ok))) break;
       note_sweep_rate(p, o->rates[r], o->frames, o->blocks, clap_dialect, midi_too, f.interposer ? &ip : NULL, &f);
+    }
     if (f.interposer) {
       ip.counts(&f.note_allocations, &f.note_locks, &f.note_syscalls);
       f.n_note_rt_events = ip.events(f.note_rt_events, OMX_RT_EV_MAX);
@@ -1849,9 +1885,10 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
       f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";
       continue;
     }
+    if (!(p = instance_for_rate(factory, d, p, rows, &n_rows, &f.headless_ok))) break;
     cost_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, clap_dialect, o, &f, r);
   }
-  p->destroy(p);
+  if (p) p->destroy(p);
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
   put_integrity(o->path, d->version, sha256, &pin);

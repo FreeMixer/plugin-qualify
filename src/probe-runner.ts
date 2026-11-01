@@ -13,7 +13,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ClapQualifyError, clapQualifyTools, proberOffer, type RtSafetyDocument } from "./clap-qualify.js";
@@ -155,10 +155,21 @@ export function lv2RunnerArgs(
 }
 
 /** One probe output and the bytes it was read from (the bytes are what gets copied beside the record). */
+/** How loaded the machine was when a probe started: the one-minute load average and the cores, so that a crash under a
+ * full machine can be told from one on an idle one. */
+export interface ProbeLoad {
+  readonly loadavg1: number;
+  readonly cores: number;
+}
+
 export interface ProbedTarget {
   readonly bytes: Buffer;
   readonly output: ProbeOutput;
+  /** The most loaded the machine was when any of the target's runs started. */
+  readonly load?: ProbeLoad;
 }
+
+const loadNow = (): ProbeLoad => ({ loadavg1: Math.round(loadavg()[0]! * 100) / 100, cores: availableParallelism() });
 
 function runOne(target: PluginTarget, options: ProbeTargetOptions, invocation: RunnerInvocation): ProbedTarget {
   const env = options.env ?? process.env;
@@ -193,6 +204,7 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions, invocation: R
     }
     // under a bound, the interposer ends the child the moment an allocation is refused, with the status that names it
     if (options.memory !== undefined) runEnv = { ...runEnv, [MEMORY_BOUND_EXIT_ENV]: "1" };
+    const load = loadNow();
     const r = (options.run ?? spawnRunner)(tool, args, runEnv);
     if (r.error !== undefined) {
       throw new ProbeRunnerError(`cannot run the probe runner "${tool}" (${r.error.message}): install plugin-hostd or set ${PROBE_RUNNER_ENV} to plugin-hostd-probe`);
@@ -214,7 +226,7 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions, invocation: R
     if (read.output.plugin.id !== expectedId) {
       throw new ProbeRunnerError(`${tool} measured ${read.output.plugin.id} when asked for ${expectedId}: not judged as the plugin asked for`);
     }
-    return { bytes, output: read.output };
+    return { bytes, output: read.output, load };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -231,8 +243,10 @@ export function targetCells(options: Pick<ProbeTargetOptions, "rates" | "cells">
  */
 export function probeTarget(target: PluginTarget, options: ProbeTargetOptions): ProbedTarget {
   const parts = runnerInvocations(target.format, targetCells(options)).map((invocation) => ({ ...runOne(target, options, invocation), invocation }));
+  const loads = parts.flatMap((p) => (p.load === undefined ? [] : [p.load]));
+  const load = loads.length === 0 ? undefined : loads.reduce((a, b) => (b.loadavg1 > a.loadavg1 ? b : a));
   try {
-    return mergeProbeRuns(parts, options.memory);
+    return { ...mergeProbeRuns(parts, options.memory), ...(load === undefined ? {} : { load }) };
   } catch (e) {
     if (e instanceof ProbeMergeError) throw new ProbeRunnerError(e.message);
     throw e;
@@ -321,7 +335,7 @@ export function qualifyTargets(
       for (const { offer, profiles: forOffer } of byOffer.values()) {
         const probed = probeTarget(target, { ...options, ...measured, offer });
         const plain = judgeProbeOutput(probed.output, forOffer, { admissions });
-        const judgment = adapter === undefined ? plain : { ...plain, adapter };
+        const judgment = { ...plain, ...(adapter === undefined ? {} : { adapter }), ...(probed.load === undefined ? {} : { load: probed.load }) };
         targetRuns.push({ bytes: probed.bytes, judgment });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);
       }

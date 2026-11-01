@@ -1218,6 +1218,53 @@ export function descriptorAccessProblems(dir: string): string[] {
   return problems;
 }
 
+/** What the records say per plugin, not per record: a CLAP plugin has a record per offer (.default, the console's
+ * in-process tier, and .custom, omx-clap-host's isolated tier), and is offered when any of its records is. */
+export interface PluginCounts {
+  readonly plugins: Readonly<Record<string, number>>;
+  readonly offered: Readonly<Record<string, number>>;
+  readonly notOffered: Readonly<Record<string, number>>;
+}
+
+export function pluginCounts(qualificationDir: string): PluginCounts {
+  const offeredBy = new Map<string, boolean>();
+  let files: string[] = [];
+  try {
+    files = readdirSync(qualificationDir).filter((f) => f.endsWith(".qualification.json"));
+  } catch {
+    // no directory, no record
+  }
+  for (const f of files) {
+    let r: { plugin?: { format?: string; id?: string }; tiers?: { offeredOn?: readonly string[] } };
+    try {
+      r = JSON.parse(readFileSync(join(qualificationDir, f), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!r.plugin?.format || !r.plugin.id) continue;
+    const key = `${r.plugin.format}\0${r.plugin.id}`;
+    offeredBy.set(key, (offeredBy.get(key) ?? false) || (r.tiers?.offeredOn?.length ?? 0) > 0);
+  }
+  const plugins: Record<string, number> = {}, offered: Record<string, number> = {}, notOffered: Record<string, number> = {};
+  for (const [key, isOffered] of offeredBy) {
+    const format = key.split("\0")[0]!;
+    plugins[format] = (plugins[format] ?? 0) + 1;
+    const into = isOffered ? offered : notOffered;
+    into[format] = (into[format] ?? 0) + 1;
+  }
+  return { plugins, offered, notOffered };
+}
+
+/** The per-plugin counts as one line: `plugins 1577 (clap 248, lv2 1329), offered 1399 (...), not offered 178 (...)`. */
+export function pluginCountsLine(c: PluginCounts): string {
+  const part = (m: Readonly<Record<string, number>>): string => {
+    const keys = Object.keys(m).sort();
+    const total = keys.reduce((n, k) => n + m[k]!, 0);
+    return `${String(total)}${keys.length === 0 ? "" : ` (${keys.map((k) => `${k} ${String(m[k])}`).join(", ")})`}`;
+  };
+  return `plugins ${part(c.plugins)}, offered ${part(c.offered)}, not offered ${part(c.notOffered)}`;
+}
+
 export function summaryLine(s: SyncSummary): string {
   return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}${s.adapterOnly === undefined ? "" : `, adapter run ${String(s.adapterOnly.measured)}, already ${String(s.adapterOnly.already)}, failed ${String(s.adapterOnly.failed)}`}, ${s.seconds.toFixed(1)} s`;
 }

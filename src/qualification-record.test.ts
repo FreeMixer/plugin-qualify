@@ -84,6 +84,21 @@ describe("the qualification record and the probe output it judged", () => {
     expect(readFileSync(w.probePath, "utf8")).toBe(text);
   });
 
+  it("says how the child that crashed ended, and how loaded the machine was, so the crash is attributable", () => {
+    const dir = join(scratch, "d2");
+    const doc = JSON.parse(fixtureText("plugin-crash"));
+    doc.steps = [...doc.steps, { step: "lifecycle", outcome: "probe.crashed", elapsedMs: 3, signal: "SIGSEGV" },
+      { step: "lifecycle", outcome: "probe.ok", elapsedMs: 3, exitStatus: 0 }];
+    const text = JSON.stringify(doc);
+    const w = writeQualification(dir, Buffer.from(text), { ...judge(text), load: { loadavg1: 3.5, cores: 4 } });
+    expect(w.record.probe.ends).toContainEqual({ step: "lifecycle", outcome: "probe.crashed", signal: "SIGSEGV" });
+    expect(w.record.probe.ends?.some((e) => e.exitStatus === 0)).toBe(false);
+    expect(w.record.probe.load).toEqual({ loadavg1: 3.5, cores: 4 });
+    // a run where every child ended well names no end
+    const ok = fixtureText("success-msi");
+    expect(writeQualification(join(scratch, "d3"), Buffer.from(ok), judge(ok)).record.probe.ends).toBeUndefined();
+  });
+
   it("replaces the pair on a rescan of the same binary and offer, leaving no half-written file", () => {
     const dir = join(scratch, "e");
     const text = fixtureText("success-msi");
