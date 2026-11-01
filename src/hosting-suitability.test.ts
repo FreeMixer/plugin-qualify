@@ -165,6 +165,25 @@ describe("a fully measured, clean plugin earns the RT thread", () => {
   });
 });
 
+describe("a plugin call that returned with a callee-saved register changed runs in a worker of its own", () => {
+  // the LSP limiters' run() left d14 and d15 changed on a Raspberry Pi 5: the measurer's guard put them back, so the
+  // measurement is whole, but a host's guard keeps only its own frame, not the other members' state in the process
+  it("rates conditional, takes the isolated path, and names the registers, the call and the block", () => {
+    const v = classify(measured({}, { stability: { abi: { clobbered: true, registers: ["d14", "d15"], call: "run", block: 227 } } }));
+    expect(v.rating).toBe("conditional");
+    expect(v.path).toBe("isolated");
+    const r = v.reasons.find((x) => x.code === HOSTING_CODE.stabilityCalleeSavedClobbered);
+    expect(r).toMatchObject({ dimension: "stability", rating: "conditional", params: { registers: "d14,d15", call: "run", block: 227 } });
+  });
+
+  it("a guard that saw no clobber changes nothing: the clean plugin keeps the RT thread", () => {
+    const v = classify(measured({}, { stability: { abi: { clobbered: false } } }));
+    expect(v.rating).toBe("suitable");
+    expect(v.path).toBe("in-process");
+    expect(v.reasons.some((x) => x.code === HOSTING_CODE.stabilityCalleeSavedClobbered)).toBe(false);
+  });
+});
+
 describe("absence is never a pass — every unmeasured dimension isolates", () => {
   it("no measurements at all reads unknown, not suitable", () => {
     const v = classifyPluginHosting(descriptor(), { rate: RATE });

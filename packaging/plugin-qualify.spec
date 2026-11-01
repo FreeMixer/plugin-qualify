@@ -22,7 +22,7 @@ BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: pkgconfig(plugin-hostd) >= 0.15.3
 BuildRequires: pkgconfig(omx-contract) >= 3.4.0
-BuildRequires: pkgconfig(omx-clap-lv2) >= 0.13.0
+BuildRequires: pkgconfig(omx-clap-lv2) >= 0.26.2
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
 BuildRequires: systemd-rpm-macros
 
@@ -41,8 +41,8 @@ Requires: omx-clap-host >= 0.23.0
 # the hosting codes' TypeScript modules, which the shipped tools/gen-hosting-codes.mjs reads through
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
 # /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on; the host above brings the same version
-# 0.25.1: the hosting.memory.* codes (#114)
-Requires: omx-clap-core >= 0.25.1
+# 0.25.1: the hosting.memory.* codes (#114); 0.26.2: the guarded plugin call and hosting.stability.callee-saved-clobbered
+Requires: omx-clap-core >= 0.26.2
 %{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
