@@ -1,3 +1,22 @@
+plugin-qualify (0.18.5) unstable; urgency=medium
+
+  * Each rate is measured on an instance of its own. Reactivating one instance at
+    another rate crashed LSP's probes; the CLAP crashes rerun on a Raspberry Pi 5
+    went from 56 to 1.
+  * A record says how the probe ended and its load, and the sync prints its counts
+    per plugin.
+  * A private JACK server stops on its TERM. A TERM to the shell's process group
+    left jackd running, so every stop ended in a KILL that left the server's row
+    in JACK's registry. Once the eight rows were taken, every adapter run failed.
+    The rows of our own dead servers are freed before a start.
+  * lv2_measure connects every port before it activates a plugin, as every host
+    does. Plugins that read a port in activate (swh's IIR filters) no longer crash
+    it.
+  * lv2_measure names Qt's offscreen platform when there is no display, so a Qt
+    plugin instantiates instead of aborting (samplv1, drumkv1).
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sun, 01 Nov 2026 07:34:34 +0100
+
 plugin-qualify (0.18.4) unstable; urgency=medium
 
   * The isolated step no longer refuses instruments as silent: its notes start after
