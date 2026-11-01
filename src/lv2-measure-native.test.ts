@@ -98,6 +98,26 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(r.status, r.stderr).toBe(0);
   });
 
+  live("a plugin whose run returns with callee-saved registers changed is measured to the end, and the record names it", () => {
+    // the LSP limiters' run() left d15 changed on a Raspberry Pi 5, where this measurer kept its sample rate: the next
+    // instance opened at 0 Hz and crashed. Through the guard the measurer's registers come back
+    expect(existsSync(join(LV2_FIXTURES, "abi-breaker.lv2", "gain.so"))).toBe(true);
+    const r = spawnSync(MEASURE, ["urn:plugin-qualify:fixture:lv2-abi-breaker", "48000", "64", "3", "2"], {
+      encoding: "utf8",
+      env: { PATH: process.env["PATH"], LV2_PATH: LV2_FIXTURES, LD_PRELOAD: INTERPOSER },
+    });
+    expect(r.signal, r.stderr).toBeNull();
+    expect(r.status, r.stderr).toBe(0);
+    const line = JSON.parse(r.stdout) as { abi?: { clobbered: boolean; registers?: string[]; call?: string } };
+    const want = process.arch === "arm64" ? ["x19", "d15"] : ["rbx", "r15"];
+    expect(line.abi).toMatchObject({ clobbered: true, registers: want, call: "run" });
+    const clean = JSON.parse(spawnSync(MEASURE, [SAFE, "48000", "64", "3", "2"], {
+      encoding: "utf8",
+      env: { PATH: process.env["PATH"], LV2_PATH: LV2_FIXTURES, LD_PRELOAD: INTERPOSER },
+    }).stdout) as { abi?: { clobbered: boolean } };
+    expect(clean.abi).toEqual({ clobbered: false });
+  });
+
   live("plays an instrument through its MIDI input and counts that apart: the allocating synth only once played", () => {
     const safe = measure(SYNTH, "48000", "512", "1", "1");
     const alloc = measure(SYNTH_ALLOC, "48000", "512", "1", "1");
