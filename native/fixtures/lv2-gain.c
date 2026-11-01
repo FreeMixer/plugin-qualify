@@ -112,8 +112,9 @@ static void cleanup(LV2_Handle h) { free(h); }
 static const void *extension_data(const char *uri) { (void)uri; return NULL; }
 
 #ifdef FIXTURE_ABI_BREAKER
-__attribute__((visibility("hidden"))) int fixture_abi_break;
-__attribute__((visibility("hidden"))) void fixture_run_c(LV2_Handle h, uint32_t frames);
+/* used: only the assembly below names them, which link-time optimisation cannot see */
+__attribute__((used, visibility("hidden"))) int fixture_abi_break;
+__attribute__((used, visibility("hidden"))) void fixture_run_c(LV2_Handle h, uint32_t frames);
 void fixture_run_breaking(LV2_Handle h, uint32_t frames);
 void fixture_run_c(LV2_Handle h, uint32_t frames) {
   static unsigned calls;
