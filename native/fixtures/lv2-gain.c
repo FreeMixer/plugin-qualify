@@ -15,11 +15,15 @@
 #include <lv2/core/lv2.h>
 
 /* leaks.lv2: built with -DFIXTURE_LEAKS_KB, run() also takes that many KB every block and never gives them back.
- * large-activate.lv2: built with -DFIXTURE_ACTIVATE_MB, activate() takes that many MiB, touched, held until cleanup. */
+ * large-activate.lv2: built with -DFIXTURE_ACTIVATE_MB, activate() takes that many MiB, touched, held until cleanup.
+ * activate-reads.lv2: built with -DFIXTURE_ACTIVATE_READS, activate() reads its gain control, as swh's IIR filters
+ * (lowpass_iir and its kin) read theirs: a host that activates before it connects the ports crashes it. */
 #if defined FIXTURE_LEAKS_KB
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-leaks"
 #elif defined FIXTURE_ACTIVATE_MB
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-large-activate"
+#elif defined FIXTURE_ACTIVATE_READS
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-activate-reads"
 #elif defined FIXTURE_SPACED
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-spaced"
 #elif defined FIXTURE_ALLOCATES
@@ -59,6 +63,11 @@ static void connect_port(LV2_Handle h, uint32_t port, void *data) {
 
 static void activate(LV2_Handle h) {
   (void)h;
+#ifdef FIXTURE_ACTIVATE_READS
+  static volatile float read_at_activate;
+  read_at_activate = *((struct gain *)h)->gain;
+  (void)read_at_activate;
+#endif
 #ifdef FIXTURE_ACTIVATE_MB
   const size_t bytes = (size_t)FIXTURE_ACTIVATE_MB << 20;
   char *block = malloc(bytes);
