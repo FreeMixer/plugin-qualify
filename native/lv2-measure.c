@@ -397,8 +397,9 @@ static void atom_reset(const struct host *h, uint8_t *buf, uint32_t port) {
 /* Open one instance the way a real host does: the provider's feature block under the run's
  * feature options, at this instance's rate and block, with its own worker schedule. A strict
  * host refuses a plugin requiring a feature it does not offer before instantiating it.
- * `bind` also connects every port to a buffer of the type it expects. */
-static struct rig *rig_open(struct host *h, double rate, uint32_t block, int bind) {
+ * Every port is connected to a buffer of the type it expects before anything activates it, as every host does:
+ * swh's IIR filters and LSP's plugins read their ports at activate, and crashed activated unconnected. */
+static struct rig *rig_open(struct host *h, double rate, uint32_t block) {
   struct rig *r = calloc(1, sizeof *r);
   if (r == NULL) return NULL;
   r->h = h;
@@ -421,8 +422,6 @@ static struct rig *rig_open(struct host *h, double rate, uint32_t block, int bin
   if (r->wk != NULL) h->worker_interface = 1;
   for (int i = 0; i < h->n_params; i++) r->pvals[i] = h->params[i].def;
   r->note_block = -1;
-  if (!bind) return r;
-
   r->audio_slots = (size_t)h->n_audio_in + h->n_audio_out + h->n_cv + 2;
   r->audio = calloc(r->audio_slots * block, sizeof(float));
   r->controls = calloc(h->n_ports, sizeof(float));
@@ -922,7 +921,7 @@ static void measure_latency(struct host *H, double rate, uint32_t block, struct 
     L->unmeasured = "no-audio-in", L->detail = "no audio input to put an impulse in and no MIDI input to play";
     return;
   }
-  struct rig *r = rig_open(H, rate, block, 1);
+  struct rig *r = rig_open(H, rate, block);
   const size_t cap = (size_t)LATENCY_DECLARED_MAX + LATENCY_TAIL + block;
   float *mag = r ? calloc(cap, sizeof *mag) : NULL;
   if (r == NULL || mag == NULL) {
@@ -1002,7 +1001,7 @@ static void measure_cost(struct host *H, double rate, uint32_t block, struct cos
     }
     C->held = held > (long)MIDI_KEYS ? MIDI_KEYS : (uint32_t)held;
   }
-  struct rig *r = rig_open(H, rate, block, 1);
+  struct rig *r = rig_open(H, rate, block);
   const uint32_t total = COST_WARMUP_BLOCKS + COST_BLOCKS;
   double *ns = r ? calloc(total, sizeof *ns) : NULL;
   if (r == NULL || ns == NULL) {
@@ -1105,7 +1104,7 @@ static void footprint_measure(struct host *H, double rate, uint32_t block, struc
     snprintf(fp->detail, sizeof fp->detail, "the resident set could not be read");
     return;
   }
-  struct rig *r = rig_open(H, rate, block, 1);
+  struct rig *r = rig_open(H, rate, block);
   if (r == NULL) {
     snprintf(fp->unmeasured, sizeof fp->unmeasured, "refused-instantiation");
     snprintf(fp->detail, sizeof fp->detail, "the plugin would not instantiate for the footprint");
@@ -1128,7 +1127,7 @@ static void footprint_measure(struct host *H, double rate, uint32_t block, struc
     }
   }
   const long before = rss_kb();
-  struct rig *q = rig_open(H, rate, block, 1);
+  struct rig *q = rig_open(H, rate, block);
   if (q != NULL) {
     lilv_instance_activate(q->inst);
     footprint_blocks(q, block, &seed, 0, 0);
@@ -1212,6 +1211,10 @@ static void usage(FILE *out, const char *self) {
 }
 
 int main(int argc, char **argv) {
+  /* A Qt plugin aborts at instantiate when it finds no display (synthv1, samplv1, padthv1, drumkv1). The console's hosts
+   * on a Zynthian run under its X server; this measurer runs without one, so a display-less run names Qt's offscreen
+   * platform, which instantiates as the X server does. A display or a platform already named is left as it is. */
+  if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) setenv("QT_QPA_PLATFORM", "offscreen", 0);
   /* lilv refuses a relative LV2_PATH segment and the world it leaves is a null dereference: resolve them first. */
   if (lv2_path_resolve_env() != 0) {
     fprintf(stderr, "lv2-measure: cannot resolve LV2_PATH against the working directory: %s\n", strerror(errno));
@@ -1347,7 +1350,7 @@ int main(int argc, char **argv) {
   const char *soak_env = getenv("OMX_SOAK_SECONDS");
   if (soak_env != NULL && atoi(soak_env) > 0) {
     const double soak_s = atof(soak_env);
-    struct rig *si = rig_open(H, rate, block, 1);
+    struct rig *si = rig_open(H, rate, block);
     if (si == NULL) {
       fprintf(jout, "{\"uri\":");
       json_str(jout, uri);
@@ -1458,7 +1461,7 @@ int main(int argc, char **argv) {
   int instantiated = 0, failed = 0;
   int threads_after_first = -1;
   for (int c = 0; c < cycles; c++) {
-    struct rig *ci = rig_open(H, rate, block, 0);
+    struct rig *ci = rig_open(H, rate, block);
     if (ci == NULL) {
       failed++;
       continue;
@@ -1490,7 +1493,7 @@ int main(int argc, char **argv) {
   struct omx_rt_event seen[OMX_RT_EV_MAX];
   int n_seen = 0;
   for (int rep = 0; rep < repeats; rep++) {
-  struct rig *inst = rig_open(H, rate, block, 1);
+  struct rig *inst = rig_open(H, rate, block);
   uint64_t r_allocs = 0, r_locks = 0, r_syscalls = 0;
   if (inst != NULL) {
     /* Every port gets the buffer type it actually expects (rig_open). An atom port handed a
@@ -1547,7 +1550,7 @@ int main(int argc, char **argv) {
     struct omx_rt_event seen[OMX_RT_EV_MAX];
   } ns = {0};
   if (H->midi_port >= 0) {
-    struct rig *ni = rig_open(H, rate, block, 1);
+    struct rig *ni = rig_open(H, rate, block);
     if (ni != NULL) {
       fill_input(ni, &rng, use_noise, block, rate, 0);
       lilv_instance_activate(ni->inst);
@@ -1660,7 +1663,7 @@ int main(int argc, char **argv) {
     const double r = OMX_DECLARED_RATES[ri];
     int ok = 0, nonfinite = 0;
     double rms_out = -1.0;
-    struct rig *pr = rig_open(H, r, block, 1);
+    struct rig *pr = rig_open(H, r, block);
     if (pr != NULL) {
       lilv_instance_activate(pr->inst);
       double sum = 0.0;

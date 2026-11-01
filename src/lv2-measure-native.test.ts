@@ -74,6 +74,30 @@ describe("lv2-measure, live — the LV2 fixtures", () => {
     expect(unsafe.line["rtSafety"]).toMatchObject({ interposer: true, swept: true, allocationsInRun: 1024 });
   });
 
+  live("connects every port before it activates: a plugin that reads its control at activate is measured, not crashed", () => {
+    // swh's IIR filters and LSP's plugins read their ports at activate; activated unconnected, 28 LV2 plugins on a
+    // Raspberry Pi 5 were dimmed probe.crashed by this measurer, not by themselves
+    expect(existsSync(join(LV2_FIXTURES, "activate-reads.lv2", "gain.so"))).toBe(true);
+    const r = spawnSync(MEASURE, ["urn:plugin-qualify:fixture:lv2-activate-reads", "48000", "64", "3", "2"], {
+      encoding: "utf8",
+      env: { PATH: process.env["PATH"], LV2_PATH: LV2_FIXTURES, LD_PRELOAD: INTERPOSER },
+    });
+    expect(r.signal, r.stderr).toBeNull();
+    expect(r.status, r.stderr).toBe(0);
+  });
+
+  live("names Qt's offscreen platform where there is no display: a Qt plugin is measured, not aborted", () => {
+    // synthv1, samplv1, padthv1 and drumkv1 abort at instantiate without a display; the probe runs without one, the
+    // Zynthian's hosts under its X server, where they instantiate
+    expect(existsSync(join(LV2_FIXTURES, "needs-display.lv2", "gain.so"))).toBe(true);
+    const r = spawnSync(MEASURE, ["urn:plugin-qualify:fixture:lv2-needs-display", "48000", "64", "1", "1"], {
+      encoding: "utf8",
+      env: { PATH: process.env["PATH"], LV2_PATH: LV2_FIXTURES },
+    });
+    expect(r.signal, r.stderr).toBeNull();
+    expect(r.status, r.stderr).toBe(0);
+  });
+
   live("plays an instrument through its MIDI input and counts that apart: the allocating synth only once played", () => {
     const safe = measure(SYNTH, "48000", "512", "1", "1");
     const alloc = measure(SYNTH_ALLOC, "48000", "512", "1", "1");
