@@ -18,9 +18,10 @@ import { basename, join } from "node:path";
 
 import { ADAPTER_PASS_CELLS, startPrivateJack, type JackStarter } from "./qualify-adapter-pass.js";
 import type { GridCell } from "./measurement-grid.js";
-import type { PinEntry } from "./pins-file.js";
+import { clapPinUri, type PinEntry } from "./pins-file.js";
 import { PROBE_OK, readProbeOutput } from "./probe-output.js";
-import type { IsolatedFigures, QualificationRecord, RunBlock, RunStep } from "./qualification-record.js";
+import { HOSTING_CODE } from "./hosting-codes.js";
+import type { IsolatedFigures, QualificationRecord, RecordVerdict, RunBlock, RunStep } from "./qualification-record.js";
 import { ISOLATED_SIGNAL_TOOL_ENV, ISOLATED_SIGNAL_TOOL_NAME } from "./qualify-declarations.js";
 import { locateNativeTool, toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
@@ -97,9 +98,34 @@ function figuresOf(run: IsolatedRunFacts): IsolatedFigures | undefined {
   };
 }
 
-/** Whether a record's outcome calls for the isolated step: rated `conditional` by some host, or a probe that crashed or hung. */
+/**
+ * A verdict whose only gap is memory nobody measured: it reads `unknown` and every reason that is not `suitable` is
+ * `hosting.memory.unmeasured`. Nothing says the plugin is unfit, so it is hosted in a worker of its own until its
+ * footprint is measured, and the isolated step is what shows it running alone.
+ */
+export function memoryGapOnly(v: Pick<RecordVerdict, "measured" | "rating" | "reasons">): boolean {
+  if (!v.measured || v.rating !== "unknown") return false;
+  const open = v.reasons.filter((r) => r.rating !== "suitable");
+  return open.length > 0 && open.every((r) => r.code === HOSTING_CODE.memoryUnmeasured);
+}
+
+/** Whether a record's outcome calls for the isolated step: rated `conditional` by some host, a memory gap and nothing else, or a probe that crashed or hung. */
 export function owesIsolated(record: QualificationRecord): boolean {
-  return PROBE_FAILED_HARD.has(record.probe.outcome) || record.verdicts.some((v) => v.measured && v.rating === "conditional");
+  return PROBE_FAILED_HARD.has(record.probe.outcome) || record.verdicts.some((v) => v.measured && (v.rating === "conditional" || memoryGapOnly(v)));
+}
+
+/**
+ * The pin a record can give back to a plugin whose state lost it: the bytes the probe pinned, and the word of a decided
+ * isolated step (`isolated` or `refused`). `undefined` when the record holds no whole pin or the step decided nothing.
+ */
+export function pinFromRecord(record: QualificationRecord): PinEntry | undefined {
+  const step = record.run?.steps.find((s) => s.step === RUN_STEP.isolated);
+  if (step === undefined || step.result === ISOLATED_RESULT.notRun) return undefined;
+  const { files, layout } = record.binary;
+  if (files === undefined || files.length === 0 || layout === undefined) return undefined;
+  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const uri = record.plugin.format === "clap" ? clapPinUri(record.binary.path, record.plugin.id) : record.plugin.id;
+  return pinAfterStep({ uri, integrity: { files: sorted, layout } }, step);
 }
 
 /** Whether the isolated step saw this plugin running alone. A record's word alone never says so. */

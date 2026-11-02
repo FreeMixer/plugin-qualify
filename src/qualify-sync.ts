@@ -35,7 +35,7 @@ import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
 import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./qualify-adapter-pass.js";
-import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
+import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, pinFromRecord, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
 import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
@@ -866,8 +866,8 @@ export function qualifyItem(ctx: SyncContext, item: SyncItem, files: readonly Fi
  * The isolated steps the records of a state still owe, each extending its record's run. A plugin's pin follows its step, and
  * a step that could not run stays owed: the next pass tries it again.
  */
-export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly state: SyncState; readonly isolated: number; readonly refused: number; readonly notRun: number } {
-  const count = { isolated: 0, refused: 0, notRun: 0 };
+export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly state: SyncState; readonly isolated: number; readonly refused: number; readonly notRun: number; readonly repinned: number } {
+  const count = { isolated: 0, refused: 0, notRun: 0, repinned: 0 };
   const runner = ctx.isolatedRunner ?? spawnedIsolatedRunner();
   const host = ctx.settings.hostProfile.id;
   const entries: Record<string, SyncEntry> = {};
@@ -885,7 +885,17 @@ export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly sta
           return p;
         }
         const done = completeIsolated(path, record, p.pin?.uri ?? record.plugin.id, isolatedCell(record, host), runner, isolatedEnv(ctx));
-        if (done === undefined) return p;
+        if (done === undefined) {
+          // a plugin the isolated step already decided but the state holds no pin for: the record keeps the bytes and the
+          // step, and the pin follows them (hostd names the files, as at every other pin)
+          if (p.pin !== undefined) return p;
+          const rebuilt = withHostdFiles(ctx, pinFromRecord(record));
+          if (rebuilt === undefined) return p;
+          count.repinned++;
+          ctx.log(`${p.uri}: pinned again from its record (isolated step ${rebuilt.verdict ?? "undecided"})`);
+          const { code: _c, ...rest } = p;
+          return rest.outcome === "qualified" && rebuilt.verdict === "refused" ? { ...rest, outcome: "refused" as const, pin: rebuilt } : { ...rest, pin: rebuilt };
+        }
         ctx.log(`${p.uri}: isolated step ${done.step.result}${done.step.code === undefined ? "" : ` (${done.step.code})`}`);
         const pin = pinAfterStep(p.pin, done.step);
         const { pin: _pin, code: _code, ...rest } = p;
@@ -899,7 +909,7 @@ export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly sta
       }),
     };
   }
-  return { ...count, state: count.isolated + count.refused + count.notRun === 0 ? state : { ...state, entries } };
+  return { ...count, state: count.isolated + count.refused + count.notRun + count.repinned === 0 ? state : { ...state, entries } };
 }
 
 // --- the distributed records ----------------------------------------------------------------------------------------
