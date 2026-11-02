@@ -68,7 +68,7 @@ jobs:
     name: Install and qualify (${{ matrix.image }})
     needs: [rpm, deb]
     if: ${{ !cancelled() }}
-    runs-on: ${{ vars.OMX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.OMX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     permissions:
       contents: read
