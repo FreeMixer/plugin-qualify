@@ -431,6 +431,24 @@ net.createServer((c) => c.on("data", (d) => {
     expect(j.hosts[0]!.verdict).toEqual(asIf.hosts[0]!.verdict);
   });
 
+  it.each([-201, -202])("a host with no JACK client to give (add answers %i) is no evidence: the plugin is not refused", (resp) => {
+    const run = { installed: true, steps: [{ cmd: "add" as const, resp }] };
+    const adapter = classifyProtocolRun(ADAPTER_HOST, run);
+    expect(adapter).toMatchObject({ measured: false, admitted: false, code: "omx-clap-host.no-jack-client", params: { resp } });
+    expect(admissionRating(adapter)).toBe("unknown");
+    expect(classifyModHostRun(run)).toMatchObject({ measured: false, code: "mod-host.no-jack-client" });
+    const output = readFixture("success-msi");
+    const lv2 = { ...output, plugin: { ...output.plugin, format: "lv2" as const, id: "urn:x:lv2" } };
+    const j = judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE], { admissions: { "omx-clap-host": adapter } });
+    expect(j.hosts[0]!.arm).toBe("declaration");
+    expect(j.hosts[0]!.verdict).toEqual(judgeProbeOutput(lv2, [OMX_CLAP_HOST_PROFILE]).hosts[0]!.verdict);
+  });
+
+  it("a JACK answer to anything but the add, and any other refusal of the add, stays the host's", () => {
+    expect(classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: 0 }, { cmd: "remove", resp: -201 }] })).toMatchObject({ measured: true, code: "omx-clap-host.resp-201" });
+    expect(classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -203 }] })).toMatchObject({ measured: true, code: "omx-clap-host.resp-203" });
+  });
+
   it("decides an asked omx-clap-host verdict of an LV2 plugin by the run, and never a CLAP plugin's", () => {
     const refused = { "omx-clap-host": classifyProtocolRun(ADAPTER_HOST, { installed: true, steps: [{ cmd: "add", resp: -512 }] }) };
     const output = readFixture("success-msi");
