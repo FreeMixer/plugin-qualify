@@ -25,7 +25,9 @@ def path_of(uri):
 
 def main():
     try:
-        import lilv
+        from lilv_load import load_lilv
+
+        lilv = load_lilv()
     except ImportError as e:
         print(f"lv2_resolve: lilv's Python bindings are not installed: {e}", file=sys.stderr)
         return 2
