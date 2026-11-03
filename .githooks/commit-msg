@@ -1,6 +1,9 @@
 #!/bin/sh
 # The commit-msg hook of a FreeMixer repository: the checker is FreeMixer/.github's commit-message-check, read from a
-# checkout of it (FREEMIXER_DOTGITHUB, else ../freemixer-dotgithub beside this repository). With no checkout the
-# commit is refused: a checker that cannot run is never a pass. Enable once per clone: git config core.hooksPath .githooks
-d=${FREEMIXER_DOTGITHUB:-$(git rev-parse --show-toplevel)/../freemixer-dotgithub}
+# checkout of it: FREEMIXER_DOTGITHUB, else the v1 clone ~/.cache/omx/freemixer-dotgithub, else ../freemixer-dotgithub
+# beside this repository. With none the commit is refused: a checker that cannot run is never a pass.
+# Enable once per clone: git config core.hooksPath .githooks
+d=${FREEMIXER_DOTGITHUB:-}
+[ -n "$d" ] || { [ -d "$HOME/.cache/omx/freemixer-dotgithub/.github" ] && d=$HOME/.cache/omx/freemixer-dotgithub; }
+[ -n "$d" ] || d=$(git rev-parse --show-toplevel)/../freemixer-dotgithub
 exec "$d/.github/actions/commit-message-check/commit-message-check.sh" --msg-file "$1"
