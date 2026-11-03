@@ -133,13 +133,18 @@ one more costs.
 
 A host with a memory budget reads them, at every cell it runs, and the verdict follows:
 `hosting.memory.within-ceiling`, `hosting.memory.above-ceiling` (`unsuitable`), or `hosting.memory.unmeasured` (`unknown`,
-since a missing figure never reads as fitting). `openmixer-console` has one, sized for the desk, and the Raspberry Pi hosts
+since a missing figure never reads as fitting). `openmixer-console` has one, sized for a console machine, and the Raspberry Pi hosts
 `openmixer-pi-4gb` and `openmixer-pi-8gb`, at 48000/128 and 48000/256, have one each. The Pi budgets are not measured on a Pi
 yet, so a plugin under them is `conditional`, `hosting.memory.within-provisional-ceiling`: that gives the figure and the
 ceiling and does not say the plugin fits. The other hosts have no budget, and read nothing.
 
 A soak (LV2; the CLAP prober has no continuous render yet) also reads the growth: past 10 MB per minute of audio over its
 second half, provisional, the rate fails as `leaks`.
+
+Why each piece is built this way: the technical note
+[How a plugin's memory is judged](https://openmixer.org/notes/how-a-plugins-memory-is-judged). A plugin that returns with
+a callee-saved register changed is the note
+[Plugins that change a callee-saved register](https://openmixer.org/notes/plugins-that-change-a-callee-saved-register).
 
 ### How long a run takes
 
@@ -682,7 +687,7 @@ no verdict a run could decide.
 `memoryGrowth` under `notMeasured`, and the last line says `leaks not measured`.
 
 On a Raspberry Pi 5 a plugin takes under 0.6 s at the median, 5 s at the 90th percentile and 22 s at the 99th; about an
-hour at most for the 1,542 plugins of the Zynthian set. Those are upper bounds: twice the time the 2026-10-28 records say a
+hour at most for the 1,542 plugins of the Zynthian set. Those are upper bounds: twice the time the October 2026 records say a
 whole pass at one cell took, which also ran 30 lifecycles, the sweep, the latency and the cost. A plugin that hangs
 takes `budget_s` a cell. The test fixtures take 0.1 s each, both cells, on an x86-64 desktop.
 
