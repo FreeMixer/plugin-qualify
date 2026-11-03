@@ -70,11 +70,6 @@ jobs:
       - name: Install and build
         run: pnpm install --frozen-lockfile
 
-      # a public repository states facts and points into no private repository; the self-test turns
-      # each kind of pointer red in each kind of file
-      - name: No tracked file points into a private repository
-        run: pnpm run check:private-refs
-
       # the overlap audit's numbers come from units found by name; its self-test proves a unit, a pair and a
       # count on a planted tree, and that a missing unit is refused rather than counted as zero
       - name: The overlap audit measures what it says
@@ -120,19 +115,7 @@ jobs:
       publish: false
       arm: false  # aarch64/arm64 build at release only
 
-  # A commit message is published like a file. A pull request's own commits must carry no
-  # attribution line (the commit-message-check action of FreeMixer/.github); what is already on the base is not read.
-  commit-message-check:
-    name: commit messages pass the message check
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-      # @main until FreeMixer/.github moves v1 past the action
-      - uses: FreeMixer/.github/.github/actions/commit-message-check@main
-        with:
-          base-ref: ${{ github.event.pull_request.base.ref }}
+  # the checks every FreeMixer repository runs on what it publishes: commit messages, private references, and no
+  # local copy of either (FreeMixer/.github's public-sources-check)
+  public-sources:
+    uses: FreeMixer/.github/.github/workflows/public-sources-check.yml@v1
