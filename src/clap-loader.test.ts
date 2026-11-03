@@ -38,18 +38,16 @@ import { resolveTargets } from "./qualify-cli.js";
 import { clapQualifyToolPath } from "./tool-paths.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
-/** The plugins of omx-clap-host 0.10.0's fake.clap, in the order its scan lists them. */
-const FAKE_NAMES = [
-  "wide", "sidechain", "notes", "passthrough", "widen", "auxout", "zero-port", "too-wide", "two-mains", "many-aux",
-  "aux-wide", "aux-max", "mono-stereo", "stereo-mono", "surround", "surround-bad", "surround-plain", "surround-short",
-  "ambisonic", "ambisonic-bad", "configs", "configurable", "surround-refuses",
-];
 /** A system CLAP directory that does not exist: a host with plugins in /usr/lib/clap (omx-clap-host installs some) must not change what a test finds. */
 const NO_SYSTEM = { [CLAP_SYSTEM_DIR_ENV]: "/nonexistent/omx-no-system-clap" };
 const FAKE_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "fake.json"), "utf8");
 const MIXED_JSON = readFileSync(join(PKG, "fixtures", "clap-scan", "mixed.json"), "utf8");
 const ZERO_PATH_BUNDLE = join(PKG, "fixtures", "zero-path.lv2");
 const FAKE_ID = "org.omx-clap-host.test";
+/** The plugins of omx-clap-host's fake.clap, in the order its scan lists them: read from the golden, which is the real tool's. */
+const FAKE_NAMES: string[] = (JSON.parse(FAKE_JSON) as { files: { plugins: { id: string }[] }[] }).files
+  .flatMap((f) => f.plugins.map((p) => p.id))
+  .map((id) => id.slice(`${FAKE_ID}.`.length));
 
 const scratch = mkdtempSync(join(tmpdir(), "clap-loader-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

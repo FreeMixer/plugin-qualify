@@ -45,10 +45,10 @@ export function runDecides(profile: HostProfile, format: string, admission: Host
 /** What running the plugin under one host came to. */
 export interface HostAdmission {
   readonly host: AdmittedHost | typeof ADAPTER_HOST;
-  /** False when the host could not be run (not installed): there is no evidence either way. */
+  /** False when the host could not be run (not installed, no JACK client): there is no evidence either way. */
   readonly measured: boolean;
   readonly admitted: boolean;
-  /** Why not: `<host>.resp-<n>`, `<host>.signal-<SIG>`, `mod-host.died-on-add`, `jalv.unknown-port-type`, `<host>.not-installed`, … */
+  /** Why not: `<host>.resp-<n>`, `<host>.signal-<SIG>`, `mod-host.died-on-add`, `jalv.unknown-port-type`, `<host>.not-installed`, `<host>.no-jack-client`, … */
   readonly code?: string;
   readonly params: Readonly<Record<string, string | number>>;
 }
@@ -103,6 +103,12 @@ export function admissionRating(admission: HostAdmission): "unsuitable" | "unkno
   return !admission.measured || UNPROVEN_SOUND.includes(admission.code ?? "") ? "unknown" : "unsuitable";
 }
 
+/**
+ * ERR_JACK_CLIENT_CREATION and ERR_JACK_CLIENT_ACTIVATION (mod-host's host-errors.h): the add could not get a JACK client,
+ * which says nothing of the plugin. omx-clap-host opens JACK at the first add since 0.26.1, so a host with no server answers these.
+ */
+const JACK_CLIENT_RESPS: readonly number[] = [-201, -202];
+
 /** The verdict of a run of a host that speaks mod-host's protocol: the first step that did not answer `resp 0` decides. */
 export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAdmission {
   if (!run.installed) return notInstalled(host);
@@ -114,6 +120,7 @@ export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAd
       return s.cmd === "add" ? refused(host, "died-on-add", { how: s.died }) : refused(host, "died", { step: s.cmd, how: s.died });
     }
     if (s.resp === undefined) return refused(host, "no-answer", { step: s.cmd });
+    if (s.cmd === "add" && s.resp !== undefined && JACK_CLIENT_RESPS.includes(s.resp)) return { host, measured: false, admitted: false, code: `${host}.no-jack-client`, params: { resp: s.resp } };
     // the host answers an error as a negative number (`resp -102`); the code carries its magnitude
     if (s.resp < 0) return refused(host, `resp-${-s.resp}`, { step: s.cmd, resp: s.resp });
   }

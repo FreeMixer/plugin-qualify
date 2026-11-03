@@ -1201,7 +1201,9 @@ class _Host:
     def __init__(self, rate, block):
         import ctypes
 
-        import lilv
+        from lilv_load import load_lilv
+
+        lilv = load_lilv()
 
         self.urids = {}
 
@@ -1362,7 +1364,9 @@ def probe_one(host, uri, symbol, cycles=DEFAULT_RUN_CYCLES):
     """
     import numpy as np
 
-    import lilv
+    from lilv_load import load_lilv
+
+    lilv = load_lilv()
 
     plugin = host.world.get_all_plugins().get_by_uri(host.world.new_uri(uri))
     if plugin is None:
@@ -1453,7 +1457,9 @@ def instantiate_connected(host, plugin, overrides=None):
     """
     import numpy as np
 
-    import lilv
+    from lilv_load import load_lilv
+
+    lilv = load_lilv()
 
     host.worker.reset()
     instance = lilv.Instance(plugin, float(host.rate), host.features)

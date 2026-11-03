@@ -178,7 +178,9 @@ class Scanner:
     def __init__(self):
         # lilv is imported here, not at module load: the owner mapping and the pure helpers
         # (test_scan.py) run on a host without the bindings, the way benchmark.py's worker does.
-        import lilv
+        from lilv_load import load_lilv
+
+        lilv = load_lilv()
 
         self.w = lilv.World()
         self.w.load_all()

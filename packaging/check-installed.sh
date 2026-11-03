@@ -100,8 +100,11 @@ mkdir -p "$out/sync/clap" "$out/sync/lv2"
 cp "$safe" "$out/sync/clap/"
 cp -r "$lv2/rt-safe.lv2" "$out/sync/lv2/"
 bare plugin-qualify-sync --clap-path "$out/sync/clap" --lv2-path "$out/sync/lv2" --lv2-extra "" --pin-file "$out/sync/qualified.pins" \
-  --qualification-dir "$out/sync/q" --descriptor-dir "$out/sync/d" --state-file "$out/sync/state.json" --hostd-port 0 > "$out/sync.txt" ||
-  fail "plugin-qualify-sync failed"
+  --qualification-dir "$out/sync/q" --descriptor-dir "$out/sync/d" --state-file "$out/sync/state.json" --hostd-port 0 > "$out/sync.txt" 2> "$out/sync.err" ||
+  fail "plugin-qualify-sync failed: $(cat "$out/sync.err")"
+cat "$out/sync.err"
+# a release with no python3-lilv says so; one with the bindings loads the library from the runtime package alone
+! grep -q 'cannot open shared object' "$out/sync.err" || fail "the sync could not load a library the package depends on"
 grep -q '^qualified 2, skipped 0, refused 0, crashed 0, hung 0, unmeasured 0, ' "$out/sync.txt" || fail "plugin-qualify-sync: $(cat "$out/sync.txt")"
 [ "$(grep -c ' verdict=in-process$' "$out/sync/qualified.pins")" -eq 2 ] || fail "the sync's pin file does not pin both fixtures in-process"
 echo "check-installed: plugin-qualify-sync qualifies a CLAP and an LV2 plugin, and its units are enabled"
