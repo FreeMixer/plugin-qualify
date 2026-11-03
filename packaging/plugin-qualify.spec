@@ -28,6 +28,8 @@ BuildRequires: systemd-rpm-macros
 
 Requires: nodejs >= 18
 Requires: python3
+# the measurer and the LV2 host probe link lilv, and the descriptors read it through python3-lilv
+Requires: lilv-libs
 Requires: python3-lilv
 # the scanned descriptors are held to omx-contract's schema before they are written (tools/descriptors.py)
 Requires: python3-jsonschema
