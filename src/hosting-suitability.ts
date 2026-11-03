@@ -23,6 +23,7 @@ import {
   type SuitabilityRating,
 } from "./rating.js";
 import type {
+  AbiReading,
   FeaturesMeasurement,
   LifecycleReading,
   RtSafetyMeasurement,
@@ -299,6 +300,8 @@ export function attributeCrash(
  */
 export interface PluginStabilityMeasurement {
   readonly lifecycle?: LifecycleReading;
+  /** Whether a plugin call returned with a callee-saved register changed (the measurer's guard put it back). */
+  readonly abi?: AbiReading;
   readonly threads?: ThreadReading;
   readonly crashes?: readonly ObservedCrash[];
   /** A continuous render per rate with the controls swept — judged at EVERY rate it ran. */
@@ -585,6 +588,17 @@ export function stabilityReasons(
   if (m.crashedLive === true) {
     out.push(
       reason("stability", "objective", "unsuitable", HOSTING_CODE.stabilityCrashedLive, {}),
+    );
+  }
+  // a plugin call that returned with a callee-saved register changed: the host's guard puts it back, but not the other
+  // members' state in the same process, so the plugin is a hosting mode, never a refusal: a worker of its own
+  if (m.abi?.clobbered === true) {
+    out.push(
+      reason("stability", "objective", "conditional", HOSTING_CODE.stabilityCalleeSavedClobbered, {
+        registers: (m.abi.registers ?? []).join(","),
+        call: m.abi.call ?? "",
+        block: m.abi.block ?? 0,
+      }),
     );
   }
   const attributions = (m.crashes ?? []).map((c) => attributeCrash(c, CRASH_SIGNATURES, pluginBinary));

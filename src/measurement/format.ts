@@ -425,8 +425,22 @@ export interface SoakReading {
 }
 
 /** Everything one run learned about one plugin SURVIVING. Readable when it has a lifecycle. */
+/**
+ * The plugin calls the measurer made through omx-clap-core's guard: whether one returned with a callee-saved register
+ * changed, and for the first, the registers, the plugin function and the run block; calls counts all that did. The
+ * guard put them back, so the measurement is whole; a plugin that clobbered runs only in a worker of its own.
+ */
+export interface AbiReading {
+  readonly clobbered: boolean;
+  readonly registers?: readonly string[];
+  readonly call?: string;
+  readonly block?: number;
+  readonly calls?: number;
+}
+
 export interface StabilityMeasurement {
   readonly lifecycle?: LifecycleReading;
+  readonly abi?: AbiReading;
   readonly threads?: ThreadReading;
   readonly crashes?: readonly CrashReading[];
   readonly soak?: SoakReading;
@@ -1078,10 +1092,28 @@ function readSoak(value: unknown): SoakReading | undefined {
   return { sweptParams, perRate: readRateMap(value.perRate, readSoakAtRate) };
 }
 
+/** The measurer's abi field: a boolean clobbered, and with it the first clobber's registers, call and block. */
+export function readAbi(value: unknown): AbiReading | undefined {
+  if (!isRecord(value)) return undefined;
+  const clobbered = booleanValue(value.clobbered);
+  if (clobbered === undefined) return undefined;
+  const registers = Array.isArray(value.registers)
+    ? value.registers.filter((r): r is string => typeof r === "string" && r.length > 0)
+    : undefined;
+  return {
+    clobbered,
+    ...optional("registers", clobbered ? registers : undefined),
+    ...optional("call", clobbered ? nonEmptyString(value.call) : undefined),
+    ...optional("block", clobbered ? finiteNumber(value.block) : undefined),
+    ...optional("calls", clobbered ? finiteNumber(value.calls) : undefined),
+  };
+}
+
 function readStability(value: unknown): StabilityMeasurement | undefined {
   if (!isRecord(value)) return undefined;
   return {
     ...optional("lifecycle", readLifecycle(value.lifecycle)),
+    ...optional("abi", readAbi(value.abi)),
     ...optional("threads", readThreads(value.threads)),
     ...optional("crashes", mapArray(value.crashes, readCrash)),
     ...optional("soak", readSoak(value.soak)),

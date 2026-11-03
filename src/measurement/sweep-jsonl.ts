@@ -29,7 +29,7 @@ import type {
   SoakReading,
   StabilityMeasurement,
 } from "./format.js";
-import { readIntegrity, readLifecycle, readNoteSweep, readSoakAtRate, readThreads } from "./format.js";
+import { readAbi, readIntegrity, readLifecycle, readNoteSweep, readSoakAtRate, readThreads } from "./format.js";
 import { booleanValue, finiteNumber, isRecord, mapArray, nonEmptyString, optional, positiveNumber } from "./guards.js";
 
 /** The sweep's three passes, each a list of parsed JSONL lines. Only `measurements` is required. */
@@ -82,8 +82,12 @@ function stabilityOf(
     (c): c is CrashReading => c !== undefined,
   );
   const soak = soakRow === undefined ? undefined : soakOf(soakRow);
+  // either pass's clobber is the plugin's: the deep pass runs the same plugin longer
+  const abis = [readAbi(quick.abi), deep === undefined ? undefined : readAbi(deep.abi)];
+  const abi = abis.find((a) => a?.clobbered === true) ?? abis.find((a) => a !== undefined);
   return {
     lifecycle,
+    ...optional("abi", abi),
     ...optional("threads", threads),
     crashes,
     ...optional("soak", soak),

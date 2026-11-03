@@ -394,6 +394,45 @@ static void atom_reset(const struct host *h, uint8_t *buf, uint32_t port) {
   }
 }
 
+/* the provider's archive carries the guarded plugin call (omx-clap-core 0.26.2): its own copy's names */
+#define OMX_ABI_LV2
+#include <omx-clap-lv2/abi_guard.h>
+
+/* Every call into the plugin goes through the guard: a plugin that returns with a callee-saved register changed (the
+ * LSP limiters' run() on a Raspberry Pi 5 left d15 changed, which held this program's sample rate) changes nothing of
+ * this program's, and the first such call is recorded, its registers, function and run block, for the record's abi
+ * field. The plugin then runs only in a worker of its own (hosting.stability.callee-saved-clobbered). */
+static struct omx_abi_guard g_abi;
+
+static void m_run(LilvInstance *in, uint32_t frames) {
+  OMX_ABI_VCALL(&g_abi, "run", lilv_instance_get_descriptor(in)->run, lilv_instance_get_handle(in), frames);
+  g_abi.block++;
+}
+static void m_activate(LilvInstance *in) {
+  if (lilv_instance_get_descriptor(in)->activate)
+    OMX_ABI_VCALL(&g_abi, "activate", lilv_instance_get_descriptor(in)->activate, lilv_instance_get_handle(in));
+}
+static void m_deactivate(LilvInstance *in) {
+  if (lilv_instance_get_descriptor(in)->deactivate)
+    OMX_ABI_VCALL(&g_abi, "deactivate", lilv_instance_get_descriptor(in)->deactivate, lilv_instance_get_handle(in));
+}
+static void m_connect(LilvInstance *in, uint32_t port, void *data) {
+  OMX_ABI_VCALL(&g_abi, "connect_port", lilv_instance_get_descriptor(in)->connect_port, lilv_instance_get_handle(in), port,
+                data);
+}
+static const void *m_extension_data(LilvInstance *in, const char *uri) {
+  const LV2_Descriptor *d = lilv_instance_get_descriptor(in);
+  return d->extension_data ? OMX_ABI_CALL(&g_abi, "extension_data", d->extension_data, uri) : NULL;
+}
+/* lilv's own instantiate and free call the plugin's: the whole of each goes through the guard */
+static LilvInstance *m_instantiate(const LilvPlugin *p, double rate, const LV2_Feature *const *features) {
+  return (LilvInstance *)(uintptr_t)omx_abi_gd(&g_abi, "instantiate", (const void *)lilv_plugin_instantiate, OMX_ABI_A(p),
+                                               OMX_ABI_A(features), 0, 0, rate);
+}
+static void m_free(LilvInstance *in) {
+  OMX_ABI_VCALL(&g_abi, "cleanup", lilv_instance_free, in);
+}
+
 /* Open one instance the way a real host does: the provider's feature block under the run's
  * feature options, at this instance's rate and block, with its own worker schedule. A strict
  * host refuses a plugin requiring a feature it does not offer before instantiating it.
@@ -412,13 +451,13 @@ static struct rig *rig_open(struct host *h, double rate, uint32_t block) {
   }
   const LV2_Feature *const *features =
       omx_lv2_features_build(&r->feature_block, fo, rate, block, block, &r->sched);
-  r->inst = features ? lilv_plugin_instantiate(h->plugin, rate, features) : NULL;
+  r->inst = features ? m_instantiate(h->plugin, rate, features) : NULL;
   if (r->inst == NULL) {
     free(r);
     return NULL;
   }
   r->handle = lilv_instance_get_handle(r->inst);
-  r->wk = lilv_instance_get_extension_data(r->inst, LV2_WORKER__interface);
+  r->wk = m_extension_data(r->inst, LV2_WORKER__interface);
   if (r->wk != NULL) h->worker_interface = 1;
   for (int i = 0; i < h->n_params; i++) r->pvals[i] = h->params[i].def;
   r->note_block = -1;
@@ -432,14 +471,14 @@ static struct rig *rig_open(struct host *h, double rate, uint32_t block) {
       const int is_in = h->is_in[i];
       size_t slot = is_in ? ai++ : (h->n_audio_in + h->n_cv + ao++);
       if (slot >= r->audio_slots) slot = r->audio_slots - 1;
-      lilv_instance_connect_port(r->inst, i, r->audio + slot * block);
+      m_connect(r->inst, i, r->audio + slot * block);
     } else if (h->pk[i] == PK_CONTROL_IN || h->pk[i] == PK_CONTROL_OUT) {
       r->controls[i] = isnan(h->defs[i]) ? 0.0f : h->defs[i];
-      lilv_instance_connect_port(r->inst, i, r->controls + i);
+      m_connect(r->inst, i, r->controls + i);
     } else {
       r->atoms[i] = calloc(1, atom_cap(h, i));
       atom_reset(h, r->atoms[i], i);
-      lilv_instance_connect_port(r->inst, i, r->atoms[i]);
+      m_connect(r->inst, i, r->atoms[i]);
     }
   }
   return r;
@@ -641,7 +680,7 @@ static void rig_after(struct rig *r) {
     const struct job *j = &r->jobs[r->jh];
     r->jh = (r->jh + 1) % MAX_JOBS;
     if (r->wk != NULL && r->wk->work != NULL) {
-      r->wk->work(r->handle, worker_respond, r, j->size, j->data);
+      OMX_ABI_VCALL(&g_abi, "work", r->wk->work, r->handle, worker_respond, r, j->size, j->data);
       h->worker_jobs++;
     } else {
       h->worker_dropped++;
@@ -651,11 +690,11 @@ static void rig_after(struct rig *r) {
     const struct job *j = &r->resp[r->rh];
     r->rh = (r->rh + 1) % MAX_JOBS;
     if (r->wk != NULL && r->wk->work_response != NULL) {
-      r->wk->work_response(r->handle, j->size, j->data);
+      OMX_ABI_VCALL(&g_abi, "work_response", r->wk->work_response, r->handle, j->size, j->data);
       h->worker_responses++;
     }
   }
-  if (r->wk != NULL && r->wk->end_run != NULL) r->wk->end_run(r->handle);
+  if (r->wk != NULL && r->wk->end_run != NULL) OMX_ABI_VCALL(&g_abi, "end_run", r->wk->end_run, r->handle);
 }
 /* LV2_CORE__CVPort comes from lv2/core/lv2.h via lilv.h. */
 
@@ -827,7 +866,22 @@ static void log_to_stderr(void *ctx, const char *type, const char *line) {
 
 /* The record's featureOptions, beside whatever the log captured. */
 static void emit_feature_options(void) {
+  struct omx_abi_clobber c;
+
   lv2_measure_options_print(jout, &g_opts, g_capture);
+  /* the first call that returned with a callee-saved register changed, or none */
+  if (!omx_abi_guard_first(&g_abi, &c)) {
+    fprintf(jout, ",\"abi\":{\"clobbered\":false}");
+    return;
+  }
+  fprintf(jout, ",\"abi\":{\"clobbered\":true,\"mask\":%u,\"registers\":[", c.mask);
+  for (unsigned bit = 0, first = 1; omx_abi_reg_name(bit); bit++)
+    if (c.mask & (1u << bit)) {
+      fprintf(jout, "%s\"%s\"", first ? "" : ",", omx_abi_reg_name(bit));
+      first = 0;
+    }
+  fprintf(jout, "],\"call\":\"%s\",\"block\":%llu,\"calls\":%llu}", c.call, (unsigned long long)c.block,
+          (unsigned long long)atomic_load(&g_abi.calls));
 }
 
 /* What main holds once the host is open, released on every way out, after the instances are gone. */
@@ -928,11 +982,11 @@ static void measure_latency(struct host *H, double rate, uint32_t block, struct 
     L->unmeasured = r == NULL ? "refused-instantiation" : "probe-error";
     L->detail = r == NULL ? "the plugin would not instantiate for the latency run" : "out of memory for the response";
     free(mag);
-    if (r != NULL) lilv_instance_free(r->inst);
+    if (r != NULL) m_free(r->inst);
     rig_close(r);
     return;
   }
-  lilv_instance_activate(r->inst);
+  m_activate(r->inst);
   uint32_t horizon = LATENCY_TAIL;
   int nonfinite = 0;
   for (uint32_t base = 0; base < horizon && !L->unmeasured; base += block) {
@@ -941,7 +995,7 @@ static void measure_latency(struct host *H, double rate, uint32_t block, struct 
       for (uint32_t k = 0; k < H->n_audio_in; k++) rig_in(r, k)[0] = 1.0f;
     r->probe_note = L->by_note ? (base == 0 ? 1 : (base + block >= horizon ? 2 : 0)) : 0;
     rig_prepare(r);
-    lilv_instance_run(r->inst, block);
+    m_run(r->inst, block);
     rig_after(r);
     if (H->latency_port >= 0) {
       /* the port is written by run(): its value is read after the block, and moves the horizon with it */
@@ -983,8 +1037,8 @@ static void measure_latency(struct host *H, double rate, uint32_t block, struct 
       L->measured = seen_at;
     }
   }
-  lilv_instance_deactivate(r->inst);
-  lilv_instance_free(r->inst);
+  m_deactivate(r->inst);
+  m_free(r->inst);
   rig_close(r);
   free(mag);
 }
@@ -1008,11 +1062,11 @@ static void measure_cost(struct host *H, double rate, uint32_t block, struct cos
     C->unmeasured = r == NULL ? "refused-instantiation" : "probe-error";
     C->detail = r == NULL ? "the plugin would not instantiate for the cost run" : "out of memory for the block times";
     free(ns);
-    if (r != NULL) lilv_instance_free(r->inst);
+    if (r != NULL) m_free(r->inst);
     rig_close(r);
     return;
   }
-  lilv_instance_activate(r->inst);
+  m_activate(r->inst);
   C->sched = timing_sched_read();
   unsigned seed = 0x636f73u;
   for (uint32_t b = 0; b < total; b++) {
@@ -1028,12 +1082,12 @@ static void measure_cost(struct host *H, double rate, uint32_t block, struct cos
     r->held = C->held;
     rig_prepare(r);
     const int64_t t0 = now_ns();
-    lilv_instance_run(r->inst, block);
+    m_run(r->inst, block);
     ns[b] = (double)(now_ns() - t0) / (double)block;
     rig_after(r);
   }
-  lilv_instance_deactivate(r->inst);
-  lilv_instance_free(r->inst);
+  m_deactivate(r->inst);
+  m_free(r->inst);
   rig_close(r);
   double *warm = ns, *timed = ns + COST_WARMUP_BLOCKS;
   qsort(warm, COST_WARMUP_BLOCKS, sizeof *warm, by_value);
@@ -1088,7 +1142,7 @@ static void footprint_blocks(struct rig *r, uint32_t block, unsigned *seed, int 
     r->probe_note = strike && b == 0 ? 3 : 0;
     r->held = held;
     rig_prepare(r);
-    lilv_instance_run(r->inst, block);
+    m_run(r->inst, block);
     rig_after(r);
   }
 }
@@ -1111,7 +1165,7 @@ static void footprint_measure(struct host *H, double rate, uint32_t block, struc
     return;
   }
   fp->instantiate = grew(base), fp->got |= FP_INSTANTIATE;
-  lilv_instance_activate(r->inst);
+  m_activate(r->inst);
   fp->activate = grew(base), fp->got |= FP_ACTIVATE;
   footprint_blocks(r, block, &seed, 0, 0);
   fp->rest = grew(base), fp->got |= FP_REST;
@@ -1129,7 +1183,7 @@ static void footprint_measure(struct host *H, double rate, uint32_t block, struc
   const long before = rss_kb();
   struct rig *q = rig_open(H, rate, block);
   if (q != NULL) {
-    lilv_instance_activate(q->inst);
+    m_activate(q->inst);
     footprint_blocks(q, block, &seed, 0, 0);
     fp->second = grew(before), fp->got |= FP_SECOND;
   }
@@ -1361,7 +1415,7 @@ int main(int argc, char **argv) {
       release(H, required, optional, uri_node, world);
       return 2;
     }
-    lilv_instance_activate(si->inst);
+    m_activate(si->inst);
 
     const long total_blocks = (long)(soak_s * rate / block);
     const long win_blocks = (long)(rate / block); /* ~1 s */
@@ -1376,7 +1430,7 @@ int main(int argc, char **argv) {
       rig_sweep(si, t, 1);
       fill_input(si, &rng, 1, block, rate, 0);
       rig_prepare(si);
-      lilv_instance_run(si->inst, block);
+      m_run(si->inst, block);
       rig_after(si);
       if (n_audio_out > 0) {
         const float *o = rig_out(si);
@@ -1410,8 +1464,8 @@ int main(int argc, char **argv) {
         win_n = 0;
       }
     }
-    lilv_instance_deactivate(si->inst);
-    lilv_instance_free(si->inst);
+    m_deactivate(si->inst);
+    m_free(si->inst);
     fprintf(jout, "{\"uri\":");
     json_str(jout, uri);
     fprintf(jout, ",\"soak\":{\"instantiated\":true,\"seconds\":%.0f,\"rate\":%.0f,\"block\":%u"
@@ -1466,10 +1520,10 @@ int main(int argc, char **argv) {
       failed++;
       continue;
     }
-    lilv_instance_activate(ci->inst);
+    m_activate(ci->inst);
     if (c == 0) threads_after_first = count_threads();
-    lilv_instance_deactivate(ci->inst);
-    lilv_instance_free(ci->inst);
+    m_deactivate(ci->inst);
+    m_free(ci->inst);
     rig_close(ci);
     instantiated++;
   }
@@ -1505,10 +1559,10 @@ int main(int argc, char **argv) {
      * RT-clean while its loud path allocates. */
     fill_input(inst, &rng, use_noise, block, rate, 0);
 
-    lilv_instance_activate(inst->inst);
+    m_activate(inst->inst);
     for (int b = 0; b < warmup_blocks; b++) {
       rig_prepare(inst);
-      lilv_instance_run(inst->inst, block);
+      m_run(inst->inst, block);
       rig_after(inst);
     }
 
@@ -1521,14 +1575,14 @@ int main(int argc, char **argv) {
       if (rig_sweep(inst, t, 0) > 0) swept = 1;
       rig_prepare(inst);
       if (rt_begin) rt_begin();
-      lilv_instance_run(inst->inst, block);
+      m_run(inst->inst, block);
       if (rt_end) rt_end();
       rig_after(inst);
     }
     if (rt_counts) rt_counts(&r_allocs, &r_locks, &r_syscalls);
     if (rt_events && n_seen == 0) n_seen = rt_events(seen, OMX_RT_EV_MAX);
-    lilv_instance_deactivate(inst->inst);
-    lilv_instance_free(inst->inst);
+    m_deactivate(inst->inst);
+    m_free(inst->inst);
     rig_close(inst);
   }
   if (r_allocs > allocs) allocs = r_allocs;
@@ -1553,10 +1607,10 @@ int main(int argc, char **argv) {
     struct rig *ni = rig_open(H, rate, block);
     if (ni != NULL) {
       fill_input(ni, &rng, use_noise, block, rate, 0);
-      lilv_instance_activate(ni->inst);
+      m_activate(ni->inst);
       for (int b = 0; b < warmup_blocks; b++) {
         rig_prepare(ni);
-        lilv_instance_run(ni->inst, block);
+        m_run(ni->inst, block);
         rig_after(ni);
       }
       const long before = H->note_events;
@@ -1565,7 +1619,7 @@ int main(int argc, char **argv) {
         ni->note_block = b;
         rig_prepare(ni);
         if (rt_begin) rt_begin();
-        lilv_instance_run(ni->inst, block);
+        m_run(ni->inst, block);
         if (rt_end) rt_end();
         rig_after(ni);
         if (n_audio_out > 0) {
@@ -1578,8 +1632,8 @@ int main(int argc, char **argv) {
       if (rt_counts) rt_counts(&ns.allocs, &ns.locks, &ns.syscalls);
       if (rt_events) ns.n_seen = rt_events(ns.seen, OMX_RT_EV_MAX);
       ns.played = 1;
-      lilv_instance_deactivate(ni->inst);
-      lilv_instance_free(ni->inst);
+      m_deactivate(ni->inst);
+      m_free(ni->inst);
       rig_close(ni);
     }
   }
@@ -1665,7 +1719,7 @@ int main(int argc, char **argv) {
     double rms_out = -1.0;
     struct rig *pr = rig_open(H, r, block);
     if (pr != NULL) {
-      lilv_instance_activate(pr->inst);
+      m_activate(pr->inst);
       double sum = 0.0;
       const char *pb = getenv("OMX_PROBE_BLOCKS");
       const int probe_blocks = pb ? atoi(pb) : 96;
@@ -1673,7 +1727,7 @@ int main(int argc, char **argv) {
       for (int b2 = 0; b2 < probe_blocks; b2++) {
         fill_input(pr, &rng, use_noise, block, r, (long)b2 * block);
         rig_prepare(pr);
-        lilv_instance_run(pr->inst, block);
+        m_run(pr->inst, block);
         rig_after(pr);
         if (b2 >= probe_settle && n_audio_out > 0) {
           const float *o = rig_out(pr);
@@ -1690,8 +1744,8 @@ int main(int argc, char **argv) {
        * verdict is a RATIO against the plugin's own best rate, computed by the
        * caller from the per-rate rms this emits. Reported here, judged there. */
       ok = 1;
-      lilv_instance_deactivate(pr->inst);
-      lilv_instance_free(pr->inst);
+      m_deactivate(pr->inst);
+      m_free(pr->inst);
       rig_close(pr);
     }
     fprintf(jout, "%s\"%.0f\":{\"instantiated\":%s,\"nonFinite\":%s,"

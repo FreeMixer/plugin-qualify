@@ -23,6 +23,7 @@ import {
   readIntegrity,
   readMeasurementDocument,
   serialiseMeasurementDocument,
+  readAbi,
 } from "./format.js";
 import { fixtureDocument, fixturePlugin, fixtureRun, fixtureUnmeasurable } from "./fixtures.js";
 import { UNMEASURED_TERMS, unmeasuredKind } from "./vocabulary.js";
@@ -289,5 +290,20 @@ describe("readIntegrity — a pin is whole or absent, never partly read", () => 
 
   it("refuses an empty files list", () => {
     expect(pin()).toEqual({ version: "1", ...notWhole });
+  });
+});
+
+describe("the measurer's abi field", () => {
+  it("reads a clobber with its registers, call, block and count, and a clean guard as clobbered false alone", () => {
+    expect(readAbi({ clobbered: true, mask: 196608, registers: ["d14", "d15"], call: "run", block: 227, calls: 386 })).toEqual({
+      clobbered: true,
+      registers: ["d14", "d15"],
+      call: "run",
+      block: 227,
+      calls: 386,
+    });
+    expect(readAbi({ clobbered: false, registers: ["x19"] })).toEqual({ clobbered: false });
+    expect(readAbi({ registers: ["x19"] })).toBeUndefined();
+    expect(readAbi("run")).toBeUndefined();
   });
 });

@@ -62,6 +62,7 @@ export const HOSTING_CODE = Object.freeze({
   "stabilityBelowFloor": "hosting.stability.cycles-below-floor",
   "stabilityCrashUnattributed": "hosting.stability.crash-unattributed",
   "stabilityCrashedAttributed": "hosting.stability.crashed-attributed-plugin",
+  "stabilityCalleeSavedClobbered": "hosting.stability.callee-saved-clobbered",
   "stabilityCrashedLive": "hosting.stability.crashed-live-on-this-rig",
   "stabilityLinksGuiToolkit": "hosting.stability.links-gui-toolkit",
   "stabilitySoakFailedAtRate": "hosting.stability.soak-failed-at-rate",
