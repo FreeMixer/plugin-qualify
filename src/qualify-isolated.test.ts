@@ -246,3 +246,44 @@ describe("the completion of a record already judged", () => {
     expect(second).toMatchObject({ isolated: 0, refused: 0, notRun: 1 });
   });
 });
+
+describe("a memory gap and nothing else (the Pi, 2026-11-02: 38 plugins qualified with no pin)", () => {
+  const gap = (reasons: { rating: string; code: string }[], rating = "unknown") =>
+    ({ host: "openmixer-console", measured: true, rating, qualified: false, hosting: "isolated", arm: "declaration", reasons }) as unknown as QualificationRecord["verdicts"][number];
+  const clean = { rating: "suitable", code: "hosting.rt-safety.clean-under-sweep" };
+  const memory = { rating: "unknown", code: "hosting.memory.unmeasured" };
+  const withVerdict = (v: QualificationRecord["verdicts"][number]) => ({ ...record({ rating: "suitable" }), verdicts: [v] }) as QualificationRecord;
+
+  it("a verdict unknown for memory alone owes the isolated step; any other gap beside it does not", () => {
+    expect(owesIsolated(withVerdict(gap([clean, memory])))).toBe(true);
+    expect(owesIsolated(withVerdict(gap([clean, memory, { rating: "unknown", code: "hosting.rt-safety.unmeasured" }])))).toBe(false);
+    expect(owesIsolated(withVerdict(gap([clean, { rating: "unsuitable", code: "hosting.memory.above-ceiling" }], "unsuitable")))).toBe(false);
+    expect(owesIsolated(withVerdict(gap([clean])))).toBe(false);
+  });
+
+  it("the pass gives the pin back from the record: the files hostd names, hashed, and the word the step earned", () => {
+    const dir = mkdtempSync(join(scratch, "repin-"));
+    writeFileSync(join(dir, "a.so"), "so");
+    writeFileSync(join(dir, "b.ttl"), "ttl");
+    const bytes = { files: [{ path: "b.ttl", sha256: "b".repeat(64) }, { path: "a.so", sha256: "a".repeat(64) }], layout: { scheme: "omx-layout/1", sha256: "c".repeat(64) } };
+    const rec = (result: string) => ({ ...withVerdict(gap([clean, memory])), binary: { path: "a.so", ...bytes }, run: { id: "r", steps: [...baseSteps(record()), { step: "isolated", result }] } });
+    for (const n of ["ok", "no"]) writeFileSync(join(dir, `${n}.qualification.json`), JSON.stringify(rec(n === "ok" ? "isolated" : "refused")));
+    const ctx = {
+      settings: { qualificationDir: dir, hostProfile: { id: "omx-clap-host" }, lv2Dirs: [] },
+      env: {},
+      log: () => {},
+      isolatedRunner: () => { throw new Error("nothing is run again"); },
+      pinFilesRun: () => ({ status: 0, stdout: `root ${dir}\nfile a.so\nfile b.ttl\n`, stderr: "" }),
+    } as unknown as SyncContext;
+    const state = { entries: { k: { plugins: ["ok", "no"].map((n) => ({ uri: `urn:${n}`, outcome: "qualified", code: "x", record: join(dir, `${n}.qualification.json`) })) } } } as unknown as SyncState;
+    const r = isolatedPass(ctx, state);
+    expect(r.repinned).toBe(2);
+    const [ok, no] = r.state.entries["k"]!.plugins;
+    expect([ok?.outcome, ok?.pin?.verdict, ok?.pin?.integrity.files?.map((f) => f.path)]).toEqual(["qualified", "isolated", ["a.so", "b.ttl"]]);
+    expect(ok?.pin?.integrity.files?.[0]?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(ok?.pin?.integrity.layout).toEqual(bytes.layout);
+    expect([no?.outcome, no?.pin?.verdict]).toEqual(["refused", "refused"]);
+    // a pin the state already holds is left as it is
+    expect(isolatedPass(ctx, r.state).repinned).toBe(0);
+  });
+});
