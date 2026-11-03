@@ -18,6 +18,8 @@
  * large-activate.lv2: built with -DFIXTURE_ACTIVATE_MB, activate() takes that many MiB, touched, held until cleanup.
  * activate-reads.lv2: built with -DFIXTURE_ACTIVATE_READS, activate() reads its gain control, as swh's IIR filters
  * (lowpass_iir and its kin) read theirs: a host that activates before it connects the ports crashes it.
+ * abi-breaker.lv2: built with -DFIXTURE_ABI_BREAKER, its third run() returns with callee-saved registers changed, as the
+ * LSP limiters' did on a Raspberry Pi 5 (d15): in assembly, after the C run has returned, since no C function can.
  * needs-display.lv2: built with -DFIXTURE_NEEDS_DISPLAY, instantiate() aborts when no display and no Qt platform is
  * named, as a Qt plugin does (synthv1, samplv1, padthv1, drumkv1: "no Qt platform plugin could be initialized"). */
 #if defined FIXTURE_LEAKS_KB
@@ -26,6 +28,8 @@
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-large-activate"
 #elif defined FIXTURE_ACTIVATE_READS
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-activate-reads"
+#elif defined FIXTURE_ABI_BREAKER
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-abi-breaker"
 #elif defined FIXTURE_NEEDS_DISPLAY
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-needs-display"
 #elif defined FIXTURE_SPACED
@@ -107,8 +111,33 @@ static void deactivate(LV2_Handle h) { (void)h; }
 static void cleanup(LV2_Handle h) { free(h); }
 static const void *extension_data(const char *uri) { (void)uri; return NULL; }
 
+#ifdef FIXTURE_ABI_BREAKER
+/* used: only the assembly below names them, which link-time optimisation cannot see */
+__attribute__((used, visibility("hidden"))) int fixture_abi_break;
+__attribute__((used, visibility("hidden"))) void fixture_run_c(LV2_Handle h, uint32_t frames);
+void fixture_run_breaking(LV2_Handle h, uint32_t frames);
+void fixture_run_c(LV2_Handle h, uint32_t frames) {
+  static unsigned calls;
+  run(h, frames);
+  fixture_abi_break = ++calls == 3;
+}
+#if defined(__aarch64__)
+__asm__(".text\n.p2align 2\n.hidden fixture_run_breaking\n.globl fixture_run_breaking\nfixture_run_breaking:\n"
+        " stp x29, x30, [sp, #-16]!\n mov x29, sp\n bl fixture_run_c\n ldp x29, x30, [sp], #16\n"
+        " adrp x9, fixture_abi_break\n ldr w9, [x9, :lo12:fixture_abi_break]\n cbz w9, 1f\n"
+        " mov x10, #0x7ead\n mov x19, x10\n fmov d15, x10\n1: ret\n");
+#elif defined(__x86_64__)
+__asm__(".text\n.p2align 4\n.hidden fixture_run_breaking\n.globl fixture_run_breaking\nfixture_run_breaking:\n"
+        " subq $8, %rsp\n call fixture_run_c\n addq $8, %rsp\n cmpl $0, fixture_abi_break(%rip)\n je 1f\n"
+        " movq $0x7ead, %rbx\n movq $0x7ead, %r15\n1: ret\n");
+#endif
+#define FIXTURE_RUN fixture_run_breaking
+#else
+#define FIXTURE_RUN run
+#endif
+
 static const LV2_Descriptor descriptor = {
-  FIXTURE_URI, instantiate, connect_port, activate, run, deactivate, cleanup, extension_data,
+  FIXTURE_URI, instantiate, connect_port, activate, FIXTURE_RUN, deactivate, cleanup, extension_data,
 };
 
 LV2_SYMBOL_EXPORT const LV2_Descriptor *lv2_descriptor(uint32_t index) { return index == 0 ? &descriptor : NULL; }
