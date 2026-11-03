@@ -61,6 +61,7 @@ under a real host with memory checking, and gives one plain verdict. Anything
 it could not measure is never a pass. Use it to vet a plugin before a gig, to
 curate a plugin collection, or to judge the same plugin against the rules of
 different hosts.
+Its documentation is on openmixer.org.
 
 %prep
 %autosetup
@@ -109,7 +110,6 @@ fi
 
 %files
 %license LICENSE
-%doc README.md
 %{_bindir}/plugin-qualify
 %{_bindir}/plugin-qualify-sync
 %{_bindir}/plugin-qualify-records-package

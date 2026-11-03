@@ -31,3 +31,5 @@ Description: find out whether an audio plugin is safe to run live
  .
  Use it to vet a plugin before a gig, to curate a plugin collection, or to
  judge the same plugin against the rules of different hosts.
+ .
+ Its documentation is on openmixer.org.
