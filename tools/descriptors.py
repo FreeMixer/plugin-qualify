@@ -109,6 +109,33 @@ def schema_candidates(env=None):
     ]
 
 
+SCHEMA_MAJOR = re.search(r"\d+", DESCRIPTOR_SCHEMA_FLOOR).group(0)
+UNITS_SHEET = os.path.join("formats", "lv2", "units.json")
+
+
+def contract_data_candidates(rel, env=None):
+    """Where one of omx-contract's data files is looked for: in the same omx-contract as each place the schema is,
+    its package's `data/` beside `schema/`, or the contract directory beside the installed schema."""
+    out = []
+    for schema in schema_candidates(env):
+        here = os.path.dirname(schema)
+        out.append(os.path.join(os.path.dirname(here), "data", rel))
+        out.append(os.path.join(here, "contract.d", SCHEMA_MAJOR, "omx-contract", rel))
+    return out
+
+
+def unit_words(env=None):
+    """omx-contract's units sheet as LV2 unit URI -> the word it is spelled by; a unit the sheet gives no word has
+    none here. The sheet is the owner: there is no table of units in this package."""
+    found = [p for p in contract_data_candidates(UNITS_SHEET, env) if os.path.isfile(p)]
+    if not found:
+        raise DescriptorRefused(DESCRIPTOR_CODE_SCHEMA_MISSING,
+                                f"no omx-contract units sheet at {', '.join(contract_data_candidates(UNITS_SHEET, env))}")
+    with open(found[0], encoding="utf-8") as f:
+        terms = json.load(f)["LV2_UNITS_TERMS"]["terms"]
+    return {t["uri"]: t["word"] for t in terms.values() if t.get("kind") == "unit" and "word" in t}
+
+
 class SchemaValidator:
     """omx-contract's schema, compiled once; `check` refuses a document it does not hold."""
 

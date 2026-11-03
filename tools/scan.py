@@ -62,23 +62,17 @@ REPORTS_LATENCY = LV2 + "reportsLatency"
 MINOR_VERSION = LV2 + "minorVersion"
 MICRO_VERSION = LV2 + "microVersion"
 
-# Common LV2 unit URIs -> display symbol. Plugins may also carry an explicit
-# units:symbol (handled below); this is the fallback for the standard units.
-KNOWN_UNITS = {
-    UNITS + "db": "dB", UNITS + "hz": "Hz", UNITS + "khz": "kHz",
-    UNITS + "s": "s", UNITS + "ms": "ms", UNITS + "pc": "%",
-    UNITS + "semitone12TET": "semi", UNITS + "cent": "ct",
-    UNITS + "degree": "deg", UNITS + "coef": "x", UNITS + "oct": "oct",
-    UNITS + "bpm": "BPM", UNITS + "midiNote": "note", UNITS + "frame": "fr",
-}
+# A port's unit is spelled as omx-contract's units sheet spells it (desc.unit_words), in the catalog and in the
+# descriptor alike; a unit the sheet has no word for falls to the plugin's own units:symbol in the catalog, and
+# is `unknown` in the descriptor.
+_UNIT_WORDS = None
 
-# LV2 unit URI -> the descriptor's unit word; any other unit, or none, is `unknown`
-DESCRIPTOR_UNITS = {
-    UNITS + "db": "dB", UNITS + "hz": "Hz", UNITS + "s": "s", UNITS + "ms": "ms",
-    UNITS + "min": "min", UNITS + "pc": "%", UNITS + "semitone12TET": "st", UNITS + "cent": "cents",
-    UNITS + "degree": "deg", UNITS + "coef": "x", UNITS + "oct": "oct", UNITS + "bpm": "bpm",
-    UNITS + "midiNote": "midiNote", UNITS + "frame": "frames",
-}
+
+def unit_words():
+    global _UNIT_WORDS
+    if _UNIT_WORDS is None:
+        _UNIT_WORDS = desc.unit_words()
+    return _UNIT_WORDS
 
 # lv2:designation -> the descriptor's meaning, where the meaning carries the LV2 term's name
 DESIGNATED_MEANINGS = {
@@ -208,8 +202,8 @@ class Scanner:
         if un is None:
             return None
         uri = str(un)
-        if uri in KNOWN_UNITS:
-            return KNOWN_UNITS[uri]
+        if uri in unit_words():
+            return unit_words()[uri]
         sym = first(self.w.find_nodes(un, self.u[UNITS + "symbol"], None))
         return str(sym) if sym is not None else None
 
@@ -379,7 +373,7 @@ class Scanner:
 
     def descriptor_unit(self, port):
         un = first(port.get_value(self.u[UNITS + "unit"]))
-        return DESCRIPTOR_UNITS.get(str(un), "unknown") if un is not None else "unknown"
+        return unit_words().get(str(un), "unknown") if un is not None else "unknown"
 
     def descriptor_control(self, port, link, readonly=False):
         """An input (or, readonly, an output) control port as a descriptor control."""
