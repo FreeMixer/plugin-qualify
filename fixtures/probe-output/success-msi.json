@@ -2,7 +2,7 @@
   "format": "plugin-hostd.probe-output",
   "formatVersion": "1.0",
   "run": {
-    "id": "msi-20261017T221500Z-3569027",
+    "id": "bench-20261017T221500Z-3569027",
     "startedAt": "2026-10-17T22:15:00+02:00",
     "elapsedMs": 184220,
     "complete": true,
@@ -96,7 +96,7 @@
     },
     "pinnedCpus": "22",
     "reference": {
-      "rig": "msi",
+      "rig": "bench",
       "image": "omx-ref-2026-10"
     }
   },
