@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.18.5
+Version:        0.19.0
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -132,6 +132,21 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Wed Nov 04 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.0-1
+- plugin-qualify compare: every plugin under omx-clap-host, plugin-hostd, mod-host
+  and jalv with the same checks on one private JACK server, one row per plugin
+  per host; --publish needs mod-host and jalv installed (#292)
+- A plugin whose call changed a callee-saved register is conditional, isolated
+  only (#283)
+- A host with no JACK client is no evidence about the plugin; lilv is required
+  and loaded by its soname (#286)
+- The sync: a memory gap alone takes the isolated step (#287); a distributed
+  record is judged again, and one that never took latency is measured (#289)
+- mod-host is suggested, not recommended (#291)
+- A port's unit is the word omx-contract's units sheet gives it
+- The shared FreeMixer/.github checks (#288); the package installs its licence and
+  a short README and no other markdown
+
 * Sun Nov 01 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.5-1
 - Each rate is measured on an instance of its own. Reactivating one instance at
   another rate crashed LSP's probes; the CLAP crashes rerun on a Raspberry Pi 5

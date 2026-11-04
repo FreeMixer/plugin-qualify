@@ -1,3 +1,32 @@
+plugin-qualify (0.19.0) unstable; urgency=medium
+
+  * plugin-qualify compare runs every plugin under omx-clap-host,
+    plugin-hostd, mod-host and jalv with the same checks on one private JACK
+    server: loads, ports, output, load cycles, soak, real-time safety, CPU and
+    reported latency, one row per plugin per host, and a summary of where
+    each host does better. --publish is refused unless mod-host and jalv are
+    installed (#292).
+  * A plugin whose call changed a callee-saved register is conditional and
+    runs isolated (hosting.stability.callee-saved-clobbered); the record's abi
+    field names the first call that did it (#283).
+  * A host with no JACK client is no evidence about the plugin: its verdict
+    stays the measurement's. lilv's runtime library is required and loaded by
+    its soname (#286).
+  * The sync: a memory gap alone takes the isolated step, and a plugin the
+    step decided gets its pin back from its record (#287). A distributed
+    record is judged again under this version's rules, so a plugin an older
+    judge refused for RT-safety alone runs isolated, and a record that never
+    took latency is measured on the device (#289).
+  * mod-host is suggested, not recommended; a qualification asked for it
+    with no mod-host reads mod-host.not-installed (#291).
+  * A port's unit is the word omx-contract's units sheet gives it; no table of
+    units is kept here.
+  * The commit message and private reference checks run from the shared
+    FreeMixer/.github workflow (#288). The package installs its licence and a
+    short README and no other markdown; the notes move to openmixer.org.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Wed, 04 Nov 2026 18:00:00 +0100
+
 plugin-qualify (0.18.5) unstable; urgency=medium
 
   * Each rate is measured on an instance of its own. Reactivating one instance at
