@@ -36,7 +36,10 @@ Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; --pin-files, which the sync takes its pins from, first released in 0.15.0
 # 0.15.3: the memory footprint in the probe output, without which every host with a budget reads unmeasured (#114)
 Requires: plugin-hostd >= 0.15.3
-Recommends: mod-host
+# mod-host is the comparison host: --host-profile mod-host and the hosting sweep run it when it is installed, and
+# without it those verdicts read mod-host.not-installed. Nothing else uses it, so it is only suggested; a machine
+# that runs a published comparison or benchmark installs mod-host (and jalv) itself.
+Suggests: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
 # remote-control pages (remote_controls), which the descriptors keep
 Requires: omx-clap-host >= 0.23.0

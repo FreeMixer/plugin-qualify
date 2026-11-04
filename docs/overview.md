@@ -49,8 +49,10 @@ pnpm exec plugin-qualify --help
 ```
 
 It needs Node.js 18 or newer to run. The measuring tools also want Python 3 with the lilv bindings
-(`python3-lilv`) and, for the hosting sweep, `mod-host`. The `Containerfile` builds an image with all of
-them. The commands below are written as `plugin-qualify`; from a checkout run them with `pnpm exec`.
+(`python3-lilv`). mod-host and jalv are comparison hosts: they run only when `--host-profile` names
+them, and a verdict under one that is not installed reads `<host>.not-installed`. The package only suggests
+mod-host, so install mod-host and jalv yourself on a machine that runs a comparison or a benchmark you publish.
+The `Containerfile` builds an image with all of them. The commands below are written as `plugin-qualify`; from a checkout run them with `pnpm exec`.
 
 ## Run it on your own plugin
 

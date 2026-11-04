@@ -118,6 +118,11 @@ jobs:
           rpm -q omx-clap-host
           rpm -qf /usr/share/omx-clap-core/ts | grep -q '^omx-clap-core-[0-9]'
           if rpm -qa --qf '%{NAME}\n' | grep -E -- '-devel$'; then echo "plugin-qualify pulled a -devel package"; exit 1; fi
+          # mod-host is only suggested: the install with weak dependencies on does not pull it, so the qualification below
+          # runs on a machine without it
+          rpm -q --suggests plugin-qualify | grep -qx mod-host
+          if rpm -q --recommends --requires plugin-qualify | grep -q mod-host; then echo "plugin-qualify needs or recommends mod-host"; exit 1; fi
+          if rpm -q mod-host; then echo "plugin-qualify pulled mod-host"; exit 1; fi
           dnf_retry --setopt=install_weak_deps=False gcc make pkgconf-pkg-config clap-devel lv2-devel
 
       - name: Prepare the container (Debian)
@@ -140,6 +145,10 @@ jobs:
           dpkg -s omx-clap-host >/dev/null
           dpkg -S /usr/share/omx-clap-core/ts | grep -q '^libomx-clap-core1'
           if dpkg-query -W -f '${Package}\n' | grep -E -- '-dev$'; then echo "plugin-qualify pulled a -dev package"; exit 1; fi
+          # mod-host is only suggested, and the qualification below runs without it
+          dpkg-query -W -f '${Suggests}\n' plugin-qualify | grep -qw mod-host
+          if dpkg-query -W -f '${Depends} ${Recommends}\n' plugin-qualify | grep -qw mod-host; then echo "plugin-qualify needs or recommends mod-host"; exit 1; fi
+          if dpkg -s mod-host >/dev/null 2>&1; then echo "plugin-qualify pulled mod-host"; exit 1; fi
           apt-get install -y --no-install-recommends gcc libc6-dev make pkgconf clap-headers lv2-dev
         env:
           IMAGE: ${{ matrix.image }}
