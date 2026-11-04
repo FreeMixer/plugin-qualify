@@ -31,6 +31,7 @@ the native CLAP prober and LV2 measurer come with the RPM or DEB.
 plugin-qualify urn:example:my-plugin          # one plugin, by URI
 plugin-qualify ./my-plugin.lv2                # every plugin in a bundle
 plugin-qualify --all --out ./qualification   # every installed LV2 and CLAP plugin, one record each
+plugin-qualify compare --all --out ./compare  # every plugin under omx-clap-host, plugin-hostd, mod-host and jalv
 plugin-qualify --help                         # every option and its default
 ```
 

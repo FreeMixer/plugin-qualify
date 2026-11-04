@@ -4,7 +4,7 @@
 # The CLAP prober, the LV2 measurer, the interposer both run under and the fixture plugins their tests
 # qualify.
 #
-#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so,
+#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so, build/rt_watch.so, build/jack_compare,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
@@ -89,7 +89,7 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
 
-all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/rt_watch.so $(BUILD)/jack_compare $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap $(BUILD)/fixtures-faulty/rate-pinned.clap \
@@ -147,6 +147,13 @@ $(BUILD)/jack_peak: jack-peak.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
+
+# the interposer again, its window put around a JACK host's process callback: the host comparison's watch
+$(BUILD)/jack_compare: jack-compare.c | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LDFLAGS) -o $@ $< -ldl -lm
+
+$(BUILD)/rt_watch.so: rt-watch.c rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
 
 $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
@@ -311,7 +318,7 @@ deps:
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/rt_watch.so $(BUILD)/jack_compare
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
@@ -319,6 +326,8 @@ install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(B
 	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
 	install -m 0755 $(BUILD)/isolated_signal $(DESTDIR)$(LIBEXECDIR)/isolated_signal
 	install -m 0755 $(BUILD)/jack_peak $(DESTDIR)$(LIBEXECDIR)/jack_peak
+	install -m 0755 $(BUILD)/rt_watch.so $(DESTDIR)$(LIBEXECDIR)/rt_watch.so
+	install -m 0755 $(BUILD)/jack_compare $(DESTDIR)$(LIBEXECDIR)/jack_compare
 
 clean:
 	rm -rf $(BUILD)

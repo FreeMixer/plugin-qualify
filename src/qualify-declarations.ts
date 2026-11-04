@@ -107,6 +107,10 @@ export const LV2_HOST_PROBE_TOOL_ENV = "OMX_LV2_HOST_PROBE";
 export const ISOLATED_SIGNAL_TOOL_ENV = "OMX_ISOLATED_SIGNAL";
 /** `native/jack-peak.c`, the level of an instrument under a held note in the adapter run (`tools/mod-host-admit.mjs`). */
 export const JACK_PEAK_TOOL_ENV = "OMX_JACK_PEAK";
+/** `native/rt-watch.c`, the interposer's window put around a JACK host's process callback: the host comparison's RT watch. */
+export const RT_WATCH_ENV = "OMX_RT_WATCH";
+/** `native/jack-compare.c`, the host comparison's ports, latency and stimulus on the JACK graph. */
+export const JACK_COMPARE_TOOL_ENV = "OMX_JACK_COMPARE";
 
 /** The file names of the native tools, in every place they are looked for. */
 export const CLAP_QUALIFY_TOOL_NAME = "clap-qualify";
@@ -115,6 +119,8 @@ export const LV2_MEASURE_TOOL_NAME = "lv2_measure";
 export const RT_INTERPOSE_NAME = "rt_interpose.so";
 export const LV2_HOST_PROBE_TOOL_NAME = "lv2_host_probe";
 export const JACK_PEAK_TOOL_NAME = "jack_peak";
+export const RT_WATCH_NAME = "rt_watch.so";
+export const JACK_COMPARE_TOOL_NAME = "jack_compare";
 
 /**
  * The ONE list of the native tools the packages install, each with the setting that names it.
@@ -127,6 +133,8 @@ export const NATIVE_TOOLS: readonly { readonly name: string; readonly env: strin
   { name: LV2_HOST_PROBE_TOOL_NAME, env: LV2_HOST_PROBE_TOOL_ENV },
   { name: ISOLATED_SIGNAL_TOOL_NAME, env: ISOLATED_SIGNAL_TOOL_ENV },
   { name: JACK_PEAK_TOOL_NAME, env: JACK_PEAK_TOOL_ENV },
+  { name: RT_WATCH_NAME, env: RT_WATCH_ENV },
+  { name: JACK_COMPARE_TOOL_NAME, env: JACK_COMPARE_TOOL_ENV },
 ];
 
 /**

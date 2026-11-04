@@ -7,6 +7,9 @@ plugin-qualify \- find out whether an audio plugin is safe to run in a real-time
 .br
 .B plugin-qualify
 [\fIoptions\fR] \fB\-\-all\fR
+.br
+.B plugin-qualify compare
+[\fIoptions\fR] \fB\-\-all\fR|\fIuri\fR...
 .SH DESCRIPTION
 Scans each plugin, measures its latency and CPU cost per sample rate and buffer size, runs it under
 a real host with memory checking, and prints one verdict per plugin: suitable, conditional, unknown
@@ -43,6 +46,17 @@ Repeat or comma-separate for one verdict per profile.
 .TP
 .B \-\-help
 Print the options.
+.SH COMPARE
+.B plugin-qualify compare
+runs each plugin through omx-clap-host, plugin-hostd, mod-host and jalv on one private JACK server with the same
+checks: it loads, it instantiates, it gives output under a tone or notes, it survives the load cycles and the soak, its
+audio thread allocates, locks or makes a system call or not, its CPU and the latency the host reports. One row per
+plugin per host; a check a host does not let us observe is not-observable, a host that is not installed is skipped with
+the reason.
+\fB\-\-out\fR \fIdir\fR writes one .comparison.json per plugin and comparison-summary.json.
+\fB\-\-publish\fR (with \fB\-\-host\-class\fR and \fB\-\-set\fR) is refused unless mod-host and jalv are installed.
+\fBplugin-qualify compare \-\-help\fR prints every option;
+\fBplugin-qualify compare summary\fR \fIdir\fR writes the summary of the records in a directory.
 .SH EXIT STATUS
 0 every plugin qualified, 1 some did not, 2 something could not be measured.
 .SH SEE ALSO

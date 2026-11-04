@@ -43,9 +43,29 @@
 #include <stdlib.h>
 #include "rt-interpose.h"
 
-/* Counters. Read by the host through dlsym after the render. */
+/* Counters. Read by the host through dlsym after the render.
+ *
+ * Built with OMX_RT_WATCH (native/rt-watch.c, the host comparison's watch on a JACK host's process callback), the
+ * window is per thread: a host has threads of its own beside the audio one (its socket, its UI, its worker), and what
+ * they do while the audio thread runs is not the audio thread's. The counters are then added atomically, since a host
+ * can have more than one audio thread, and an event keeps its kind without a backtrace. */
+#ifdef OMX_RT_WATCH
+#define OMX_RT_LOCAL static __thread __attribute__((tls_model("initial-exec")))
+#define OMX_RT_INC(x) __atomic_fetch_add(&(x), 1, __ATOMIC_RELAXED)
+#else
+#define OMX_RT_LOCAL static
+#define OMX_RT_INC(x) ((x)++)
+#endif
 static uint64_t n_alloc, n_lock, n_syscall;
-static int armed;
+OMX_RT_LOCAL int armed;
+/* A try-lock never waits. The qualification counts it as a lock, as before; the host comparison keeps it apart, since a
+ * host that polls a lock from its audio thread without waiting on it is not blocking that thread. */
+#ifdef OMX_RT_WATCH
+static uint64_t n_trylock;
+#define OMX_RT_TRYLOCK_COUNTER n_trylock
+#else
+#define OMX_RT_TRYLOCK_COUNTER n_lock
+#endif
 
 /* The first events, with their backtraces, so a count becomes a fact. backtrace() can
  * allocate on its first use (the unwinder's lazy init), so omx_rt_reset() warms it OUTSIDE
@@ -53,9 +73,18 @@ static int armed;
  * and the ring while a record is being taken. */
 static struct omx_rt_event events[OMX_RT_EV_MAX];
 static int n_events;
-static int in_record;
+OMX_RT_LOCAL int in_record;
 
 static void record(int kind) {
+#ifdef OMX_RT_WATCH
+  if (!armed || in_record) return;
+  int i = __atomic_fetch_add(&n_events, 1, __ATOMIC_RELAXED);
+  if (i < OMX_RT_EV_MAX) {
+    events[i].kind = kind;
+    events[i].depth = 0;
+  }
+  return;
+#endif
   if (!armed || in_record || n_events >= OMX_RT_EV_MAX) return;
   in_record = 1;
   struct omx_rt_event *e = &events[n_events];
@@ -152,7 +181,7 @@ int omx_rt_present(void) { return 1; }
 void *malloc(size_t n) {
   resolve();
   if (real_malloc == NULL) return boot_alloc(n);
-  if (armed && !in_record) { n_alloc++; record(OMX_RT_MALLOC); }
+  if (armed && !in_record) { OMX_RT_INC(n_alloc); record(OMX_RT_MALLOC); }
   return bounded(real_malloc(n), n);
 }
 
@@ -163,14 +192,14 @@ void *calloc(size_t nmemb, size_t size) {
     if (p) memset(p, 0, nmemb * size);
     return p;
   }
-  if (armed && !in_record) { n_alloc++; record(OMX_RT_CALLOC); }
+  if (armed && !in_record) { OMX_RT_INC(n_alloc); record(OMX_RT_CALLOC); }
   return bounded(real_calloc(nmemb, size), nmemb * size);
 }
 
 void *realloc(void *p, size_t n) {
   resolve();
   if (real_realloc == NULL) return boot_alloc(n);
-  if (armed && !in_record) { n_alloc++; record(OMX_RT_REALLOC); }
+  if (armed && !in_record) { OMX_RT_INC(n_alloc); record(OMX_RT_REALLOC); }
   return bounded(real_realloc(p, n), n);
 }
 
@@ -178,7 +207,7 @@ void free(void *p) {
   resolve();
   /* Never hand the arena to libc free: it did not come from libc. */
   if (from_boot_arena(p)) return;
-  if (armed && !in_record) { n_alloc++; record(OMX_RT_FREE); }
+  if (armed && !in_record) { OMX_RT_INC(n_alloc); record(OMX_RT_FREE); }
   if (real_free != NULL) real_free(p);
 }
 
@@ -200,13 +229,13 @@ void *aligned_alloc(size_t align, size_t n) {
 
 int pthread_mutex_lock(pthread_mutex_t *m) {
   resolve();
-  if (armed && !in_record) { n_lock++; record(OMX_RT_MUTEX_LOCK); }
+  if (armed && !in_record) { OMX_RT_INC(n_lock); record(OMX_RT_MUTEX_LOCK); }
   return real_mutex_lock ? real_mutex_lock(m) : 0;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *m) {
   resolve();
-  if (armed && !in_record) { n_lock++; record(OMX_RT_MUTEX_TRYLOCK); }
+  if (armed && !in_record) { OMX_RT_INC(OMX_RT_TRYLOCK_COUNTER); record(OMX_RT_MUTEX_TRYLOCK); }
   return real_mutex_trylock ? real_mutex_trylock(m) : 0;
 }
 
@@ -220,7 +249,7 @@ int pthread_mutex_trylock(pthread_mutex_t *m) {
   ret name params {                                                                    \
     static ret (*real)params;                                                          \
     if (real == NULL) real = dlsym(RTLD_NEXT, #name);                                  \
-    if (armed && !in_record) { n_syscall++; record(kind); }                            \
+    if (armed && !in_record) { OMX_RT_INC(n_syscall); record(kind); }                            \
     return real ? real args : fallback;                                                \
   }
 
