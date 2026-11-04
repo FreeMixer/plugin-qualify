@@ -439,6 +439,7 @@ struct port_set {
 
 #include "rss-kb.h"
 #include "timing-sched.h"
+#include "note-onset.h"
 
 /* how the cost arm chose how many notes to hold */
 enum voice_basis { BASIS_NONE, BASIS_DECLARED, BASIS_PROBE };
@@ -632,7 +633,8 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
    * kept as its per-frame magnitude (the loudest main-out channel), and the arrival is read against
    * its own peak (ONSET_OF_PEAK); a response that never leaves SILENCE has not arrived. A plugin with
    * no main audio input has nowhere to put an impulse: an instrument is played a note instead, A4 at
-   * velocity 127 at frame 0, let go at the end, and its onset is read the same way. */
+   * velocity 127 at frame 0, let go at the end, and its onset is its first frame above SILENCE
+   * (note-onset.h), never read against its peak: the patch's attack is not the plugin's latency. */
   if (p->reset) p->reset(p);
   const int by_note = ins.main_port < 0 && f->latency_note >= 0;
   const uint32_t horizon = f->declared[r] + IMPULSE_TAIL;
@@ -660,7 +662,11 @@ static void measure_rate(const clap_plugin_t *p, double rate, uint32_t frames, u
         if (m > mag[base + i]) mag[base + i] = m;
       }
   }
-  if (mag) {
+  if (mag && by_note) {
+    /* the note's first sample above the floor (note-onset.h): the patch's attack is not the plugin's latency */
+    seen_at = note_onset_at(mag, horizon, SILENCE);
+    free(mag);
+  } else if (mag) {
     float peak = 0.0f;
     for (uint32_t i = 0; i < horizon; i++)
       if (mag[i] > peak) peak = mag[i];

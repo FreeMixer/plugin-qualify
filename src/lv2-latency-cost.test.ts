@@ -27,7 +27,17 @@ const LV2_FIXTURES = join(BUILD, "fixtures", "lv2");
 const LATENCY = (kind: string): string => `urn:plugin-qualify:fixture:lv2-latency-${kind}`;
 const GAIN = "urn:plugin-qualify:fixture:lv2-rt-safe";
 const SYNTH = "urn:plugin-qualify:fixture:lv2-synth";
-const BUILT = [MEASURE, INTERPOSER, join(LV2_FIXTURES, "latency.lv2", "latency.so"), join(LV2_FIXTURES, "rt-safe.lv2", "gain.so"), join(LV2_FIXTURES, "synth.lv2", "synth.so")].every((p) => existsSync(p));
+const SYNTH_ATTACK = "urn:plugin-qualify:fixture:lv2-synth-attack";
+const SYNTH_DELAY = "urn:plugin-qualify:fixture:lv2-synth-delay";
+const BUILT = [
+  MEASURE,
+  INTERPOSER,
+  join(LV2_FIXTURES, "latency.lv2", "latency.so"),
+  join(LV2_FIXTURES, "rt-safe.lv2", "gain.so"),
+  join(LV2_FIXTURES, "synth.lv2", "synth.so"),
+  join(LV2_FIXTURES, "synth-attack.lv2", "synth.so"),
+  join(LV2_FIXTURES, "synth-delay.lv2", "synth.so"),
+].every((p) => existsSync(p));
 
 const scratch = mkdtempSync(join(tmpdir(), "lv2-latency-cost-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -81,6 +91,22 @@ describe("lv2-measure, live: the latency of fixtures whose delay is known", () =
     for (const rate of [44100, 48000, 192000]) {
       // the fixture's sine starts at phase 0, so its first frame is silent and its second is the onset
       expect(latencyAt(measure(SYNTH, rate), rate)).toEqual({ declaredFrames: 0, declaredFrom: "none", measuredFrames: 1, from: "note" });
+    }
+  });
+
+  live("an instrument's latency is its first sample above silence: a 50 ms linear attack is the patch's, never a delay", () => {
+    for (const rate of [48000, 192000]) {
+      // the attack ramps from the note on, so its first sample above silence comes within the sine's own first frames
+      // (1 at 48 kHz, 2 at 192 kHz); read against the response's peak (the impulse's rule) the ramp reads 7 and 27
+      const at = latencyAt(measure(SYNTH_ATTACK, rate), rate);
+      expect(at).toMatchObject({ declaredFrames: 0, declaredFrom: "none", from: "note" });
+      expect(at["measuredFrames"]).toBeLessThanOrEqual(2);
+    }
+  });
+
+  live("an instrument with a real 64-frame processing delay measures 64, at every rate", () => {
+    for (const rate of [44100, 48000, 192000]) {
+      expect(latencyAt(measure(SYNTH_DELAY, rate), rate)).toEqual({ declaredFrames: 0, declaredFrom: "none", measuredFrames: 64, from: "note" });
     }
   });
 

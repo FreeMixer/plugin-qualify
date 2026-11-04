@@ -7,12 +7,12 @@
 #   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so, build/rt_watch.so, build/jack_compare,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
-#                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
+#                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict,synth-attack,synth-delay}.clap,
 #                            build/fixtures/{pool-synth,pool-synth-slow,pool-synth-quiet,pool-synth-helper,pool-synth-serial}.clap (the pool step's),
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
 #                            build/fixtures-faulty/synth-voice-memory.clap (apart, its memory fails any budget),
-#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,latency,activate-reads,needs-display,abi-breaker}.lv2,
+#                            build/fixtures/lv2/{rt-safe,rt-unsafe,host-faithfulness,synth,synth-alloc,synth-attack,synth-delay,latency,activate-reads,needs-display,abi-breaker}.lv2,
 #                            build/fixtures-faulty/lv2/{leaks,large-activate}.lv2 (apart, as the faulty ones)
 #   build/lv2_measure_options_test    the measurer's feature options oracle
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
@@ -105,13 +105,14 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap $(BUILD)/fixtures-faulty/rate-pinned.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
-	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
+	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap $(BUILD)/fixtures/synth-attack.clap $(BUILD)/fixtures/synth-delay.clap \
 	$(BUILD)/fixtures/pool-synth.clap $(BUILD)/fixtures/pool-synth-slow.clap $(BUILD)/fixtures/pool-synth-quiet.clap $(BUILD)/fixtures/pool-synth-serial.clap $(BUILD)/fixtures/pool-synth-helper.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
 	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so $(BUILD)/fixtures/lv2/needs-display.lv2/gain.so $(BUILD)/fixtures/lv2/abi-breaker.lv2/gain.so \
 	$(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so \
 	$(BUILD)/fixtures/lv2/synth.lv2/synth.so $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so $(BUILD)/fixtures/lv2/synth-drum.lv2/synth.so \
+	$(BUILD)/fixtures/lv2/synth-attack.lv2/synth.so $(BUILD)/fixtures/lv2/synth-delay.lv2/synth.so \
 	$(BUILD)/fixtures/lv2/latency.lv2/latency.so $(BUILD)/fixtures/lv2/spaced.lv2/manifest.ttl \
 	$(BUILD)/fixtures-faulty/synth-voice-memory.clap \
 	$(BUILD)/fixtures-faulty/lv2/leaks.lv2/gain.so $(BUILD)/fixtures-faulty/lv2/large-activate.lv2/gain.so
@@ -120,11 +121,11 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
-$(BUILD)/clap-qualify: clap-qualify.c pool-host.c pool-host.h rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
+$(BUILD)/clap-qualify: clap-qualify.c pool-host.c pool-host.h rt-interpose.h rss-kb.h timing-sched.h note-onset.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ clap-qualify.c pool-host.c $(PLUGIN_HOSTD_LIBS) -ldl -lm -lpthread
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
-LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
+LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h note-onset.h
 
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
@@ -207,6 +208,11 @@ $(BUILD)/fixtures/synth-midi.clap: fixtures/synth.c | $(BUILD)/fixtures
 # a drum kit: only keys 36 to 40 answer, each with a 20 ms hit
 $(BUILD)/fixtures/synth-drum.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_DRUM -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+# an instrument's latency, known: a 50 ms linear attack and no delay, and a real 64-frame processing delay (note-onset.h)
+$(BUILD)/fixtures/synth-attack.clap: fixtures/synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_ATTACK_MS=50 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+$(BUILD)/fixtures/synth-delay.clap: fixtures/synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_DELAY_FRAMES=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 # the same declaring its voice capacity through voice-info, at 8 and at 0: what the cost arm holds
 $(BUILD)/fixtures/synth-voices.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_VOICE_CAPACITY=8 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
@@ -316,6 +322,19 @@ $(BUILD)/fixtures/lv2/synth.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv
 	mkdir -p $(@D)
 	cp fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl $(@D)/
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+
+# the instrument with a 50 ms linear attack, and the one with a 64-frame processing delay, under their own uris
+$(BUILD)/fixtures/lv2/synth-attack.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
+	mkdir -p $(@D)
+	sed 's/fixture:lv2-synth>/fixture:lv2-synth-attack>/' fixtures/synth.lv2/manifest.ttl > $(@D)/manifest.ttl
+	sed 's/fixture:lv2-synth>/fixture:lv2-synth-attack>/' fixtures/synth.lv2/synth.ttl > $(@D)/synth.ttl
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_ATTACK_MS=50 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+
+$(BUILD)/fixtures/lv2/synth-delay.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth.lv2/manifest.ttl fixtures/synth.lv2/synth.ttl
+	mkdir -p $(@D)
+	sed 's/fixture:lv2-synth>/fixture:lv2-synth-delay>/' fixtures/synth.lv2/manifest.ttl > $(@D)/manifest.ttl
+	sed 's/fixture:lv2-synth>/fixture:lv2-synth-delay>/' fixtures/synth.lv2/synth.ttl > $(@D)/synth.ttl
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -DFIXTURE_DELAY_FRAMES=64 -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
 
 $(BUILD)/fixtures/lv2/synth-alloc.lv2/synth.so: fixtures/lv2-synth.c fixtures/synth-alloc.lv2/manifest.ttl fixtures/synth-alloc.lv2/synth.ttl
 	mkdir -p $(@D)

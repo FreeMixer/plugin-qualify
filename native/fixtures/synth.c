@@ -24,6 +24,8 @@
  *                          It also has a stepped parameter (a mode, 0 to 3) and aborts on a value between two
  *                          steps, which no host sends.
  *
+ *   synth-attack.clap      built with -DFIXTURE_ATTACK_MS=50, and synth-delay.clap with -DFIXTURE_DELAY_FRAMES=64: see
+ *                          voice_sample.
  *   synth-voice-memory.clap  built with -DFIXTURE_VOICE_MB=4, the safe one taking that many MiB for each note struck,
  *                          touched and never given back, as a sampler's voice would.
  * Each voice costs a sine per sample, so the cost grows with the notes held.
@@ -63,6 +65,12 @@ static void (*volatile fixture_free)(void *) = free;
 #elif defined FIXTURE_VOICE_CAPACITY
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-voices"
 #define FIXTURE_NAME "synth declaring its voices"
+#elif defined FIXTURE_ATTACK_MS
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-attack"
+#define FIXTURE_NAME "synth with a slow attack"
+#elif defined FIXTURE_DELAY_FRAMES
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth-delay"
+#define FIXTURE_NAME "synth with a processing delay"
 #else
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.synth"
 #define FIXTURE_NAME "synth"
@@ -94,7 +102,40 @@ static const clap_plugin_descriptor_t descriptor = {
 #define FIXTURE_DRUM_HIT_S 0.02
 #endif
 
-struct voice { int key; double phase, step; long left; };
+#define VOICE_LEVEL 0.1
+
+/*
+ * Two instruments whose latency is known, for the note-onset rule (note-onset.h):
+ *   FIXTURE_ATTACK_MS=50       a voice at FIXTURE_LEVEL with a 50 ms linear attack: no processing delay at all, so its
+ *                              latency is its first sample above the floor, never its attack.
+ *   FIXTURE_DELAY_FRAMES=64    a voice at FIXTURE_LEVEL that starts 64 frames after its note, at full level (a cosine): a
+ *                              real 64-frame processing delay.
+ */
+#if defined FIXTURE_ATTACK_MS || defined FIXTURE_DELAY_FRAMES
+#define FIXTURE_LEVEL 0.5
+#endif
+
+struct voice { int key; double phase, step; long left, since; };
+
+/* one voice's next sample, its phase and its age moved on */
+static double voice_sample(struct voice *v, double rate) {
+  (void)rate;
+#if defined FIXTURE_ATTACK_MS
+  const double attack = rate * FIXTURE_ATTACK_MS / 1000.0;
+  const double y = sin(v->phase) * FIXTURE_LEVEL * (v->since < attack ? (double)v->since / attack : 1.0);
+#elif defined FIXTURE_DELAY_FRAMES
+  if (v->since < FIXTURE_DELAY_FRAMES) {
+    v->since++;
+    return 0.0;
+  }
+  const double y = cos(v->phase) * FIXTURE_LEVEL;
+#else
+  const double y = sin(v->phase) * VOICE_LEVEL;
+#endif
+  v->phase += v->step;
+  v->since++;
+  return y;
+}
 
 struct synth {
   clap_plugin_t plugin;
@@ -149,6 +190,7 @@ static void note_on(struct synth *s, int key) {
     if (s->voice[v].key < 0) {
       s->voice[v].key = key;
       s->voice[v].phase = 0.0;
+      s->voice[v].since = 0;
       s->voice[v].step = 2.0 * M_PI * 440.0 * pow(2.0, (key - 69) / 12.0) / s->rate;
 #ifdef FIXTURE_DRUM
       s->voice[v].left = (long)(s->rate * FIXTURE_DRUM_HIT_S);
@@ -215,8 +257,7 @@ static clap_process_status synth_process(const clap_plugin_t *p, const clap_proc
     double y = 0.0;
     for (int v = 0; v < VOICES; v++)
       if (s->voice[v].key >= 0) {
-        y += sin(s->voice[v].phase) * 0.1;
-        s->voice[v].phase += s->voice[v].step;
+        y += voice_sample(&s->voice[v], s->rate);
 #ifdef FIXTURE_DRUM
         if (--s->voice[v].left <= 0) s->voice[v].key = -1;
 #endif
