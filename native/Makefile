@@ -36,8 +36,9 @@ BUILD ?= build
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.15.3
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
-# reads the contract the packages do.
-OMX_CONTRACT_VERSION := 3.4.0
+# reads the contract the packages do (3.9.0: the first with <omxcontract/omx_json_write.h>, the one JSON string writer
+# every tool here spells its literals through).
+OMX_CONTRACT_VERSION := 3.9.0
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.26.2
@@ -60,7 +61,8 @@ PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
 PLUGIN_HOSTD_LIBS ?=
 endif
 
-# the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>
+# the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>; the JSON string
+# literals of every tool are spelled by <omxcontract/omx_json_write.h> (src/no-json-escape-loop.test.ts)
 ifeq ($(shell $(PKG_CONFIG) --exists omx-contract && echo true),true)
 OMX_CONTRACT_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags omx-contract)
 else
@@ -115,7 +117,7 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
 $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< $(PLUGIN_HOSTD_LIBS) -ldl -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ $< $(PLUGIN_HOSTD_LIBS) -ldl -lm
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
 LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
@@ -135,7 +137,7 @@ $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 
 # the feature options' oracle, never installed
 $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-options.c lv2-measure-options.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CLAP_LV2_CFLAGS) $(LV2_CFLAGS) -I. $(LDFLAGS) -o $@ lv2_measure_options.test.c \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CLAP_LV2_CFLAGS) $(LV2_CFLAGS) $(OMX_CONTRACT_CFLAGS) -I. $(LDFLAGS) -o $@ lv2_measure_options.test.c \
 		lv2-measure-options.c $(OMX_CLAP_LV2_LIBS) -ldl -lpthread
 
 # the search path's oracle, never installed
@@ -156,7 +158,7 @@ $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
 
 # the interposer again, its window put around a JACK host's process callback: the host comparison's watch
 $(BUILD)/jack_compare: jack-compare.c | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LDFLAGS) -o $@ $< -ldl -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/rt_watch.so: rt-watch.c rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread

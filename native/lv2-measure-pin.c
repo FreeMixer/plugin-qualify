@@ -14,6 +14,7 @@
 
 #include <plugin-hostd/pin.h>
 #include <plugin-hostd/protocol.h>
+#include <omxcontract/omx_json_write.h>
 
 #define MANIFEST "manifest.ttl"
 #define PIN_FILES_MAX 64
@@ -23,14 +24,9 @@ struct pin_file {
   char sha256[PHD_SHA256_HEX_LEN + 1];
 };
 
+/* a JSON string literal, spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>) */
 static void json_text(FILE *out, const char *s) {
-  fputc('"', out);
-  for (const char *p = s; *p; p++) {
-    if (*p == '"' || *p == '\\') fprintf(out, "\\%c", *p);
-    else if ((unsigned char)*p < 0x20) fprintf(out, "\\u%04x", *p);
-    else fputc(*p, out);
-  }
-  fputc('"', out);
+  omx_json_write_string(out, s);
 }
 
 static void print_reason(FILE *out, const char *reason, const char *detail) {
