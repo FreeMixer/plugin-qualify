@@ -807,7 +807,16 @@ only when:
   intact (its SHA-256 the one the record names): the same acceptance the sync gives a record of its own, which it
   never measures again for a newer tool;
 - it holds a verdict for the sync's `host_profile`, and that verdict ended `qualified`, `refused`, `crashed` or
-  `hung`. One that could not be measured at the source (`unmeasured`) is measured here.
+  `hung`. One that could not be measured at the source (`unmeasured`) is measured here;
+- its probe took the latency figure, or named why it could not. A record from a probe that ran before the latency
+  pass (plugin-hostd-probe 0.12 on an LV2 plugin) holds neither, and is measured here: its plugin would otherwise read
+  "latency unknown" for a figure today's probe takes.
+
+The verdicts of a record that applies are not taken as the measuring device's plugin-qualify wrote them: its figures
+are judged again under this version's rules, as `--rejudge` judges a device's own records after an upgrade. A plugin an
+older judge refused for an RT-safety violation alone is taken as `conditional`, pinned `isolated` and runs alone in a
+worker of its own. A record this version's judge cannot decide for the host (an LV2 plugin with no run under
+omx-clap-host's adapter) is measured here.
 
 A plugin whose distributed records apply is not measured: the records are copied into `qualification_dir` with the
 set's `provenance` object added, its pin is taken from the probe output the record judged, its descriptor is

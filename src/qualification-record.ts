@@ -150,6 +150,25 @@ export function unmeasuredFigures(output: ProbeOutput): readonly UnmeasuredFigur
     }));
 }
 
+/**
+ * Whether the run that wrote the record never took the latency figure: the probe ended well and measured a point, yet no
+ * point holds a latency and none is named unmeasured. That is a probe from before the latency pass (plugin-hostd-probe
+ * 0.12 ran no latency pass on an LV2 plugin): an instrument's note onset, or an effect's impulse, was never asked for, so a
+ * reader shows "latency unknown" for a figure today's probe takes. Such a record owes a measurement; it is never read as
+ * a plugin with no latency.
+ */
+export function latencyNeverTaken(record: Pick<QualificationRecord, "probe" | "measurements">): boolean {
+  if (record.probe?.outcome !== PROBE_OK) return false;
+  const ok = (record.measurements?.grid ?? []).filter((p) => p.outcome === PROBE_OK);
+  if (ok.length === 0) return false;
+  if ((record.measurements.unmeasured ?? []).some((u) => u.dimension === "latency")) return false;
+  // a point's latency is a figure, or the reason the probe gave for none; `not-attempted` with no step is the older probe's silence
+  return !ok.some((p) => {
+    const l = p.latency as Partial<{ measuredFrames: number; unmeasuredReason: string }> | undefined;
+    return l !== undefined && (l.measuredFrames !== undefined || (l.unmeasuredReason !== undefined && l.unmeasuredReason !== word("notAttempted")));
+  });
+}
+
 /** A cell's latency when the run took no figure: the contract's unmeasured word and the hosting code a reader classifies by. */
 export interface UnmeasuredLatency {
   /** The figure the plugin declared (LV2 latency port, CLAP latency extension) when it loaded but the probe did not measure. */

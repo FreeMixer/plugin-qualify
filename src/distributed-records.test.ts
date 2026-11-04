@@ -49,12 +49,24 @@ function machine(name: string, flags: readonly string[] = []): { root: string; c
   return { root, clap, settings: r.settings, share };
 }
 
-async function sync(settings: SyncSettings, force = false) {
+async function sync(settings: SyncSettings, force = false, flags: readonly string[] = []) {
   const lines: string[] = [];
-  const summary = await runSync(settings, { force, env: {}, log: (l) => lines.push(l) });
+  const run = flags.includes("--no-distributed") ? { ...settings, distributed: false } : settings;
+  const summary = await runSync(run, { force, env: {}, log: (l) => lines.push(l) });
   if (summary === undefined) throw new Error("the run held no lock");
   return { summary, lines };
 }
+
+/** The measurements of a record as a probe from before the latency pass left them: no point holds a latency, none is named unmeasured. */
+const stripLatency = (m: Record<string, unknown>): Record<string, unknown> => {
+  const { unmeasured, ...rest } = m as { unmeasured?: { dimension: string }[] };
+  const kept = (unmeasured ?? []).filter((u) => u.dimension !== "latency");
+  return {
+    ...rest,
+    grid: (m["grid"] as Record<string, unknown>[]).map(({ latency: _latency, ...p }) => p),
+    ...(kept.length === 0 ? {} : { unmeasured: kept }),
+  };
+};
 
 const measured = (s: { qualified: number; refused: number; crashed: number; hung: number; unmeasured: number }): number =>
   s.qualified + s.refused + s.crashed + s.hung + s.unmeasured;
@@ -103,6 +115,53 @@ describe("a distributed record", () => {
     const { summary, lines } = await sync(m.settings);
     expect(lines.some((l) => /its record lacks the steps describe, rt-safety; measured here/.test(l)), lines.join("\n")).toBe(true);
     expect(summary.distributed).toBe(0);
+  });
+
+  it("refused by an older judge for RT-safety alone is judged again: it is taken, isolated, never refused", async () => {
+    const m = machine("older-judge-rt");
+    // the probe counted syscalls in the run; plugin-qualify 0.16.1 rated that unsuitable, today's judge conditional (#196)
+    writeFixtureSet(m.share, CLASS, SET, m.clap, (doc) => {
+      for (const p of doc["grid"]) if (p["rtSafety"] !== undefined) p["rtSafety"]["syscalls"] = 7;
+    });
+    editRecord(m, (r) => ({
+      ...r,
+      verdicts: (r["verdicts"] as Record<string, unknown>[]).map((v) =>
+        v["host"] === "omx-clap-host" ? { ...v, rating: "unsuitable", qualified: false, deciding: "hosting.rt-safety.violations-in-run" } : v,
+      ),
+    }));
+    const { summary, lines } = await sync(m.settings);
+    expect(summary.distributed, lines.join("\n")).toBe(1);
+    expect(summary.refused).toBe(0);
+    const pins = readFileSync(m.settings.pinFile, "utf8").split("\n").filter((l) => l.startsWith("pin_set"));
+    expect(pins.map((l) => parsePinLine(l)!.verdict)).toEqual(["isolated"]);
+    const copied = readdirSync(m.settings.qualificationDir).find((f) => f.endsWith(".qualification.json"))!;
+    const record = JSON.parse(readFileSync(join(m.settings.qualificationDir, copied), "utf8"));
+    expect(record.verdicts.find((v: { host: string }) => v.host === "omx-clap-host")).toMatchObject({ rating: "conditional", deciding: "hosting.rt-safety.violations-in-run" });
+    expect(record.rejudged?.figures?.measuredAt).toBe(record.measuredAt);
+  });
+
+  it("that never took the latency figure (a probe from before that pass) is not taken: the plugin is measured here", async () => {
+    const m = machine("no-latency");
+    writeFixtureSet(m.share, CLASS, SET, m.clap);
+    editRecord(m, (r) => ({ ...r, measurements: stripLatency(r["measurements"] as Record<string, unknown>) }));
+    const { summary, lines } = await sync(m.settings);
+    expect(lines.some((l) => /its record never took the latency figure \(a probe from before that pass\); measured here/.test(l)), lines.join("\n")).toBe(true);
+    expect(summary.distributed).toBe(0);
+  });
+
+  it("recorded here from a probe that never took the latency figure is measured again, its bytes unchanged", async () => {
+    const m = machine("owed-here");
+    writeFixtureSet(m.share, CLASS, SET, m.clap);
+    expect((await sync(m.settings)).summary.distributed).toBe(1);
+    const again = await sync(m.settings);
+    expect(again.summary.skipped).toBe(1);
+    const name = readdirSync(m.settings.qualificationDir).find((f) => f.endsWith(".qualification.json"))!;
+    const path = join(m.settings.qualificationDir, name);
+    const r = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    writeFileSync(path, JSON.stringify({ ...r, measurements: stripLatency(r["measurements"] as Record<string, unknown>) }));
+    const owed = await sync(m.settings, false, ["--no-distributed"]);
+    expect(owed.lines.some((l) => /never took the latency figure \(a probe from before that pass\); measured again/.test(l)), owed.lines.join("\n")).toBe(true);
+    expect(owed.summary.skipped).toBe(0);
   });
 
   it("with no run is from before the steps: it is taken, and keeps its word", async () => {
