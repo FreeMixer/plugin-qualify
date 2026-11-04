@@ -442,7 +442,8 @@ the comparison: `OMX_COMPARE_VERSION_MOD_HOST="zynthian 3f2c1ab"` names a `mod-h
 
 plugin-qualify does not pull in mod-host or jalv: install them, and the plugins to compare, yourself.
 
-Fedora 44 (a `fedora:44` container does):
+Fedora 44 (a `fedora:44` container does, started with `--shm-size=1g`: the JACK server maps about 100 MB of
+`/dev/shm` and a container's default 64 MB runs out mid-run):
 
 ```
 dnf install https://www.openmixer.org/rpm/openmixer-release.noarch.rpm

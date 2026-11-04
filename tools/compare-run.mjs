@@ -4,7 +4,7 @@
 // src/compare.ts; this module finds the hosts and their versions, starts the private JACK server, runs
 // tools/compare-host.mjs for each plugin and host, and writes the records and the summary.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +86,15 @@ async function startJack(rate, quantum) {
         name,
         proc: p,
         alive: () => failed === undefined && answers(name),
-        stop: () => {
+        // SIGTERM first: a JACK server ended so removes its shared memory (100 MB at the defaults), which a killed one
+        // leaves in /dev/shm for the next server to run short of
+        stop: async () => {
+          try {
+            process.kill(-p.pid, "SIGTERM");
+          } catch {
+            return;
+          }
+          for (let i = 0; i < 50 && failed === undefined; i++) await sleep(100);
           try {
             process.kill(-p.pid, "SIGKILL");
           } catch {}
@@ -233,9 +241,18 @@ export async function compareMain(argv) {
     return 2;
   }
   log(`${String(targets.length)} plugins, ${String(present.filter((p) => p.installed).length)} hosts, ${String(a.rate)}/${String(a.quantum)}`);
+  // a JACK server maps about 100 MB of /dev/shm and its clients more: a container's default 64 MB runs out mid-run, and
+  // the server then stops answering
+  try {
+    const st = statfsSync("/dev/shm");
+    const free = (st.bavail * st.bsize) / 2 ** 20;
+    if (free < 512) log(`/dev/shm has ${String(Math.round(free))} MiB free; the JACK server and its clients want 512 or more (podman run --shm-size=1g)`);
+  } catch {
+    // no /dev/shm to read: JACK says so itself
+  }
   const instruments = lv2Instruments(targets.filter((t) => t.format === "lv2").map((t) => t.uri));
   let jack;
-  const startOwn = async () => (a.server === undefined ? startJack(a.rate, a.quantum) : { name: a.server, alive: () => answers(a.server), stop: () => {} });
+  const startOwn = async () => (a.server === undefined ? startJack(a.rate, a.quantum) : { name: a.server, alive: () => answers(a.server), stop: async () => {} });
   try {
     jack = await startOwn();
   } catch (e) {
@@ -288,7 +305,7 @@ export async function compareMain(argv) {
               break;
             }
             log("the JACK server does not answer; starting a new one");
-            jack.stop();
+            await jack.stop();
             jack = await startOwn();
           }
           const opts = { server: jack.name, cycles: a.cycles, soakS: a.soakS, windowMs: a.windowMs, timeoutMs: a.timeoutMs, stimulus, workdir: join(work, p.host) };
@@ -314,7 +331,7 @@ export async function compareMain(argv) {
       if (file !== undefined) writeFileWhole(file, `${JSON.stringify(rec, null, 2)}\n`);
     }
   } finally {
-    jack.stop();
+    await jack.stop();
     rmSync(work, { recursive: true, force: true });
   }
   log(`machine: ${String(cpus().length)} CPUs, ${cpus()[0]?.model ?? "unknown CPU"}; real time ${conditions.realtime}`);
