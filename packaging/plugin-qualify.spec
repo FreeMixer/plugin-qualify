@@ -110,6 +110,7 @@ fi
 
 %files
 %license LICENSE
+%doc README.md
 %{_bindir}/plugin-qualify
 %{_bindir}/plugin-qualify-sync
 %{_bindir}/plugin-qualify-records-package

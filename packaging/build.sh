@@ -31,6 +31,8 @@ tar -xzf "$work"/openmixer-plugin-qualify-*.tgz -C "$target" --strip-components=
 dep=$dest$libdir/node_modules/@openmixer/omx-contract
 mkdir -p "$dep"
 cp -rL node_modules/@openmixer/omx-contract/. "$dep"/
+# the package's one document is its README in the doc directory: no page rides along inside node_modules
+find "$target" "$dep" -name '*.md' -delete
 install -m 0644 packaging/plugin-qualify.1 packaging/plugin-qualify-sync.1 packaging/plugin-qualify-records-package.1 "$dest/usr/share/man/man1/"
 install -D -m 0644 packaging/qualify.conf "$dest/etc/omx/qualify.conf"
 for cmd in plugin-qualify plugin-qualify-sync plugin-qualify-records-package; do

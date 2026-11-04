@@ -57,7 +57,7 @@ export const ZYNTHIAN_LV2_DIRS = ["/zynthian/zynthian-plugins/lv2", "/zynthian/z
 export interface SyncSetting {
   readonly key: string;
   readonly meaning: string;
-  /** The default as `--help` and the README print it. */
+  /** The default as `--help` and docs/overview.md print it. */
   readonly default: string;
 }
 

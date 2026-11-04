@@ -3,7 +3,7 @@
 /**
  * The measurement grid (#193): the cells, each one rate and one quantum, a plugin is measured at, and the runs of the
  * probe runner that measure them. A host is judged at its own cell, so the grid a run takes is chosen from the hosts it
- * judges; README "The measurement grid" states the three ways of choosing it and the order the cells are taken in.
+ * judges; docs/overview.md "The measurement grid" states the three ways of choosing it and the order the cells are taken in.
  *
  * Pure: no file, no process. `probe-runner.ts` runs what `runnerInvocations` plans.
  */
