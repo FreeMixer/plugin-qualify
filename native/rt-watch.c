@@ -29,7 +29,6 @@
 #define OMX_RT_WATCH 1
 #include "rt-interpose.c"
 
-#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 
@@ -112,11 +111,12 @@ static void report(void) {
   len += snprintf(buf + len, sizeof buf - (size_t)len, "]}\n");
   char path[512];
   snprintf(path, sizeof path, "%s/rt-%d.json", report_dir, (int)getpid()); /* a forked worker reports as itself */
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd >= 0) {
-    ssize_t w = write(fd, buf, (size_t)len);
+  /* stdio, not open(2): this file defines open() as the interposer, which <fcntl.h> under _FORTIFY_SOURCE also defines */
+  FILE *f = fopen(path, "w");
+  if (f) {
+    size_t w = fwrite(buf, 1, (size_t)len, f);
     (void)w;
-    close(fd);
+    fclose(f);
   }
 }
 
