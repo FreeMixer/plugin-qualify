@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /*
  * lv2-measure-pin.c — the integrity block of an LV2 plugin; see lv2-measure-pin.h. Nothing here
- * hashes or serialises: plugin-pin's pin.h does both, over the records lilv fills.
+ * hashes or serialises: plugin-db's pin.h does both, over the records lilv fills.
  */
 #define _GNU_SOURCE
 #include "lv2-measure-pin.h"
@@ -12,7 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <plugin-pin/pin.h>
+#include <plugin-db/pin.h>
 #include <plugin-hostd/protocol.h>
 
 #define MANIFEST "manifest.ttl"

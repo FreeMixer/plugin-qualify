@@ -219,7 +219,7 @@ violation in the run (`hosting.rt-safety.violations-under-notes`); an instrument
 interposer is **unknown** (`hosting.rt-safety.notes-unmeasured`). `--out` writes the qualification records and the probe outputs they judged (see
 "Judging a probe output" below), one pair per plugin binary and offered host extensions. Each plugin's pin is
 an `integrity` block in the probe output: the `.clap`'s SHA-256 by its file name and the parameter-layout
-fingerprint `omx-layout/1:<sha256>`, both computed through plugin-pin's `pin.h`, which is what a console
+fingerprint `omx-layout/1:<sha256>`, both computed through plugin-db's `pin.h`, which is what a console
 hands plugin-hostd as `pin_set` before it adds the plugin. `OMX_CLAP_QUALIFY` and `OMX_RT_INTERPOSE`
 name the prober and the interposer the runner starts when they are not the installed ones or the checkout's
 own build.
@@ -329,7 +329,7 @@ node tools/lv2-measure.mjs --rates 48000 --dimensions stability,rtSafety,feature
 
 Without `--plugins` it measures every plugin the scan finds. Each plugin's entry carries its pin, an
 `integrity` block: the SHA-256 of the files the host loads and the parameter-layout fingerprint,
-through plugin-pin's `pin.h`, as for CLAP. `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` name the
+through plugin-db's `pin.h`, as for CLAP. `OMX_LV2_MEASURE` and `OMX_RT_INTERPOSE` name the
 measurer and the interposer when they are not the installed ones or the checkout's own build.
 
 The features the measurer offers a plugin are the console's own: omx-clap-core's LV2 feature

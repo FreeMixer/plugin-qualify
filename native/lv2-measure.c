@@ -62,7 +62,7 @@
  *
  * The measurement line also carries the plugin's pin, `integrity` (lv2-measure-pin.h): the
  * SHA-256 of every file the host loads and the parameter-layout fingerprint, through
- * plugin-pin's pin.h.
+ * plugin-db's pin.h.
  *
  * Emits one JSON object on stdout. Exit 0 measured, 2 could not instantiate, 3 no
  * such plugin — a host that cannot find a plugin and a host that found a broken one
