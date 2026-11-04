@@ -88,6 +88,7 @@
 #include "lv2-measure-path.h"
 #include "lv2-measure-pin.h"
 #include <omxcontract/omx_contract_limits.h>
+#include <omxcontract/omx_json_write.h>
 #include <omxdsp/omx_units.h> /* omx_lin_to_db_d */
 #include <lv2/atom/atom.h>
 
@@ -763,15 +764,9 @@ static void rt_owner(const struct omx_rt_event *e, const char **module, const ch
   }
 }
 
-/* A JSON string, escaped enough for URIs and plugin names. */
+/* a JSON string literal (NULL as ""), spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>) */
 static void json_str(FILE *out, const char *s) {
-  fputc('"', out);
-  for (const char *p = s; p && *p; p++) {
-    if (*p == '"' || *p == '\\') fprintf(out, "\\%c", *p);
-    else if ((unsigned char)*p < 0x20) fprintf(out, "\\u%04x", *p);
-    else fputc(*p, out);
-  }
-  fputc('"', out);
+  omx_json_write_string(out, s ? s : "");
 }
 
 /* `--pin <uri>`: the plugin's pin alone, read from the world without instantiating it — a re-vet of

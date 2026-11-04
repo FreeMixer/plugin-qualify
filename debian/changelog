@@ -24,6 +24,16 @@ plugin-qualify (0.19.0) unstable; urgency=medium
   * The commit message and private reference checks run from the shared
     FreeMixer/.github workflow (#288). The package installs its licence and a
     short README and no other markdown; the notes move to openmixer.org.
+  * The pin header comes from plugin-db (pkg-config plugin-db, plugin-db-dev),
+    the protocol header from plugin-hostd-protocol (#299).
+  * Every tool spells its JSON string literals through omx-contract's one
+    writer, <omxcontract/omx_json_write.h>, so 0x7f is escaped the same
+    everywhere; a test refuses a copy of the loop (#296).
+  * The live memory test reads which limit the runner applies, and CI cannot
+    skip it (#297).
+  * Floors and ceilings: plugin-db >= 0.1.0 and < 0.2, plugin-hostd-protocol
+    >= 0.3.0 and < 0.4, omx-contract >= 3.9.0 and < 4, omx-clap-core and
+    omx-clap-host < 0.30, plugin-hostd < 0.19, omx-dsp < 0.31.
 
  -- Pau Aliagas <linuxnow@gmail.com>  Wed, 04 Nov 2026 18:00:00 +0100
 

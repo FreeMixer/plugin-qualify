@@ -20,6 +20,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <omxcontract/omx_json_write.h>
+
 #define MAX_PORTS 64
 #define DEADLINE_S 3600u
 #define JACK_NO_START_SERVER 1
@@ -97,15 +99,10 @@ static int process(uint32_t n, void *arg)
   return 0;
 }
 
+/* a JSON string literal, spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>) */
 static void json_string(const char *s)
 {
-  putchar('"');
-  for (; *s; s++) {
-    if (*s == '"' || *s == '\\') putchar('\\');
-    if ((unsigned char)*s < 0x20) printf("\\u%04x", *s);
-    else putchar(*s);
-  }
-  putchar('"');
+  omx_json_write_string(stdout, s);
 }
 
 int main(int argc, char **argv)

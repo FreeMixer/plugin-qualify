@@ -41,8 +41,10 @@ with make. The CLAP headers come from `pkg-config clap` (Fedora
 `clap-devel`), plugin-hostd's `pin.h` from `pkg-config plugin-hostd`, lilv and the LV2 headers from
 `pkg-config lilv-0` (`lilv-devel`, `liblilv-dev` and `lv2-dev`). Where the CLAP and plugin-hostd
 headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`.
-The measurer's sample rates are omx-contract's `OMX_DECLARED_RATES`: the header comes from
-`pkg-config omx-contract` (`omx-contract-devel`, `libomx-contract-dev`), else `make deps` fetches it.
+The measurer's sample rates are omx-contract's `OMX_DECLARED_RATES`, and every tool spells its JSON
+string literals through omx-contract's one writer, `<omxcontract/omx_json_write.h>`: the headers come
+from `pkg-config omx-contract` (`omx-contract-devel`, `libomx-contract-dev`, 3.9.0 or later), else
+`make deps` fetches them.
 Its host features are omx-clap-core's LV2 feature provider, the static `libomx-clap-lv2` and its
 header: `pkg-config omx-clap-lv2` (`omx-clap-lv2-devel`, `libomx-clap-lv2-dev`), else `make deps`
 fetches omx-clap-core at the packages' floor, builds the archive against the fetched CLAP headers and

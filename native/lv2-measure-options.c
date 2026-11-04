@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <omxcontract/omx_json_write.h>
+
 const char *const LV2_MEASURE_FEATURE_NAMES[OMX_LV2_FEATURE_KINDS] = {
   [OMX_LV2_F_MAP] = "map",
   [OMX_LV2_F_UNMAP] = "unmap",
@@ -139,14 +141,9 @@ int lv2_measure_option_parse(struct lv2_measure_options *o, int argc, char **arg
   return 1;
 }
 
+/* a JSON string literal (NULL as ""), spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>) */
 static void json_text(FILE *out, const char *s) {
-  fputc('"', out);
-  for (const unsigned char *p = (const unsigned char *)s; p && *p; p++) {
-    if (*p == '"' || *p == '\\') fprintf(out, "\\%c", *p);
-    else if (*p < 0x20) fprintf(out, "\\u%04x", *p);
-    else fputc(*p, out);
-  }
-  fputc('"', out);
+  omx_json_write_string(out, s ? s : "");
 }
 
 static void json_names(FILE *out, uint32_t bits, const char *const *names, unsigned n) {

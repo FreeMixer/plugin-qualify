@@ -69,6 +69,7 @@
 #include <clap/clap.h>
 #include <plugin-db/pin.h>
 #include <plugin-hostd/protocol.h>
+#include <omxcontract/omx_json_write.h>
 
 #include "rt-interpose.h"
 
@@ -1119,9 +1120,11 @@ static int utf8_length(const unsigned char *s) {
   return 0;
 }
 
-/* a JSON string; a byte that is no UTF-8 becomes ? */
+/* a JSON string, each byte spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>); a byte that is no
+ * UTF-8 becomes ? */
 static void put_string(const char *s) {
   const unsigned char *p = (const unsigned char *)(s ? s : "");
+  char esc[OMX_JSON_ESCAPE_MAX];
   fputc_out('"');
   while (*p) {
     const int n = utf8_length(p);
@@ -1132,9 +1135,7 @@ static void put_string(const char *s) {
       fwrite(p, 1, (size_t)n, g_out);
       p += n;
     } else {
-      if (*p < 0x20 || *p == 0x7F) fprintf(g_out, "\\u%04x", *p);
-      else if (*p == '"' || *p == '\\') fprintf(g_out, "\\%c", *p);
-      else fputc_out(*p);
+      fwrite(esc, 1, omx_json_escape_byte(*p, esc), g_out);
       p++;
     }
   }
