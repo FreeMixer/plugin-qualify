@@ -23,4 +23,6 @@ runs:
         v=$(dpkg-query -W -f='${Version}' plugin-hostd)
         dpkg --compare-versions "$v" ge 0.15.3 || { echo "::error::plugin-hostd $v in the channel; a verdict needs the memory footprint, plugin-hostd 0.15.3 or later"; exit 1; }
         echo "PLUGIN_HOSTD=/usr/bin/plugin-hostd" >> "$GITHUB_ENV"
+        # the runner is here now, so src/grid-runs.test.ts fails its live arms instead of skipping them
+        echo "OMX_PROBE_RUNNER_REQUIRED=1" >> "$GITHUB_ENV"
         echo "PLUGIN_HOSTD_FAKE_HOST=/usr/libexec/plugin-hostd/tests/fake-host" >> "$GITHUB_ENV"

@@ -46,10 +46,11 @@ describe('ci.yml and publish.yml prepare the runner alike', () => {
     });
   }
 
-  it('the install action sets what src/pins-file.test.ts asks for and checks the floor', () => {
+  it('the install action sets what src/pins-file.test.ts and src/grid-runs.test.ts ask for and checks the floor', () => {
     const action = read('.github/actions/install-plugin-hostd/action.yml');
     expect(action).toMatch(/>> "\$GITHUB_ENV"/);
-    for (const variable of ['PLUGIN_HOSTD', 'PLUGIN_HOSTD_FAKE_HOST']) {
+    // OMX_PROBE_RUNNER_REQUIRED: src/grid-runs.test.ts fails its live arms instead of skipping them
+    for (const variable of ['PLUGIN_HOSTD', 'PLUGIN_HOSTD_FAKE_HOST', 'OMX_PROBE_RUNNER_REQUIRED']) {
       expect(action).toContain(`echo "${variable}=`);
     }
     expect(action).toMatch(/dpkg --compare-versions .* ge 0\.15\.3/);
