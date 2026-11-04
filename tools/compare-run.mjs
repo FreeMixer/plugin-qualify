@@ -4,7 +4,7 @@
 // src/compare.ts; this module finds the hosts and their versions, starts the private JACK server, runs
 // tools/compare-host.mjs for each plugin and host, and writes the records and the summary.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statfsSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,9 +72,19 @@ let jackSerial = 0;
 async function startJack(rate, quantum) {
   const name = `cmp${String(process.pid)}_${String(jackSerial++)}`;
   const env = { ...process.env, JACK_NO_START_SERVER: "1" };
-  const p = spawn("jackd", ["-n", name, "-d", "dummy", "-r", String(rate), "-p", String(quantum)], { stdio: ["ignore", "ignore", "pipe"], detached: true, env });
-  let err = "";
-  p.stderr.on("data", (d) => (err = (err + d.toString()).slice(-2000)));
+  // the server's output goes to a file, never to a pipe: this process waits on each host's run, a pipe it does not
+  // read fills, and a JACK server blocked writing its log stops answering
+  const logFile = join(tmpdir(), `plugin-qualify-${name}.log`);
+  const fd = openSync(logFile, "w");
+  const p = spawn("jackd", ["-n", name, "-d", "dummy", "-r", String(rate), "-p", String(quantum)], { stdio: ["ignore", fd, fd], detached: true, env });
+  closeSync(fd);
+  const lastLine = () => {
+    try {
+      return readFileSync(logFile, "utf8").trim().split("\n").filter((l) => !/lock down/.test(l)).pop() ?? "";
+    } catch {
+      return "";
+    }
+  };
   let failed;
   p.on("error", (e) => (failed = e.code));
   p.on("exit", (c, s) => (failed = failed ?? s ?? `exit ${String(c)}`));
@@ -98,6 +108,7 @@ async function startJack(rate, quantum) {
           try {
             process.kill(-p.pid, "SIGKILL");
           } catch {}
+          rmSync(logFile, { force: true });
         },
       };
     }
@@ -106,12 +117,14 @@ async function startJack(rate, quantum) {
   try {
     process.kill(-p.pid, "SIGKILL");
   } catch {}
-  throw new Error(`the private JACK server did not start (${failed ?? "no answer"}): ${err.trim().split("\n").pop() ?? ""}`);
+  throw new Error(`the private JACK server did not start (${failed ?? "no answer"}): ${lastLine()}`);
 }
 
 /** The server lists its ports within five seconds: a server that does not is not one to measure on. */
 function answers(name) {
-  const r = spawnSync(locateCompareTool(), ["ports"], { env: { ...process.env, JACK_DEFAULT_SERVER: name, JACK_NO_START_SERVER: "1" }, stdio: "ignore", timeout: 5000, killSignal: "SIGKILL" });
+  const t0 = Date.now();
+  const r = spawnSync(locateCompareTool(), ["ports"], { env: { ...process.env, JACK_DEFAULT_SERVER: name, JACK_NO_START_SERVER: "1" }, encoding: "utf8", timeout: 20000, killSignal: "SIGKILL" });
+  if (r.status !== 0 || Date.now() - t0 > 2000) log(`the JACK server ${name} answered ${r.status === 0 ? "" : "nothing "}in ${String(Date.now() - t0)} ms${r.status === 0 ? "" : `: ${(r.stderr ?? "").trim().split("\n").pop() ?? r.error?.code ?? ""}`}`);
   return r.status === 0;
 }
 
@@ -154,7 +167,8 @@ function lv2Instruments(uris) {
   return new Set(JSON.parse(r.stdout));
 }
 
-const addSpec = (t) => (t.format === "clap" ? `clap:${t.binaryPath}#${t.uri}` : t.uri);
+// a CLAP target's uri is urn:clap:<id>; the hosts take clap:<path>#<id>
+const addSpec = (t) => (t.format === "clap" ? `clap:${t.binaryPath}#${t.uri.replace(/^urn:clap:/, "")}` : t.uri);
 
 function readRecords(dir) {
   const out = [];

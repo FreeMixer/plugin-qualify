@@ -110,6 +110,11 @@ describe("one host's row", () => {
     expect(hostRowOf("jalv", null, fed, COND).checks?.output).toMatchObject({ result: "fail", detail: "silent under tone" });
     expect(hostRowOf("jalv", null, fed, COND).runsClean).toBe(false);
   });
+  it("NaN or infinite samples on the output fail it, whatever the finite peak", () => {
+    const row = hostRowOf("jalv", null, { ...clean, nonFinite: 512 }, COND);
+    expect(row.checks?.output).toMatchObject({ result: "fail", detail: "the output is not finite (512 NaN or infinite samples)" });
+    expect(row.runsClean).toBe(false);
+  });
   it("a host that dies is a crash at its step, and the checks after it did not run", () => {
     const died: HostObservation = { installed: true, started: true, load: { ok: false, died: "SIGSEGV" }, cycles: { done: 0, of: 3, failedAt: "add", died: "SIGSEGV" }, died: { step: "load", signal: "SIGSEGV" } };
     const row = hostRowOf("mod-host", null, died, COND);

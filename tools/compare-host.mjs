@@ -128,7 +128,8 @@ async function peakOver(outs) {
   await sleep(WINDOW_MS);
   const r = await m.stop();
   try {
-    return { peak: JSON.parse(r.out).peak };
+    const j = JSON.parse(r.out);
+    return { peak: j.peak, nonFinite: j.nonFinite ?? 0 };
   } catch {
     return { problem: r.err.trim() || "jack_peak gave no figure" };
   }
@@ -205,7 +206,10 @@ async function run(plugin, pgid, alive, deathOf) {
   if (outs.length > 0 && obs.peakProblem === undefined) {
     const p = await peakOver(outs);
     if (p.problem) obs.peakProblem = p.problem;
-    else obs.peak = p.peak;
+    else {
+      obs.peak = p.peak;
+      if (p.nonFinite) obs.nonFinite = p.nonFinite;
+    }
   }
   const t0 = groupTicks(pgid);
   const s0 = Date.now();
@@ -217,6 +221,7 @@ async function run(plugin, pgid, alive, deathOf) {
   if (survived && outs.length > 0 && obs.peakProblem === undefined) {
     const p = await peakOver(outs);
     peakAtEnd = p.peak ?? null;
+    if (p.nonFinite) obs.nonFinite = (obs.nonFinite ?? 0) + p.nonFinite;
   }
   obs.soak = { seconds: Math.round(seconds * 10) / 10, alive: survived && alive(), ...(survived ? {} : { died: deathOf() }), ...(peakAtEnd === undefined ? {} : { peakAtEnd }) };
   obs.cpu = survived ? { percent: (100 * (t1 - t0)) / CLK_TCK / Math.max(seconds, 0.001) } : { problem: "the host ended during the soak" };

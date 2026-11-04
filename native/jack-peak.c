@@ -7,7 +7,8 @@
  *   jack_peak <client:port> ...
  *
  * It links each port to an input of its own and prints "ready" once they are linked. The window ends when its standard
- * input closes, and it prints {"peak":<largest magnitude, linear>,"frames":<frames read>}. Exit 0; 1 with the reason on
+ * input closes, and it prints {"peak":<largest finite magnitude, linear>,"frames":<frames read>,"nonFinite":<NaN and
+ * infinite samples read>}. Exit 0; 1 with the reason on
  * stderr when JACK or a port cannot be had, and no server is ever started. libjack is opened at run time: it is on every
  * machine with a JACK server and nowhere else this package runs, and nothing else here needs it.
  */
@@ -42,19 +43,24 @@ static port_t *g_in[MAX_PORTS];
 static int g_ports;
 static _Atomic float g_peak;
 static _Atomic uint64_t g_frames;
+static _Atomic uint64_t g_nonfinite;
 
 /* [audio] the largest magnitude of every input this cycle; a NaN is not a level and is never the peak */
 static int process(uint32_t n, void *arg)
 {
   float peak = atomic_load_explicit(&g_peak, memory_order_relaxed);
+  uint64_t nonfinite = 0;
 
   (void)arg;
   for (int k = 0; k < g_ports; k++) {
     const float *x = p_port_buffer(g_in[k], n);
 
-    for (uint32_t i = 0; i < n; i++)
-      if (fabsf(x[i]) > peak) peak = fabsf(x[i]);
+    for (uint32_t i = 0; i < n; i++) {
+      if (!isfinite(x[i])) nonfinite++;
+      else if (fabsf(x[i]) > peak) peak = fabsf(x[i]);
+    }
   }
+  if (nonfinite) atomic_fetch_add_explicit(&g_nonfinite, nonfinite, memory_order_relaxed);
   atomic_store_explicit(&g_peak, peak, memory_order_relaxed);
   atomic_fetch_add_explicit(&g_frames, n, memory_order_relaxed);
   return 0;
@@ -105,8 +111,9 @@ int main(int argc, char **argv)
   fflush(stdout);
   while (read(STDIN_FILENO, &byte, 1) > 0)
     ;
-  printf("{\"peak\":%.9g,\"frames\":%llu}\n", (double)atomic_load_explicit(&g_peak, memory_order_relaxed),
-         (unsigned long long)atomic_load_explicit(&g_frames, memory_order_relaxed));
+  printf("{\"peak\":%.9g,\"frames\":%llu,\"nonFinite\":%llu}\n", (double)atomic_load_explicit(&g_peak, memory_order_relaxed),
+         (unsigned long long)atomic_load_explicit(&g_frames, memory_order_relaxed),
+         (unsigned long long)atomic_load_explicit(&g_nonfinite, memory_order_relaxed));
   fflush(stdout);
   p_client_close(client);
   return 0;

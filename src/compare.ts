@@ -378,6 +378,8 @@ export interface HostObservation {
   readonly ports?: { readonly audioIn: number; readonly audioOut: number; readonly midiIn: number };
   readonly stimulus?: Stimulus;
   readonly peak?: number | null;
+  /** NaN and infinite samples read on the outputs, over both windows. */
+  readonly nonFinite?: number;
   readonly peakProblem?: string;
   readonly cycles?: { readonly done: number; readonly of: number; readonly died?: string; readonly failedAt?: string };
   readonly soak?: { readonly seconds: number; readonly alive: boolean; readonly died?: string; readonly peakAtEnd?: number | null };
@@ -452,9 +454,10 @@ export function hostRowOf(host: CompareHost, version: string | null, obs: HostOb
   if (!running) output = { ...NOT_RUN("it is not running") };
   else if (ports.audioOut === 0) output = { result: "not-observable", detail: "the plugin has no audio output" };
   else if (obs.peakProblem !== undefined) output = { result: "not-observable", detail: obs.peakProblem };
+  else if ((obs.nonFinite ?? 0) > 0) output = { result: "fail", detail: `the output is not finite (${String(obs.nonFinite)} NaN or infinite samples)`, peak: obs.peak ?? 0, stimulus: obs.stimulus ?? "none" };
   else if (audible(obs.peak)) output = { result: "pass", peak: obs.peak as number, stimulus: obs.stimulus ?? "none" };
   else if (obs.stimulus === "none" || obs.stimulus === undefined) output = { result: "not-observable", detail: "no stimulus this plugin takes (no audio or MIDI input), and its output was silent", peak: obs.peak ?? 0, stimulus: "none" };
-  else output = { result: "fail", detail: obs.peak !== null && obs.peak !== undefined && !Number.isFinite(obs.peak) ? "the output is not finite" : `silent under ${obs.stimulus}`, peak: obs.peak ?? 0, stimulus: obs.stimulus };
+  else output = { result: "fail", detail: `silent under ${obs.stimulus}`, peak: obs.peak ?? 0, stimulus: obs.stimulus };
 
   const c = obs.cycles;
   const cycles: CyclesCheck =
