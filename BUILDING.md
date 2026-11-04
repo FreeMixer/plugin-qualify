@@ -90,8 +90,8 @@ dpkg-buildpackage -b -uc -us                      # the DEB
 Both are built per architecture: they carry the CLAP prober, the LV2 measurer and their interposer,
 in `/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers
 come from packages, never from `make deps`: `clap-devel`, `lilv-devel`, `lv2-devel`,
-`plugin-hostd-devel` and `omx-clap-lv2-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev`,
-`plugin-hostd-dev` and `libomx-clap-lv2-dev` on Debian (`clap-headers`, `plugin-hostd-dev` and
+`plugin-db-devel`, `plugin-hostd-protocol-devel` and `omx-clap-lv2-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev`,
+`plugin-db-dev`, `libplugin-hostd-protocol-dev` and `libomx-clap-lv2-dev` on Debian (`clap-headers`, `plugin-db-dev` and
 `libomx-clap-lv2-dev` from the FreeMixer channel). An installed package is
 checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>`, run
 with nothing set.

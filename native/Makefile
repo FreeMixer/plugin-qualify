@@ -17,14 +17,15 @@
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
 #                            leak check; never installed, and not in `all` (Fedora's gcc lacks libasan)
-#   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, the
+#   make -C native deps      fetch the CLAP, plugin-db and plugin-hostd headers at the pinned tags into deps/, the
 #                            omx-contract header the LV2 measurer reads its rates from, and omx-clap-core's
 #                            LV2 feature provider (libomx-clap-lv2), built and installed into deps/
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer, the interposer and the LV2 host
 #                            probe, for a package
 #
-# The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
-# header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. omx-contract's limits
+# The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; the pin header from
+# `pkg-config plugin-db` (plugin-db-devel) and the protocol's from `pkg-config plugin-hostd-protocol`
+# (plugin-hostd-protocol-devel), else deps/plugin-db and deps/plugin-hostd. omx-contract's limits
 # header from `pkg-config omx-contract` (omx-contract-devel, libomx-contract-dev), else deps/omx-contract. lilv and the LV2
 # headers from `pkg-config lilv-0` (lilv-devel, liblilv-dev). The LV2 measurer's host features are omx-clap-core's
 # provider, `pkg-config omx-clap-lv2` (omx-clap-lv2-devel, libomx-clap-lv2-dev), else deps/omx-clap-lv2.
@@ -35,6 +36,7 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.15.3
+PLUGIN_DB_REF := v0.1.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do.
 OMX_CONTRACT_VERSION := 3.4.0
@@ -49,15 +51,15 @@ CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
 else
 CLAP_CFLAGS ?= -Ideps/clap/include
 endif
-# pin.h is header-inline and, from plugin-hostd 0.16, digests through libcrypto: every program that includes it links
-# what `pkg-config --libs plugin-hostd` names, never a hand-kept library list. The deps/ fallback is the pinned tag's
-# header, which carries its own SHA-256 and links nothing.
-ifeq ($(shell $(PKG_CONFIG) --exists plugin-hostd && echo true),true)
-PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-hostd)
-PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs plugin-hostd)
+# pin.h is header-inline and digests through libcrypto: every program that includes it links what
+# `pkg-config --libs plugin-db` names, never a hand-kept library list. The tools read two headers: the pin's and the
+# protocol's, for the separators of a pin's words.
+ifeq ($(shell $(PKG_CONFIG) --exists plugin-db plugin-hostd-protocol && echo true),true)
+PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-db plugin-hostd-protocol)
+PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs plugin-db)
 else
-PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
-PLUGIN_HOSTD_LIBS ?=
+PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-db/include -Ideps/plugin-hostd/include
+PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs libcrypto)
 endif
 
 # the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>
@@ -319,7 +321,7 @@ $(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
-	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION)
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION) $(PLUGIN_DB_REF)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)

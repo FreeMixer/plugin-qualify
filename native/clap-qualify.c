@@ -67,7 +67,7 @@
 #include <unistd.h>
 
 #include <clap/clap.h>
-#include <plugin-hostd/pin.h>
+#include <plugin-db/pin.h>
 #include <plugin-hostd/protocol.h>
 
 #include "rt-interpose.h"
