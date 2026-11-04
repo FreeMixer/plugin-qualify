@@ -24,7 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { clapQualifyTools } from "./clap-qualify.js";
-import { DISTRIBUTED_DIR_SYSTEM, EMPTY_LAYER, applyDistributed, distributedUri, hostClassOfBoard, matchDistributed, readBoardModel, readDistributedLayer, type DistributedLayer } from "./distributed-records.js";
+import { DISTRIBUTED_DIR_SYSTEM, EMPTY_LAYER, applyDistributed, distributedUri, hostClassOfBoard, outcomeOfVerdict, matchDistributed, readBoardModel, readDistributedLayer, type DistributedLayer } from "./distributed-records.js";
 import { clapSearchPath, parseClapScan } from "./clap-loader.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
@@ -36,9 +36,9 @@ import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
 import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./qualify-adapter-pass.js";
 import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, pinFromRecord, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
-import { lv2World, rejudgeState, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
+import { lv2World, rejudgeRecord, rejudgeState, rejudgeToolName, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
-import { rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
+import { QUALIFICATION_RECORD_SCHEMA, latencyNeverTaken, rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
 import { ADMIT_STEP_MS_ENV, DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, MEMORY_PASS_PROBE_NOTES, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
@@ -522,6 +522,25 @@ export function machineReason(p: Pick<SyncPlugin, "outcome" | "code" | "detail">
   return /wrote no document|cannot run the probe runner/.test(p.detail ?? "") ? "the measurement wrote no document" : undefined;
 }
 
+/**
+ * The figure the records of a recorded entry never took, or `undefined`: a record whose probe ran before that figure's
+ * pass ({@link latencyNeverTaken}) owes a measurement, and the sync measures the entry again although its bytes are the
+ * ones it recorded. A record that cannot be read owes nothing here: the sync's other checks deal with it.
+ */
+export function figureOwed(entry: Pick<SyncEntry, "plugins">): "latency" | undefined {
+  for (const p of entry.plugins) {
+    if (p.record === undefined) continue;
+    let r: QualificationRecord;
+    try {
+      r = JSON.parse(readFileSync(p.record, "utf8")) as QualificationRecord;
+    } catch {
+      continue;
+    }
+    if (r.schema === QUALIFICATION_RECORD_SCHEMA && latencyNeverTaken(r)) return "latency";
+  }
+  return undefined;
+}
+
 /** What the quick qualification never measures, stated in every record it writes. */
 export const QUICK_NOT_MEASURED: readonly NotMeasured[] = [{ dimension: "stability", code: HOSTING_CODE.stabilityUnsoaked }];
 
@@ -948,10 +967,35 @@ function takeDistributed(ctx: SyncContext, layer: DistributedLayer, item: SyncIt
       ctx.log(`distributed: ${distributedUri(item, r)}: its record lacks the step${missing.length === 1 ? "" : "s"} ${missing.join(", ")}; measured here`);
       return undefined;
     }
+    if (latencyNeverTaken(r.record)) {
+      ctx.log(`distributed: ${distributedUri(item, r)}: its record never took the latency figure (a probe from before that pass); measured here`);
+      return undefined;
+    }
+  }
+  // The set was judged by the plugin-qualify that measured it. Its figures are carried across and judged again under
+  // today's rules, as an upgrade's are (`--rejudge`): a verdict of an older judge (RT-unsafe read as refused, before
+  // #196) is never taken as it stands. A record today's judge cannot decide for this host is measured here.
+  const by = rejudgeToolName();
+  const at = new Date(started).toISOString();
+  const records = [];
+  for (const r of match.records) {
+    let record: QualificationRecord;
+    try {
+      record = rejudgeRecord(r.record, readFileSync(join(r.path, "..", r.record.probe.file)), { host, by, at }).record;
+    } catch (e) {
+      ctx.log(`distributed: ${distributedUri(item, r)}: ${(e as Error).message}; measured here`);
+      return undefined;
+    }
+    const v = record.verdicts.find((x) => x.host === host);
+    if (v !== undefined && outcomeOfVerdict(v) === "unmeasured") {
+      ctx.log(`distributed: ${distributedUri(item, r)}: judged again, ${v.deciding ?? "unknown"} for ${host}; measured here`);
+      return undefined;
+    }
+    records.push({ ...r, record });
   }
   let plugins: SyncPlugin[];
   try {
-    plugins = applyDistributed(ctx.settings.qualificationDir, item, match, host);
+    plugins = applyDistributed(ctx.settings.qualificationDir, item, { ...match, records }, host);
   } catch (e) {
     ctx.log(`distributed: ${distributedUri(item, match.records[0]!)}: ${(e as Error).message}; measured here`);
     return undefined;
@@ -1490,7 +1534,8 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       for (const item of items) {
         const recorded = recordedAsIs(item, entries[item.key]);
         const retry = recorded.same ? entries[item.key]!.plugins.map(machineReason).find((r) => r !== undefined) : undefined;
-        if (recorded.same && options.force !== true && retry === undefined) {
+        const owed = recorded.same && options.force !== true && retry === undefined ? figureOwed(entries[item.key]!) : undefined;
+        if (recorded.same && options.force !== true && retry === undefined && owed === undefined) {
           if (pass === 0) count.skipped += entries[item.key]!.plugins.length;
           continue;
         }
@@ -1508,6 +1553,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
           continue;
         }
         if (recorded.same && retry !== undefined) log(`${item.key}: unmeasured last run by the machine (${retry}); measured again`);
+        if (owed !== undefined) log(`${item.key}: its record never took the ${owed} figure (a probe from before that pass); measured again`);
         const files = recorded.files ?? digestFiles(item.root, item.files);
         if (files === undefined) {
           log(`${item.key}: a file of it cannot be read; skipped this run`);

@@ -33,9 +33,10 @@ export function writeFakeClap(path: string, bytes = "not a plugin, only bytes to
  * The record and probe output of the `.clap` at `clapPath`, as a device's sync writes them, into `dir`. Returns the
  * record's path and the probe copy's.
  */
-export function writeFixtureRecord(dir: string, clapPath: string): { recordPath: string; probePath: string } {
+export function writeFixtureRecord(dir: string, clapPath: string, edit?: (doc: Record<string, any>) => void): { recordPath: string; probePath: string } {
   const digest = sha(readFileSync(clapPath));
   const doc = fixtureJson("success-msi");
+  edit?.(doc);
   doc["binary"] = { ...doc["binary"], path: clapPath, sha256: digest, files: [{ path: basename(clapPath), sha256: digest }] };
   const bytes = Buffer.from(`${JSON.stringify(doc, null, 2)}\n`);
   const read = readProbeOutput(bytes.toString("utf8"));
@@ -59,9 +60,9 @@ export function fixtureProvenance(hostClass: string, set: string): Record<string
 }
 
 /** A distributed set as a package installs it: `<root>/<class>/<set>/`, its provenance and the record of the `.clap`. */
-export function writeFixtureSet(root: string, hostClass: string, set: string, clapPath: string): { dir: string; recordPath: string; probePath: string } {
+export function writeFixtureSet(root: string, hostClass: string, set: string, clapPath: string, edit?: (doc: Record<string, any>) => void): { dir: string; recordPath: string; probePath: string } {
   const dir = join(root, hostClass, set);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "provenance.json"), `${JSON.stringify(fixtureProvenance(hostClass, set), null, 2)}\n`);
-  return { dir, ...writeFixtureRecord(dir, clapPath) };
+  return { dir, ...writeFixtureRecord(dir, clapPath, edit) };
 }
