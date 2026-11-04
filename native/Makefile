@@ -49,10 +49,15 @@ CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
 else
 CLAP_CFLAGS ?= -Ideps/clap/include
 endif
+# pin.h is header-inline and, from plugin-hostd 0.16, digests through libcrypto: every program that includes it links
+# what `pkg-config --libs plugin-hostd` names, never a hand-kept library list. The deps/ fallback is the pinned tag's
+# header, which carries its own SHA-256 and links nothing.
 ifeq ($(shell $(PKG_CONFIG) --exists plugin-hostd && echo true),true)
 PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-hostd)
+PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs plugin-hostd)
 else
 PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
+PLUGIN_HOSTD_LIBS ?=
 endif
 
 # the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>
@@ -110,7 +115,7 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
 $(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< $(PLUGIN_HOSTD_LIBS) -ldl -lm
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
 LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
@@ -118,7 +123,7 @@ LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) \
-		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
+		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) $(PLUGIN_HOSTD_LIBS) -lpthread -lm -ldl
 
 # the same, under AddressSanitizer: the leak check runs it on every way out of main
 asan: $(BUILD)/asan/lv2_measure
@@ -126,7 +131,7 @@ asan: $(BUILD)/asan/lv2_measure
 $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) \
-		$(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
+		$(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) $(PLUGIN_HOSTD_LIBS) -lpthread -lm -ldl
 
 # the feature options' oracle, never installed
 $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-options.c lv2-measure-options.h | $(BUILD)
