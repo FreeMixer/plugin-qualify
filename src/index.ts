@@ -39,3 +39,4 @@ export * from "./host-admission.js";
 export * from "./history-file.js";
 export * from "./history-adjust.js";
 export * from "./adjust-cli.js";
+export * from "./compare.js";

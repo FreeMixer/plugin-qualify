@@ -383,6 +383,92 @@ plugins are still written. The schema is the omx-contract package plugin-qualify
 `/usr/share/omx-contract/omx-contract.schema.json`; `OMX_CONTRACT_SCHEMA` names another one, for a test. The
 writer needs Python's `jsonschema` (`python3-jsonschema`).
 
+## Comparing hosts: mod-host, jalv and ours
+
+`plugin-qualify compare` runs every plugin through four hosts with the same checks, one row per plugin per host:
+omx-clap-host (one process; an LV2 plugin through its LV2 adapter, a CLAP plugin as itself), plugin-hostd (a worker
+per plugin), and the two references, mod-host and jalv, which take LV2 only (a CLAP plugin's row under them says so,
+`not-applicable`).
+
+```
+plugin-qualify compare urn:zamaudio:ZamComp http://calf.sourceforge.net/plugins/Monosynth
+plugin-qualify compare --all --out ./comparison
+plugin-qualify compare --all --publish --host-class x86-64 --set fedora44 --out ./comparison
+plugin-qualify compare summary ./comparison          # the summary again, from the records in a directory
+```
+
+Every host runs on one private JACK server (`jackd -d dummy`, at `--rate` and `--quantum`, 48000/256 by default;
+`--server <name>` uses a running one instead), one plugin and one host at a time, with the same budget for each step
+(`--timeout-ms`). For each plugin and host:
+
+| check | how | observable |
+|---|---|---|
+| loads | the first `add` answers `resp 0` or more (jalv: its client reaches the graph) | every host |
+| instantiates | the plugin's ports appear on the graph | every host |
+| output | an effect gets a 440 Hz tone at -12 dBFS on every audio input, an instrument (lilv's `lv2:InstrumentPlugin`, or a plugin with MIDI in and no audio in) gets notes, keys 36 to 65 in turn; the peak of its outputs over `--window-ms` must be above -100 dBFS | every host; a plugin with no audio output, or no input to feed, is `not-observable` |
+| cycles | `--cycles` loads and unloads (5); jalv: as many starts and stops | every host |
+| soak | the plugin runs under its stimulus for `--soak` seconds (10) and its host is still there; the peak is read again at the end | every host |
+| rtSafe | allocations, locks and system calls on the audio thread, counted by `rt_watch.so` (below) after 64 warm-up cycles; a try-lock never waits, so it is counted and reported but does not fail the check | every host whose processes load `rt_watch.so` and register a JACK process callback; otherwise `not-observable` |
+| cpu | user and system time of all the host's processes over the soak, in percent of one core | every host |
+| latency | the capture latency the host puts on the plugin's output port | omx-clap-host, plugin-hostd and jalv; mod-host sets no JACK latency callback, so it is `not-observable` there |
+
+A check a host does not let us observe is `not-observable`, never `fail`. A host that is not installed gives every
+plugin a `skipped` row with the reason, never no row. A host that dies is a crash, with the step (load, a cycle, the
+run, the soak) and the signal. A row runs clean when the plugin loaded, instantiated, survived the cycles and the soak,
+its host never died, and its output was not found silent.
+
+`rt_watch.so` is the interposer the CLAP prober runs under (`native/rt-interpose.c`), built with its window around the
+one thing every JACK host has: the process callback it gives `jack_set_process_callback()`. It is preloaded into each
+host, counts per thread (a host's socket or UI thread is not its audio thread), and writes each process's counts when
+the comparison sends it `SIGUSR2`. What it counts is the host's callback with the plugin in it, so the host's own work on
+its audio thread counts too: the same window for every host.
+
+`--out` writes one `<plugin>-<format>-<hash>.comparison.json` per plugin (`plugin-qualify.comparison-record/1`: the
+plugin, its stimulus, the conditions, and per host its version, status, checks and figures) and
+`comparison-summary.json` (`plugin-qualify.comparison-summary/1`: per host the plugins it ran, loads, runs clean, runs
+real-time safe of those observed, crashes, its median CPU, and the plugins where each host does better than the
+others, on running clean or on a clean audio thread). A run into a directory that holds a record made under the same
+conditions keeps it (`--force` compares again), so a long run that stopped is started again where it stopped.
+
+**`--publish`** makes a summary for the records (FreeMixer/omx-qualification-records, and from them the site's plugin
+pages). It needs `--host-class` and `--set`, and it is refused, before anything runs and with each missing host named,
+unless mod-host and jalv are both installed: a comparison is measured against them. Without `--publish` a run is a
+local look, and its summary says it is not publishable.
+
+The versions are the packages' (`rpm -qf`, `dpkg-query -S`). A host built outside a package is named by the one who runs
+the comparison: `OMX_COMPARE_VERSION_MOD_HOST="zynthian 3f2c1ab"` names a `mod-host` found on the path.
+
+### The installs
+
+plugin-qualify does not pull in mod-host or jalv: install them, and the plugins to compare, yourself.
+
+Fedora 44 (a `fedora:44` container does):
+
+```
+dnf install https://www.openmixer.org/rpm/openmixer-release.noarch.rpm
+dnf install plugin-qualify plugin-hostd omx-clap-host jack-audio-connection-kit lilv-libs python3-lilv
+dnf install mod-host jalv          # mod-host: the channel's build (0.10.6.f14a230-11.3.omx); jalv: Fedora's
+CLAP_PATH=/usr/lib64/clap:/usr/lib/clap plugin-qualify compare --all --publish --host-class x86-64 --set fedora44 --out ./comparison
+```
+
+`CLAP_PATH` adds `/usr/lib64/clap`, where Fedora's CLAP packages install. The private server takes real-time priority
+where the machine grants it (`ulimit -r`); the conditions of every record say what it got.
+
+Debian trixie and Raspberry Pi OS:
+
+```
+apt install plugin-qualify plugin-hostd omx-clap-host jackd2 python3-lilv jalv
+```
+
+The channel has no Debian mod-host: on a Zynthian use its own (`/usr/local/bin/mod-host`) and name its revision with
+`OMX_COMPARE_VERSION_MOD_HOST`.
+
+### How long a comparison takes
+
+About 20 seconds per plugin and host with the defaults (5 cycles, a 10-second soak, two 2-second windows), 80 seconds
+for an LV2 plugin under the four hosts and 40 for a CLAP plugin under ours. `--cycles` and `--soak` shorten it; a
+publishable run keeps the defaults so that its figures compare with the others.
+
 ## What the verdicts mean
 
 - **suitable**: every dimension was measured and passed. Safe to run inside the engine's own
