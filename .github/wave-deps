@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
+#
+# The siblings plugin-qualify builds on, inside out: on a pull request into dedupe/all, or a push to it, a job that runs
+# FreeMixer/.github's wave-deps builds each from its own dedupe/all and installs from those builds instead of the channel's
+# releases.
+plugin-db
