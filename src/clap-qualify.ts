@@ -124,7 +124,7 @@ export interface ClapQualifyLine {
   readonly cost?: ClapCostReading;
   /**
    * The pin (spec §11): the `.clap`'s digest by its name in its directory and the layout fingerprint
-   * the prober computed through plugin-hostd's `pin.h`, or the reason it took none.
+   * the prober computed through plugin-pin's `pin.h`, or the reason it took none.
    */
   readonly integrity: IntegrityMeasurement;
 }

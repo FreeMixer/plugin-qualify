@@ -12,7 +12,7 @@ Source0: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildRequires: nodejs >= 18
 BuildRequires: npm
 # the CLAP prober, the LV2 measurer and their interposer: the CLAP headers and lilv from Fedora,
-# pin.h from plugin-hostd-devel, the declared sample rates from omx-contract-devel, the LV2 host
+# pin.h from plugin-pin-devel, protocol.h from plugin-hostd-protocol-devel, the declared sample rates from omx-contract-devel, the LV2 host
 # features from omx-clap-lv2-devel (a static archive: nothing of it is needed at run time)
 BuildRequires: gcc
 BuildRequires: make
@@ -20,7 +20,8 @@ BuildRequires: pkgconfig
 BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
-BuildRequires: pkgconfig(plugin-hostd) >= 0.15.3
+BuildRequires: pkgconfig(plugin-pin) >= 0.1.0
+BuildRequires: pkgconfig(plugin-hostd-protocol) >= 0.2.0
 BuildRequires: pkgconfig(omx-contract) >= 3.4.0
 BuildRequires: pkgconfig(omx-clap-lv2) >= 0.26.2
 BuildRequires: pkgconfig(omxdsp) >= 0.21.0
