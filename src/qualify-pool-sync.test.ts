@@ -6,11 +6,19 @@
  * is not a candidate for a worker of its own; the step is a stand-in that says what the host saw, and the live arms are in
  * `qualify-pool.test.ts`.
  */
+import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+
+import { parsePinLine } from "./pins-file.js";
 
 import type { QualificationRecord } from "./qualification-record.js";
 import { POOL_CODE, POOL_RESULT, POOL_STEP, type PoolRunFacts } from "./qualify-pool.js";
-import { parseSyncArgs, runSync, summaryLine } from "./qualify-sync.js";
+import { parseSyncArgs, resolveSyncSettings, runSync, summaryLine } from "./qualify-sync.js";
+import { clapQualifyToolPath, rtInterposePath } from "./tool-paths.js";
 import { CLAP_NOTES, CLAP_RT, LV2_CLEAN, device, rejudge, removeDevices } from "./qualify-rejudge.support.js";
 
 afterAll(removeDevices);
@@ -108,4 +116,53 @@ describe("--pool-only", () => {
     await rejudge(d);
     expect(d.pins()[0]).toMatchObject({ verdict: "isolated", pool: "cores" });
   });
+});
+
+describe("a sweep over CLAP plugins that ask for the pool and one that does not", () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "native", "build", "fixtures");
+  const which = (name: string): string | undefined => {
+    const r = spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" });
+    return r.status === 0 ? r.stdout.trim() : undefined;
+  };
+  const RUNNER = process.env["OMX_PROBE_RUNNER"] || which("plugin-hostd-probe");
+  const BUILT = [clapQualifyToolPath(), rtInterposePath(), join(FIXTURES, "pool-synth.clap"), join(FIXTURES, "pool-synth-serial.clap")].every((p) => existsSync(p));
+
+  it("the pass runs the step for each CLAP plugin it qualifies and pins what the step said, a plugin the step could not run left without a word", async (ctx) => {
+    if (!BUILT || RUNNER === undefined) {
+      if (process.env["CI"]) throw new Error("native/build and plugin-hostd-probe are needed under CI");
+      ctx.skip("needs native/build (make -C native deps all) and plugin-hostd-probe");
+    }
+    const root = mkdtempSync(join(tmpdir(), "qualify-pool-sweep-"));
+    try {
+      const clap = join(root, "clap");
+      mkdirSync(clap);
+      for (const f of ["pool-synth", "pool-synth-serial"]) copyFileSync(join(FIXTURES, `${f}.clap`), join(clap, `${f}.clap`));
+      const out = join(root, "out");
+      const flags = [
+        "--config", "/dev/null", "--clap-path", clap, "--lv2-path", join(root, "none"), "--lv2-extra", "",
+        "--pin-file", join(out, "qualified.pins"), "--qualification-dir", join(out, "qualification"),
+        "--descriptor-dir", join(out, "descriptors"), "--state-file", join(out, "state.json"),
+        "--grid-hosts", "--budget-s", "20", "--hostd-port", "0", "--hostd-feedback-port", "0",
+      ];
+      const args = parseSyncArgs(flags);
+      if (!args.ok) throw new Error(args.error);
+      const r = resolveSyncSettings(new Map(), args.args, {}, root);
+      if (!r.ok) throw new Error(r.error);
+      const asked: string[] = [];
+      const poolRunner = (uri: string): PoolRunFacts => {
+        asked.push(uri);
+        return uri.includes("pool-synth.clap") ? FASTER : NOT_ASKED;
+      };
+      const summary = await runSync(r.settings, { poolRunner, isolatedRunner: () => ALONE, env: { ...process.env, OMX_PROBE_RUNNER: RUNNER }, log: () => {} });
+      expect(summary?.qualified).toBe(2);
+      const pins = readFileSync(join(out, "qualified.pins"), "utf8").split("\n").map(parsePinLine).filter((p) => p !== undefined);
+      expect(asked.length, JSON.stringify(asked)).toBe(2);
+      expect(pins.find((p) => p!.uri.endsWith("pool-synth.clap#org.freemixer.plugin-qualify.fixture.pool-synth"))).toMatchObject({ pool: "cores" });
+      expect(pins.find((p) => p!.uri.includes("pool-synth-serial.clap"))).not.toHaveProperty("pool");
+      const records = readdirSync(join(out, "qualification")).filter((f) => f.endsWith(".qualification.json")).map((f) => JSON.parse(readFileSync(join(out, "qualification", f), "utf8")) as QualificationRecord);
+      expect(records.flatMap((rec) => steps(rec)).map((x) => x.result).sort()).toEqual([POOL_RESULT.cores, POOL_RESULT.notAsked]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
