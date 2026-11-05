@@ -19,6 +19,7 @@ import type { QualificationRecord, RunStep } from "./qualification-record.js";
 import {
   POOL_CODE,
   POOL_GAIN,
+  POOL_HELPERS_IDLE_NS,
   POOL_MIN_GAIN,
   POOL_RESULT,
   POOL_STEP,
@@ -35,8 +36,10 @@ import {
 
 const CELL = { rate: 48000, quantum: 128 };
 const win = (over: Partial<PoolWindowFacts> = {}): PoolWindowFacts => ({ alive: true, workers: 1, xruns: 0, finite: true, silent: false, dspLoad: 40, poolOfWorker: "qualified", ...over });
-/** A plugin that asks, runs under both words, and is twice as fast with the pool. */
-const FASTER: PoolRunFacts = { started: true, asks: true, added: true, off: win(), on: win({ dspLoad: 20, poolOfWorker: "on" }), poolApplied: true };
+/** The plugin's tasks on three helper threads under the interposer: seen, and clean. */
+const CLEAN_RT = { helpers: 3, tasksOnHelpers: 300, allocations: 0, locks: 0, syscalls: 0 };
+/** A plugin that asks, is clean on the helpers, runs under both words, and is twice as fast with the pool. */
+const FASTER: PoolRunFacts = { started: true, asks: true, rt: CLEAN_RT, added: true, off: win(), on: win({ dspLoad: 20, poolOfWorker: "on", helperBusyNs: 400_000_000 }), poolApplied: true };
 const A = "a".repeat(64);
 const B = "b".repeat(64);
 const pin = (extra: Partial<PinEntry> = {}): PinEntry => ({
@@ -50,8 +53,29 @@ describe("the decision table", () => {
     expect(judgePoolRun(FASTER)).toEqual({
       step: POOL_STEP,
       result: POOL_RESULT.cores,
-      pool: { dspLoadOff: 40, dspLoadOn: 20, xrunsOff: 0, xrunsOn: 0 },
+      pool: { allocationsOn: 0, locksOn: 0, syscallsOn: 0, tasksOnHelpers: 300, dspLoadOff: 40, dspLoadOn: 20, xrunsOff: 0, xrunsOn: 0 },
     });
+  });
+
+  it.each([
+    ["an allocation", { allocations: 2 }],
+    ["a lock", { locks: 5 }],
+    ["a system call", { syscalls: 1 }],
+  ] as const)("%s on a helper thread is off, whatever the pool gains and whether or not the windows ran", (_what, over) => {
+    const rt = { ...CLEAN_RT, ...over };
+    const withWindows = judgePoolRun({ ...FASTER, rt });
+    expect(withWindows).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notRtSafe });
+    expect(withWindows.detail).toContain("helper threads");
+    // the runner stops there: no server was started for a plugin the interposer already refused
+    expect(judgePoolRun({ started: true, asks: true, rt })).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notRtSafe, pool: { tasksOnHelpers: 300 } });
+  });
+
+  it.each([
+    ["no watch at all", undefined],
+    ["a pool whose helpers ran no task", { ...CLEAN_RT, tasksOnHelpers: 0 }],
+  ] as const)("%s decides nothing: not-run, tried again", (_what, rt) => {
+    const { rt: _rt, ...without } = FASTER;
+    expect(judgePoolRun({ ...without, ...(rt === undefined ? { problem: "the interposer did not load in the prober" } : { rt }) })).toMatchObject({ result: POOL_RESULT.notRun, code: POOL_CODE.unwatched });
   });
 
   it("the gain is a ratio of the loads: just inside it is granted, just outside it is not", () => {
@@ -59,6 +83,16 @@ describe("the decision table", () => {
     expect(at(POOL_GAIN - 0.01).result).toBe(POOL_RESULT.cores);
     expect(at(POOL_GAIN + 0.01)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notFaster });
     expect(at(1.2)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notFaster });
+  });
+
+  it("a worker that held the pool and whose helpers ran next to nothing is off: the window with the pool measured the window without it again", () => {
+    const idle = (ns: number) => judgePoolRun({ ...FASTER, on: win({ dspLoad: 20, poolOfWorker: "on", helperBusyNs: ns }) });
+    expect(idle(0)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.helpersIdle });
+    expect(idle(POOL_HELPERS_IDLE_NS - 1)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.helpersIdle });
+    expect(idle(POOL_HELPERS_IDLE_NS).result).toBe(POOL_RESULT.cores);
+    // a stack that cannot read the helpers' time says nothing of them
+    const { helperBusyNs: _ns, ...unread } = win({ dspLoad: 20, poolOfWorker: "on" });
+    expect(judgePoolRun({ ...FASTER, on: unread }).result).toBe(POOL_RESULT.cores);
   });
 
   it("a fall of a few points of a small load is not a gain, whatever its ratio", () => {
@@ -94,7 +128,7 @@ describe("the decision table", () => {
 
   it.each([
     ["a machine that could not run it", { started: false, problem: "no jackd" }, POOL_CODE.noHost],
-    ["a plugin that was not added", { started: true, asks: true, added: false, problem: "add answered -1" }, POOL_CODE.notAdded],
+    ["a plugin that was not added", { started: true, asks: true, rt: CLEAN_RT, added: false, problem: "add answered -1" }, POOL_CODE.notAdded],
     ["a window without the pool that failed", { ...FASTER, off: win({ problem: "isolated_signal: no ports", alive: false }) }, POOL_CODE.windowFailed],
     ["a window without the pool whose output is not finite", { ...FASTER, off: win({ finite: false }) }, POOL_CODE.windowFailed],
     ["a daemon that did not start the worker with the pool", { ...FASTER, poolApplied: false }, POOL_CODE.notApplied],
@@ -197,25 +231,41 @@ describe("the step itself, on a private server, under a real plugin-hostd with o
   it("an instrument that asks for the pool and has voices to share is granted cores, the worker having started with it", (ctx) => {
     need(ctx);
     const { facts, step, tries } = granted("pool-synth.clap", "pool-synth");
+    // omx-clap-host holds the pool for a plugin whose pin says cores, and a worker whose helpers ran no task in the window
+    // gained nothing there was to gain: that is the host's, named, and not a pass of this arm
+    if (step.code === POOL_CODE.helpersIdle) return ctx.skip(`this omx-clap-host holds the pool and its helpers ran no task: ${JSON.stringify(facts.on)}`);
     expect(facts.asks, JSON.stringify(facts)).toBe(true);
     expect(facts.poolApplied, JSON.stringify(facts)).toBe(true);
     expect(facts.off?.poolOfWorker).not.toBe("on");
     expect(facts.on?.poolOfWorker).toBe("on");
     expect(step.result, JSON.stringify({ facts, step, tries })).toBe(POOL_RESULT.cores);
-    expect(step.pool!.dspLoadOn).toBeLessThan(step.pool!.dspLoadOff * POOL_GAIN);
+    expect(step.pool!.dspLoadOn!).toBeLessThan(step.pool!.dspLoadOff! * POOL_GAIN);
   });
 
-  it("one whose tasks fight over a lock asks and gains nothing: off", (ctx) => {
+  it("one whose tasks take one lock asks and is not real-time safe on the helpers: off", (ctx) => {
     need(ctx);
     const facts = run("pool-synth-slow.clap", "pool-synth-slow");
-    expect(facts.poolApplied, JSON.stringify(facts)).toBe(true);
-    expect(judgePoolRun(facts).result, JSON.stringify(facts)).toBe(POOL_RESULT.off);
+    expect(facts.rt?.tasksOnHelpers, JSON.stringify(facts)).toBeGreaterThan(0);
+    expect(judgePoolRun(facts), JSON.stringify(facts)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notRtSafe });
+  });
+
+  it("one that is clean when its tasks run serial and allocates on a helper thread is off, found only by watching the helpers", (ctx) => {
+    need(ctx);
+    const facts = run("pool-synth-helper.clap", "pool-synth-helper");
+    expect(facts.rt?.tasksOnHelpers, JSON.stringify(facts)).toBeGreaterThan(0);
+    expect(facts.rt?.allocations, JSON.stringify(facts)).toBeGreaterThan(0);
+    expect(judgePoolRun(facts), JSON.stringify(facts)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notRtSafe });
+    // no JACK server and no daemon were needed to say so
+    expect(facts.off).toBeUndefined();
   });
 
   it("one with next to nothing to do has nothing to run in parallel: off", (ctx) => {
     need(ctx);
     const facts = run("pool-synth-quiet.clap", "pool-synth-quiet");
-    expect(judgePoolRun(facts), JSON.stringify(facts)).toMatchObject({ result: POOL_RESULT.off, code: POOL_CODE.notFaster });
+    const step = judgePoolRun(facts);
+    expect(step.result, JSON.stringify(facts)).toBe(POOL_RESULT.off);
+    // there was no gain to see: the load fell by nothing, or the helpers had next to nothing to do
+    expect([POOL_CODE.notFaster, POOL_CODE.helpersIdle], JSON.stringify(facts)).toContain(step.code);
   });
 
   it("one that never offers the extension is not asked, and the daemon is not started for it", (ctx) => {
@@ -229,6 +279,7 @@ describe("the step itself, on a private server, under a real plugin-hostd with o
     const clap = process.env["OMX_TEST_POOL_VOICE"];
     if (clap === undefined) return ctx.skip("OMX_TEST_POOL_VOICE names omx-plugins' build/omx-test-pool-voice.clap: no release carries it yet");
     const { facts, step, tries } = granted(clap, "org.openmixer.test-pool-voice", (f, i) => `clap:${f}#${i}`);
+    if (step.code === POOL_CODE.helpersIdle) return ctx.skip(`this omx-clap-host holds the pool and its helpers ran no task: ${JSON.stringify(facts.on)}`);
     expect(step.result, JSON.stringify({ facts, step, tries })).toBe(POOL_RESULT.cores);
   });
 });

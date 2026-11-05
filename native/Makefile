@@ -8,7 +8,7 @@
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
-#                            build/fixtures/{pool-synth,pool-synth-slow,pool-synth-quiet,pool-synth-serial}.clap (the pool step's),
+#                            build/fixtures/{pool-synth,pool-synth-slow,pool-synth-quiet,pool-synth-helper,pool-synth-serial}.clap (the pool step's),
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
 #                            build/fixtures-faulty/synth-voice-memory.clap (apart, its memory fails any budget),
@@ -106,7 +106,7 @@ all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
-	$(BUILD)/fixtures/pool-synth.clap $(BUILD)/fixtures/pool-synth-slow.clap $(BUILD)/fixtures/pool-synth-quiet.clap $(BUILD)/fixtures/pool-synth-serial.clap \
+	$(BUILD)/fixtures/pool-synth.clap $(BUILD)/fixtures/pool-synth-slow.clap $(BUILD)/fixtures/pool-synth-quiet.clap $(BUILD)/fixtures/pool-synth-serial.clap $(BUILD)/fixtures/pool-synth-helper.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
 	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so $(BUILD)/fixtures/lv2/needs-display.lv2/gain.so $(BUILD)/fixtures/lv2/abi-breaker.lv2/gain.so \
@@ -226,6 +226,8 @@ $(BUILD)/fixtures/pool-synth-slow.clap: fixtures/pool-synth.c | $(BUILD)/fixture
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_SLOW -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
 $(BUILD)/fixtures/pool-synth-quiet.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_QUIET -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
+$(BUILD)/fixtures/pool-synth-helper.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_HELPER_ALLOC -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
 $(BUILD)/fixtures/pool-synth-serial.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_NO_POOL -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
 # the rt-safe gain whose init() (and, for the thread-pool one, process()) requires a host extension beyond the

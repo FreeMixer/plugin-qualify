@@ -11,7 +11,7 @@
 //   pool-step.mjs <clap uri> <window ms>
 //   environment: OMX_ISOLATED_SIGNAL (the signal tool), PLUGIN_HOSTD
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,6 +97,20 @@ function learnedPin() {
   return undefined;
 }
 
+/** Nanoseconds the pool's helper threads of a worker have been on a cpu (`omx-pool-<core>`), or `undefined` when the worker is gone. */
+function helperNs(pid) {
+  try {
+    let ns = 0;
+    for (const t of readdirSync(`/proc/${String(pid)}/task`)) {
+      if (!readFileSync(`/proc/${String(pid)}/task/${t}/comm`, "utf8").startsWith("omx-pool-")) continue;
+      ns += Number(readFileSync(`/proc/${String(pid)}/task/${t}/schedstat`, "utf8").split(" ")[0]);
+    }
+    return ns;
+  } catch {
+    return undefined;
+  }
+}
+
 /** One window: the plugin added alone under `pool=<word>`, the notes played, what was seen. */
 async function window(send, pool, pin) {
   const set = await send(`pin_set ${pinWord(uri)} ${pinWord(pin.files)} ${pin.layout} pool=${pool}`);
@@ -107,12 +121,13 @@ async function window(send, pool, pin) {
   const workers = workersOf(await send("worker_list"));
   const worker = workers[0];
   const heard = spawnSync(signalTool, [`effect_${String(INSTANCE)}`, String(windowMs)], { encoding: "utf8", timeout: windowMs + 15000, killSignal: "SIGKILL" });
+  const helperBusyNs = worker === undefined ? undefined : helperNs(worker.pid);
   const after = workersOf(await send("worker_list"));
   await send(`remove ${String(INSTANCE)}`);
   const alive = after.length > 0 && after[0].pid === worker?.pid;
   if (heard.error !== undefined || heard.status !== 0) return { problem: `isolated_signal: ${(heard.stderr ?? "").trim()}`, alive };
   const f = JSON.parse(heard.stdout);
-  return { alive, workers: workers.length, poolOfWorker: worker?.pool, xruns: f.xruns, finite: f.finite, silent: f.silent, dspLoad: f.dspLoad };
+  return { alive, workers: workers.length, poolOfWorker: worker?.pool, xruns: f.xruns, finite: f.finite, silent: f.silent, dspLoad: f.dspLoad, ...(helperBusyNs === undefined ? {} : { helperBusyNs }) };
 }
 
 /** The windows of one mode as one: the lowest load and the fewest xruns, and any window that failed, died or was silent counts. */
@@ -128,6 +143,8 @@ function best(windows) {
     finite: windows.every((w) => w.finite),
     silent: windows.some((w) => w.silent),
     dspLoad: low("dspLoad"),
+    // what the helpers did in the window that used them most: the pool is idle only if it was idle in every one
+    ...(windows.every((w) => w.helperBusyNs === undefined) ? {} : { helperBusyNs: Math.max(...windows.map((w) => w.helperBusyNs ?? 0)) }),
   };
 }
 

@@ -24,7 +24,7 @@ import { CLAP_NOTES, CLAP_RT, LV2_CLEAN, device, rejudge, removeDevices } from "
 afterAll(removeDevices);
 
 const win = (over: object = {}) => ({ alive: true, workers: 1, xruns: 0, finite: true, silent: false, dspLoad: 40, poolOfWorker: "qualified", ...over });
-const FASTER: PoolRunFacts = { started: true, asks: true, added: true, off: win(), on: win({ dspLoad: 20, poolOfWorker: "on" }), poolApplied: true };
+const FASTER: PoolRunFacts = { started: true, asks: true, rt: { helpers: 3, tasksOnHelpers: 300, allocations: 0, locks: 0, syscalls: 0 }, added: true, off: win(), on: win({ dspLoad: 20, poolOfWorker: "on" }), poolApplied: true };
 const NOT_FASTER: PoolRunFacts = { ...FASTER, on: win({ dspLoad: 39, poolOfWorker: "on" }) };
 const NOT_ASKED: PoolRunFacts = { started: true, asks: false };
 const NO_HOST: PoolRunFacts = { started: false, problem: "no jackd" };
@@ -54,7 +54,7 @@ describe("--pool-only", () => {
     expect(done?.poolOnly).toEqual({ cores: 1, off: 0, notAsked: 0, notRun: 0 });
     expect(summaryLine(done!)).toContain("pool granted 1");
     expect(d.pins()[0]).toMatchObject({ verdict: "isolated", pool: "cores" });
-    expect(steps(d.record(CLAP_RT))).toEqual([expect.objectContaining({ result: POOL_RESULT.cores, pool: { dspLoadOff: 40, dspLoadOn: 20, xrunsOff: 0, xrunsOn: 0 } })]);
+    expect(steps(d.record(CLAP_RT))).toEqual([expect.objectContaining({ result: POOL_RESULT.cores, pool: { allocationsOn: 0, locksOn: 0, syscallsOn: 0, tasksOnHelpers: 300, dspLoadOff: 40, dspLoadOn: 20, xrunsOff: 0, xrunsOn: 0 } })]);
     expect(Object.values(d.state().entries)[0]!.plugins[0]!.pin).toMatchObject({ pool: "cores" });
   });
 
