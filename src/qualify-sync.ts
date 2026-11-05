@@ -29,7 +29,7 @@ import { clapSearchPath, parseClapScan } from "./clap-loader.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
 import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
-import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
+import { judgmentPinEntries, pinClearLine, pinLineUri, pinsFile, type PinEntry } from "./pins-file.js";
 import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
@@ -990,7 +990,7 @@ export function syncPinsText(state: SyncState): string {
 /** The pin lines, by uri. */
 function pinLinesOf(text: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const line of text.split("\n")) if (line !== "" && !line.startsWith("#")) out.set(line.split(" ")[1]!, line);
+  for (const line of text.split("\n")) if (line !== "" && !line.startsWith("#")) out.set(pinLineUri(line)!, line);
   return out;
 }
 
@@ -1554,7 +1554,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     if (unreadable) log("a plugin directory could not be read; no record or descriptor is removed this run");
     else for (const f of pruneStale(settings, stateBefore, state)) log(`${f}: removed, its plugin is gone or changed`);
     // a plugin that was pinned and is not any more is also forgotten by a running daemon
-    const changed = [...changedPinLines(before, after), ...removedPinUris(before, after).map((uri) => `pin_clear ${uri}`)];
+    const changed = [...changedPinLines(before, after), ...removedPinUris(before, after).map(pinClearLine)];
     const sent = await sendPins(settings.hostdPort, settings.hostdFeedbackPort, changed);
     if ("unsent" in sent) {
       const why = {
@@ -1565,7 +1565,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       log(`${why}; the ${String(changed.length)} changed pins apply at its next start, from the pin file`);
     }
     const replies = "replies" in sent ? sent.replies : [];
-    for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
+    for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${pinLineUri(changed[i]!)!}`);
     const taken = replies.filter((r) => r === "resp 0").length;
     for (const [why, n] of byMachine) if (n > 1) log(`${String(n)} plugins unmeasured by the machine (${why}); the first is listed above`);
     const [only] = byMachine.size === 1 ? [...byMachine] : [];
