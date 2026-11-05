@@ -7,11 +7,14 @@
  * qualification to give, so nothing writes it but this step.
  *
  * A plugin that does not offer `clap.thread-pool` is never asked: its record says `not-asked` and its pin has no pool
- * word, so it runs serial. A plugin that does is run twice in a worker of its own on a private JACK server at the host's
- * rate and quantum, with the same notes held, once under `pool=off` and once under `pool=cores`
+ * word, so it runs serial. A plugin that does is first run by the prober with real helper threads under the interposer
+ * (`clap-qualify --pool`, which counts what the plugin's tasks do on a thread that is not the audio thread); one that
+ * allocates, locks or makes a system call there is `off`. Then it is run twice in a worker of its own on a private JACK
+ * server at the host's rate and quantum, with the same notes held, once under `pool=off` and once under `pool=cores`
  * (`tools/pool-step.mjs`), each mode twice in turn and judged by its best window, because what else runs on the machine can
  * only make a window worse. The pool is granted when, with it on,
  *
+ *  - its tasks, run on the helpers under the interposer, allocated nothing, took no lock and made no system call,
  *  - the worker really started with the pool (a daemon that does not apply the word decides nothing),
  *  - the output is finite and not silent, and the worker lived through the window,
  *  - the window took no more xruns than the same window without the pool, and
@@ -24,12 +27,13 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 
 import type { GridCell } from "./measurement-grid.js";
 import type { PinEntry, PinPool } from "./pins-file.js";
 import type { PoolFigures, QualificationRecord, RunBlock, RunStep } from "./qualification-record.js";
-import { ADMIT_STEP_MS_ENV, CLAP_QUALIFY_TOOL_NAME, ISOLATED_SIGNAL_TOOL_ENV, ISOLATED_SIGNAL_TOOL_NAME } from "./qualify-declarations.js";
+import { ADMIT_STEP_MS_ENV, CLAP_QUALIFY_TOOL_NAME, ISOLATED_SIGNAL_TOOL_ENV, ISOLATED_SIGNAL_TOOL_NAME, RT_INTERPOSE_NAME } from "./qualify-declarations.js";
 import { ISOLATED_RESULT, RUN_STEP, baseSteps, pinFromRecord, runIdOf } from "./qualify-isolated.js";
 import { startPrivateJack, type JackStarter } from "./qualify-adapter-pass.js";
 import { locateNativeTool, toolsDir } from "./tool-paths.js";
@@ -48,6 +52,13 @@ export const POOL_GAIN = 0.85;
  */
 export const POOL_MIN_GAIN = 3;
 
+/**
+ * The pool's helpers must have been on a cpu this many nanoseconds in the busiest window with the pool (20 ms of a 3 s
+ * window, across all of them): a worker that holds the pool and whose plugin asks for tasks every block keeps them
+ * busy for a good part of it, and a few microseconds is a start-up, not a pool at work.
+ */
+export const POOL_HELPERS_IDLE_NS = 20_000_000;
+
 export const POOL_RESULT = { cores: "cores", off: "off", notAsked: "not-asked", notRun: "not-run" } as const;
 
 /** Why the step decided what it did, or why it could not run. */
@@ -56,11 +67,14 @@ export const POOL_CODE = {
   noServer: "pool.no-private-server",
   notAdded: "pool.not-added",
   windowFailed: "pool.window-failed",
+  unwatched: "pool.not-watched",
+  notRtSafe: "pool.not-rt-safe",
   notApplied: "pool.not-applied",
   crashed: "pool.crashed-with-pool",
   unsafeOutput: "pool.unsafe-output",
   xruns: "pool.more-xruns",
   notFaster: "pool.not-faster",
+  helpersIdle: "pool.helpers-idle",
 } as const;
 
 /** What one window saw, with the pool as the word set it. */
@@ -74,6 +88,18 @@ export interface PoolWindowFacts {
   readonly finite?: boolean;
   readonly silent?: boolean;
   readonly dspLoad?: number;
+  /** Nanoseconds the worker's pool helpers were on a cpu in the window (the busiest of the windows taken): little means the worker held the pool and its helpers ran next to nothing. */
+  readonly helperBusyNs?: number;
+}
+
+/** What the plugin did on the helper threads of a real pool under the interposer. */
+export interface PoolRtFacts {
+  readonly helpers: number;
+  /** The tasks the helpers ran; none means the pool was not exercised, and nothing was seen of it. */
+  readonly tasksOnHelpers: number;
+  readonly allocations: number;
+  readonly locks: number;
+  readonly syscalls: number;
 }
 
 /** What one run of the step saw. A run that never reached the plugin says `started: false`, and `problem`. */
@@ -82,6 +108,8 @@ export interface PoolRunFacts {
   readonly problem?: string;
   /** Whether the plugin offers clap.thread-pool. */
   readonly asks?: boolean;
+  /** The plugin's tasks on helper threads, counted by the interposer (the prober's `--pool`); absent when it could not be watched. */
+  readonly rt?: PoolRtFacts;
   readonly added?: boolean;
   readonly off?: PoolWindowFacts;
   readonly on?: PoolWindowFacts;
@@ -92,9 +120,10 @@ export interface PoolRunFacts {
 export type PoolRunner = (uri: string, cell: GridCell, env: Readonly<Record<string, string | undefined>>) => PoolRunFacts;
 
 function figuresOf(run: PoolRunFacts): PoolFigures | undefined {
-  const { off, on } = run;
-  if (off?.dspLoad === undefined || on?.dspLoad === undefined) return undefined;
-  return { dspLoadOff: off.dspLoad, dspLoadOn: on.dspLoad, xrunsOff: off.xruns ?? 0, xrunsOn: on.xruns ?? 0 };
+  const { off, on, rt } = run;
+  const watched = rt === undefined ? {} : { allocationsOn: rt.allocations, locksOn: rt.locks, syscallsOn: rt.syscalls, tasksOnHelpers: rt.tasksOnHelpers };
+  const timed = off?.dspLoad === undefined || on?.dspLoad === undefined ? {} : { dspLoadOff: off.dspLoad, dspLoadOn: on.dspLoad, xrunsOff: off.xruns ?? 0, xrunsOn: on.xruns ?? 0 };
+  return Object.keys(watched).length === 0 && Object.keys(timed).length === 0 ? undefined : { ...watched, ...timed };
 }
 
 /** The decision table of the step, with the figures it took. Pure. */
@@ -105,6 +134,13 @@ export function judgePoolRun(run: PoolRunFacts): RunStep {
   };
   if (!run.started) return step(POOL_RESULT.notRun, POOL_CODE.noHost, run.problem);
   if (run.asks === false) return step(POOL_RESULT.notAsked);
+  // the plugin on helper threads comes first: a plugin that allocates or locks there is refused the pool whatever it gains,
+  // and one nobody could watch there decides nothing
+  const { rt } = run;
+  if (rt === undefined || rt.tasksOnHelpers < 1) return step(POOL_RESULT.notRun, POOL_CODE.unwatched, run.problem ?? "the plugin's tasks were not seen on helper threads under the interposer");
+  if (rt.allocations + rt.locks + rt.syscalls > 0) {
+    return step(POOL_RESULT.off, POOL_CODE.notRtSafe, `${String(rt.allocations)} allocations, ${String(rt.locks)} locks and ${String(rt.syscalls)} system calls while its tasks ran on ${String(rt.helpers)} helper threads`);
+  }
   if (run.added !== true) return step(POOL_RESULT.notRun, POOL_CODE.notAdded, run.problem);
   const { off, on } = run;
   // the window without the pool is the reference: a plugin that does not even run alone says nothing about the pool
@@ -114,6 +150,9 @@ export function judgePoolRun(run: PoolRunFacts): RunStep {
   if (on.alive !== true) return step(POOL_RESULT.off, POOL_CODE.crashed, on.problem);
   if (on.problem !== undefined) return step(POOL_RESULT.notRun, POOL_CODE.windowFailed, on.problem);
   if (on.finite !== true || on.silent !== false) return step(POOL_RESULT.off, POOL_CODE.unsafeOutput);
+  // the worker held the pool and its helpers ran nothing: the plugin's requests never reached them, so the window with the
+  // pool measured the window without it again, and no gain was seen because there was nothing to see
+  if (on.helperBusyNs !== undefined && on.helperBusyNs < POOL_HELPERS_IDLE_NS) return step(POOL_RESULT.off, POOL_CODE.helpersIdle, "the worker's pool helpers ran no task in the window with the pool");
   if ((on.xruns ?? 0) > (off.xruns ?? 0)) return step(POOL_RESULT.off, POOL_CODE.xruns);
   if (off.dspLoad === undefined || on.dspLoad === undefined) return step(POOL_RESULT.notRun, POOL_CODE.windowFailed, "the server's load was not read");
   if (on.dspLoad > off.dspLoad * POOL_GAIN || off.dspLoad - on.dspLoad < POOL_MIN_GAIN) return step(POOL_RESULT.off, POOL_CODE.notFaster);
@@ -173,6 +212,43 @@ export function asksForPool(prober: string, uri: string, env: Readonly<Record<st
   }
 }
 
+/** The most helper threads the prober's pool makes (`POOL_HELPERS_MAX` in native/clap-qualify.c). */
+const POOL_HELPERS_MAX = 7;
+
+/** How many blocks the prober's sweeps run: the sync's own, so a plugin that needs a few blocks to settle is seen settled. */
+const WATCH_BLOCKS = 512;
+
+/**
+ * What the plugin does on helper threads: the prober run with a real pool of one helper per core of this process's set but
+ * one (at most seven), under the interposer, which counts what any thread does while a sweep runs. The pool must have
+ * been used: a run whose tasks all ran on the calling thread saw nothing of the helpers.
+ */
+export function watchOnHelpers(prober: string, interposer: string, uri: string, cell: GridCell, env: Readonly<Record<string, string | undefined>>): { readonly rt: PoolRtFacts } | { readonly problem: string } {
+  const m = /^clap:(.*)#([^#]*)$/s.exec(uri);
+  if (m === null) return { problem: `${uri} is no clap uri` };
+  const helpers = Math.min(POOL_HELPERS_MAX, availableParallelism() - 1);
+  if (helpers < 1) return { problem: "this machine has one core, and a pool of one core is no pool" };
+  const preload = [interposer, env["LD_PRELOAD"]].filter((x) => x !== undefined && x !== "").join(" ");
+  const r = spawnSync(prober, ["--rates", String(cell.rate), "--block", String(cell.quantum), "--blocks", String(WATCH_BLOCKS), "--pool", String(helpers), m[1]!, m[2]!], {
+    encoding: "utf8",
+    timeout: 120000,
+    killSignal: "SIGKILL",
+    env: { ...env, LD_PRELOAD: preload },
+  });
+  if (r.error !== undefined || r.status !== 0) return { problem: `${CLAP_QUALIFY_TOOL_NAME} --pool: ${r.error?.message ?? `exit ${String(r.status)}`}` };
+  const line = r.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
+  if (line === undefined) return { problem: `${CLAP_QUALIFY_TOOL_NAME} --pool printed no line` };
+  try {
+    const doc = JSON.parse(line) as { rtSafety?: { interposer?: boolean; allocationsInRun?: number; locksInRun?: number; syscallsInRun?: number }; noteSweep?: { interposer?: boolean; allocationsInRun?: number; locksInRun?: number; syscallsInRun?: number }; threadPool?: { tasksOnHelpers?: number } };
+    const sweeps = [doc.rtSafety, doc.noteSweep].filter((x) => x?.interposer === true);
+    if (doc.rtSafety?.interposer !== true) return { problem: "the interposer did not load in the prober" };
+    const sum = (key: "allocationsInRun" | "locksInRun" | "syscallsInRun"): number => sweeps.reduce((n, x) => n + (x?.[key] ?? 0), 0);
+    return { rt: { helpers, tasksOnHelpers: doc.threadPool?.tasksOnHelpers ?? 0, allocations: sum("allocationsInRun"), locks: sum("locksInRun"), syscalls: sum("syscallsInRun") } };
+  } catch {
+    return { problem: `${CLAP_QUALIFY_TOOL_NAME} --pool printed no JSON` };
+  }
+}
+
 /** The step as it runs on a device: a private server at the cell, and `tools/pool-step.mjs` under it. */
 export function spawnedPoolRunner(jack: JackStarter = startPrivateJack): PoolRunner {
   return (uri, cell, env) => {
@@ -182,6 +258,12 @@ export function spawnedPoolRunner(jack: JackStarter = startPrivateJack): PoolRun
     const asks = asksForPool(prober, uri, env);
     if (asks === undefined) return { started: false, problem: `${uri} could not be asked for clap.thread-pool` };
     if (!asks) return { started: true, asks: false };
+    // then what it does on helper threads, which needs no server: a plugin that allocates there is refused without one
+    const interposer = locateNativeTool(RT_INTERPOSE_NAME, env, existsSync).path;
+    if (interposer === undefined) return { started: true, asks: true, problem: `no ${RT_INTERPOSE_NAME}` };
+    const watched = watchOnHelpers(prober, interposer, uri, cell, env);
+    if (!("rt" in watched)) return { started: true, asks: true, problem: watched.problem };
+    if (watched.rt.tasksOnHelpers < 1 || watched.rt.allocations + watched.rt.locks + watched.rt.syscalls > 0) return { started: true, asks: true, rt: watched.rt };
     const signal = locateNativeTool(ISOLATED_SIGNAL_TOOL_NAME, env, existsSync).path;
     if (signal === undefined) return { started: false, problem: `no ${ISOLATED_SIGNAL_TOOL_NAME}` };
     const server = jack(cell);
@@ -194,7 +276,7 @@ export function spawnedPoolRunner(jack: JackStarter = startPrivateJack): PoolRun
         env: { ...env, JACK_DEFAULT_SERVER: server.name, [ISOLATED_SIGNAL_TOOL_ENV]: signal },
       });
       if (r.error !== undefined || r.status !== 0) return { started: false, problem: `pool-step: ${r.error?.message ?? `exit ${String(r.status)}`}: ${(r.stderr ?? "").trim()}` };
-      return { ...(JSON.parse(r.stdout) as PoolRunFacts), asks: true };
+      return { ...(JSON.parse(r.stdout) as PoolRunFacts), asks: true, rt: watched.rt };
     } finally {
       server.stop();
     }

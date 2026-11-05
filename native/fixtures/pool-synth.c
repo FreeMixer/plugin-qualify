@@ -13,6 +13,8 @@
  *                          gains nothing.
  *   pool-synth-quiet.clap  built with -DFIXTURE_POOL_QUIET, the same with a twentieth of the CPU per voice: asks, and has
  *                          too little to run in parallel to be worth a pool.
+ *   pool-synth-helper.clap built with -DFIXTURE_POOL_HELPER_ALLOC, the same which allocates a scratch buffer on a thread
+ *                          that is not the audio thread: clean when the tasks run serial, not when a pool runs them.
  *   pool-synth-serial.clap built with -DFIXTURE_NO_POOL, the same which never offers the extension: never asked.
  *
  * Events are taken at the start of their block. The load changes no sample: it is a dependent multiply-add chain
@@ -31,6 +33,9 @@
 #elif defined FIXTURE_POOL_QUIET
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.pool-synth-quiet"
 #define FIXTURE_NAME "pool synth with almost nothing to do"
+#elif defined FIXTURE_POOL_HELPER_ALLOC
+#define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.pool-synth-helper"
+#define FIXTURE_NAME "pool synth that allocates on its helper threads"
 #elif defined FIXTURE_NO_POOL
 #define FIXTURE_ID "org.freemixer.plugin-qualify.fixture.pool-synth-serial"
 #define FIXTURE_NAME "synth that never asks for the pool"
@@ -44,7 +49,7 @@
 #ifdef FIXTURE_POOL_QUIET
 #define LOAD_ITERS 20
 #else
-#define LOAD_ITERS 400
+#define LOAD_ITERS 900
 #endif
 
 static const char *const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO, NULL };
@@ -75,6 +80,7 @@ struct synth {
   const clap_host_thread_pool_t *pool;
   double rate;
   uint32_t frames;
+  pthread_t audio_thread;
   uint32_t act[VOICES];
   struct voice voice[VOICES];
 };
@@ -134,8 +140,23 @@ static void synth_event(struct synth *s, const clap_event_header_t *e) {
   }
 }
 
+#ifdef FIXTURE_POOL_HELPER_ALLOC
+/* through volatile pointers, so the compiler cannot pair the malloc with the free and drop both */
+static void *(*volatile fixture_malloc)(size_t) = malloc;
+static void (*volatile fixture_free)(void *) = free;
+#endif
+
 static void render(struct synth *s, struct voice *v) {
   double acc = 1.0;
+#ifdef FIXTURE_POOL_HELPER_ALLOC
+  if (!pthread_equal(pthread_self(), s->audio_thread)) {
+    double *scratch = fixture_malloc(256 * sizeof(double));
+    if (scratch) {
+      scratch[0] = acc;
+      fixture_free(scratch);
+    }
+  }
+#endif
 #ifdef FIXTURE_POOL_SLOW
   pthread_mutex_lock(&g_lock);
 #endif
@@ -162,6 +183,7 @@ static clap_process_status synth_process(const clap_plugin_t *p, const clap_proc
   if (proc->audio_outputs_count < 1 || proc->frames_count > MAXFRAMES) return CLAP_PROCESS_ERROR;
   for (uint32_t i = 0; i < n; i++) synth_event(s, proc->in_events->get(proc->in_events, i));
   s->frames = proc->frames_count;
+  s->audio_thread = pthread_self();
   uint32_t sounding = 0;
   for (uint32_t v = 0; v < VOICES; v++)
     if (s->voice[v].key >= 0) s->act[sounding++] = v;
