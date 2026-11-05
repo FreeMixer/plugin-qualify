@@ -118,6 +118,19 @@ describe("lv2Loader — the one discovery seam", () => {
     expect(lv2Loader.resolve(ZERO_PATH_URI)).toEqual([{ format: "lv2", uri: ZERO_PATH_URI }]);
   });
 
+  it("a URI with a scheme (http, https, urn) is looked up by URI, not read as a path", () => {
+    for (const uri of ["http://lsp-plug.in/plugins/lv2/comp_delay_mono", "https://example.org/p/x", "urn:t:x"]) {
+      expect(lv2Loader.resolve(uri)).toEqual([{ format: "lv2", uri }]);
+    }
+    const r = resolveTargets(["http://lsp-plug.in/plugins/lv2/comp_delay_mono"], [lv2Loader]);
+    expect(r.ok && r.plugins.map((p) => p.uri)).toEqual(["http://lsp-plug.in/plugins/lv2/comp_delay_mono"]);
+  });
+
+  it("a bare or file: argument stays a path: one that is not there is refused", () => {
+    expect(lv2Loader.resolve("some/dir/x.lv2")).toBeUndefined();
+    expect(lv2Loader.resolve("file:///no/such/x.lv2")).toBeUndefined();
+  });
+
   it("a bundle path resolves to every plugin its manifest declares, with the binary's basename", () => {
     expect(lv2Loader.resolve(ZERO_PATH_BUNDLE)).toEqual([
       { format: "lv2", uri: ZERO_PATH_URI, bundle: ZERO_PATH_BUNDLE, binary: "zero-path.so" },

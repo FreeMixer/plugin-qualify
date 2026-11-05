@@ -3,8 +3,8 @@
 /**
  * The LV2 implementation of the one discovery seam (`loader.ts`, spec §7). A target that names an
  * existing directory is a bundle: every subject its `manifest.ttl` declares `a lv2:Plugin` is a
- * plugin, with its `lv2:binary` basename. Anything else shaped like a URI (`scheme:rest`) is one
- * plugin. A path that does not exist is not this loader's — the CLI refuses it by name.
+ * plugin, with its `lv2:binary` basename. Anything with a scheme (`scheme:rest`, other than `file:`) is one
+ * plugin, looked up by URI; a bare or `file:` argument is a path. A path that does not exist is not this loader's — the CLI refuses it by name.
  *
  * The manifest is read as plugin-hostd reads it to pin a plugin: statements of IRIs and prefixed names, with blank
  * nodes and collections stepped over, not a whole Turtle parser. A plugin is a subject typed `lv2:Plugin`; its files
@@ -169,8 +169,9 @@ export const lv2Loader: PluginLoader = {
         ...(p.binary === undefined ? {} : { binary: p.binary }),
       }));
     }
-    if (target.includes("/") || target.endsWith(".lv2")) return undefined; // a path that is not there
-    return URI_SHAPE.test(target) ? [{ format: "lv2", uri: target }] : undefined;
+    // A scheme (http, https, urn, ...) makes the argument a URI; a bare or `file:` argument is a path, and one that is not there is not this loader's.
+    if (!/^file:/i.test(target) && URI_SHAPE.test(target) && !/^[A-Za-z]:[\\/]/.test(target)) return [{ format: "lv2", uri: target }];
+    return undefined;
   },
 };
 
