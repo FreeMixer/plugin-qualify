@@ -5,7 +5,10 @@
  * pin store's import): one line per qualified plugin, the SAME line as hostd's `pin_set` verb, with the
  * qualification verdict as a last word.
  *
- *     pin_set <uri> <path>=<sha256>[,<path>=<sha256>...] <scheme>:<sha256> [verdict=<word>]
+ *     pin_set <uri> <path>=<sha256>[,<path>=<sha256>...] <scheme>:<sha256> [verdict=<word>] [pool=<word>]
+ *
+ * A word is the protocol's (plugin-hostd-protocol's `word`): bare, or in double quotes when it holds a space, with `\"`
+ * for a quote inside. A CLAP plugin under a directory with a space in its name has a uri with a space in it: one quoted word.
  *
  * The digests and the layout are the prober's, raw (`IntegrityMeasurement`); nothing here computes a hash. A plugin
  * whose run took no whole pin has no line: a pins file never holds a partial pin. The grammar is plugin-hostd's
@@ -56,17 +59,79 @@ export interface PinEntry {
   readonly verdict?: PinVerdict;
 }
 
-/** The line of one pin, or `undefined` when the integrity block is not a whole pin. A uri with whitespace in it would be read back as more words: it is refused, by name. */
-export function pinLine(entry: PinEntry): string | undefined {
-  const spaced = [entry.uri, ...(entry.integrity.files ?? []).map((f) => f.path)].find((w) => /\s/.test(w));
-  if (spaced !== undefined) {
-    throw new Error(`${entry.uri}: ${JSON.stringify(spaced)} has whitespace in it and cannot be a word of a pin line`);
+/** A word of the protocol, `word` in its grammar: bare, or quoted when it holds a space or a double quote. A control character cannot be a word, nor can a quoted word end in a backslash (it would read as an escaped quote). */
+export function pinWord(value: string): string {
+  if (value === "") throw new Error("an empty word cannot be a word of a pin line");
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`${JSON.stringify(value)} has a control character in it and cannot be a word of a pin line`);
+  if (!/[ "]/.test(value)) return value;
+  if (value.endsWith("\\")) throw new Error(`${JSON.stringify(value)} ends in a backslash and cannot be a quoted word of a pin line`);
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+/** The words of a line, the protocol's: a quoted word with its quotes taken off and its `\"` read as a quote. */
+export function pinWords(line: string): string[] {
+  const words: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === " " || line[i] === "\t" || line[i] === "\r") {
+      i++;
+    } else if (line[i] === '"') {
+      let word = "";
+      for (i++; ; i++) {
+        if (i >= line.length) throw new Error("a quote is not closed");
+        if (line[i] === "\\" && line[i + 1] === '"') {
+          word += '"';
+          i++;
+        } else if (line[i] === '"') {
+          i++;
+          break;
+        } else {
+          word += line[i];
+        }
+      }
+      if (i < line.length && line[i] !== " " && line[i] !== "\t" && line[i] !== "\r") throw new Error("a quoted word is followed by more of the word");
+      words.push(word);
+    } else {
+      const start = i;
+      while (i < line.length && line[i] !== " " && line[i] !== "\t" && line[i] !== "\r") {
+        if (line[i] === '"') throw new Error("a quote inside a bare word");
+        i++;
+      }
+      words.push(line.slice(start, i));
+    }
   }
+  return words;
+}
+
+/** The uri of a pin line (or of a `pin_clear` line), with the verb or without: its first word after the verb. */
+export function pinLineUri(line: string): string | undefined {
+  const words = pinWords(line);
+  if (words[0] === PIN_VERB || words[0] === "pin_clear") words.shift();
+  return words[0];
+}
+
+/** The line that takes a pin away: the uri is one word. */
+export function pinClearLine(uri: string): string {
+  return `pin_clear ${pinWord(uri)}`;
+}
+
+/**
+ * The line of one pin, or `undefined` when the integrity block is not a whole pin. The uri is one word, quoted when it
+ * holds a space. A file path inside the bundle cannot hold whitespace, a comma or an equals sign (the protocol's PATH
+ * limit: they are the separators of the words of a pin), so a plugin with such a file has no pin, refused by name.
+ */
+export function pinLine(entry: PinEntry): string | undefined {
   const { files, layout } = entry.integrity;
+  const uri = pinWord(entry.uri);
+  for (const f of files ?? []) {
+    const bad = /[,="\s]/.exec(f.path);
+    if (bad !== null) throw new Error(`${entry.uri}: the file ${JSON.stringify(f.path)} holds ${JSON.stringify(bad[0])}, which a pinned path cannot (a separator of the words of a pin, or a quote)`);
+  }
   if (files === undefined || files.length === 0 || layout === undefined) return undefined;
   const list = files.map((f) => `${f.path}=${f.sha256}`).join(",");
   const verdict = entry.verdict === undefined ? "" : ` ${PIN_VERDICT_KEY}${entry.verdict}`;
-  return `${PIN_VERB} ${entry.uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}`;
+  return `${PIN_VERB} ${uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}`;
 }
 
 /** hostd's uri of a CLAP plugin the prober loaded: its file as it was handed, made absolute, and its id. */
@@ -82,7 +147,7 @@ export interface PinsFile {
   readonly written: readonly string[];
   /** The uris of plugins that took no whole pin: they have no line. */
   readonly skipped: readonly string[];
-  /** The uris refused because a word of their line has whitespace in it, each with the reason: they have no line. */
+  /** The uris refused because a word of their line cannot be a word (a control character), each with the reason: they have no line. */
   readonly refused: readonly { readonly uri: string; readonly problem: string }[];
 }
 
@@ -185,7 +250,7 @@ const HEX = /^[0-9a-f]{64}$/;
  * 64 lowercase hex digits, a layout without a scheme, a verdict outside the vocabulary, a path named twice).
  */
 export function parsePinLine(line: string): ParsedPin | undefined {
-  const words = line.trim().split(/\s+/).filter((w) => w !== "");
+  const words = pinWords(line);
   if (words.length === 0 || words[0]!.startsWith("#")) return undefined;
   if (words[0] === PIN_VERB) words.shift();
   if (words.length !== 3 && words.length !== 4) throw new Error(`a pin line has 3 or 4 words, not ${words.length}`);

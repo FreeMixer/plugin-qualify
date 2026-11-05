@@ -20,11 +20,13 @@ import {
   pruneStale,
   recordStem,
   removedPinUris,
+  changedPinLines,
   resolveSyncSettings,
   runSync,
   type FileDigest,
   type SyncState,
 } from "./qualify-sync.js";
+import { pinClearLine, pinWord } from "./pins-file.js";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = mkdtempSync(join(tmpdir(), "qualify-prune-"));
@@ -113,6 +115,15 @@ describe("removedPinUris", () => {
     const pin = (uri: string) => `pin_set ${uri} a=1 s:2 verdict=in-process`;
     expect(removedPinUris(`# c\n${pin("u1")}\n${pin("u2")}\n`, `# c\n${pin("u2")}\n`)).toEqual(["u1"]);
     expect(removedPinUris("", `${pin("u1")}\n`)).toEqual([]);
+  });
+
+  it("reads the uri of a line whose uri has a space in it as the one quoted word, and clears it by the same word", () => {
+    const spaced = "clap:/p/My Plugins/x.clap#id";
+    const pin = (uri: string) => `pin_set ${pinWord(uri)} a=1 s:2 verdict=in-process`;
+    expect(removedPinUris(`${pin(spaced)}\n${pin("u2")}\n`, `${pin("u2")}\n`)).toEqual([spaced]);
+    expect(changedPinLines(`${pin("u2")}\n`, `${pin(spaced)}\n${pin("u2")}\n`)).toEqual([pin(spaced)]);
+    expect(pinClearLine(spaced)).toBe(`pin_clear "${spaced}"`);
+    expect(pinClearLine("u2")).toBe("pin_clear u2");
   });
 });
 
