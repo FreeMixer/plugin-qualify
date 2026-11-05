@@ -13,7 +13,7 @@ BuildRequires: nodejs >= 18
 BuildRequires: npm
 # the CLAP prober, the LV2 measurer and their interposer: the CLAP headers and lilv from Fedora,
 # pin.h from plugin-db-devel, protocol.h from plugin-hostd-protocol-devel, the declared sample rates and the one JSON string
-# writer (<omxcontract/omx_json_write.h>, 3.9.0) from omx-contract-devel, the LV2 host features from omx-clap-lv2-devel (a static archive: nothing of it is needed at run time)
+# writer (<omxcontract/omx_json_write.h>, 3.9.1) from omx-contract-devel, the LV2 host features from omx-clap-lv2-devel (a static archive: nothing of it is needed at run time)
 BuildRequires: gcc
 BuildRequires: make
 BuildRequires: pkgconfig
@@ -22,7 +22,7 @@ BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: (pkgconfig(plugin-db) >= 0.1.0 with pkgconfig(plugin-db) < 0.2)
 BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.3.0 with pkgconfig(plugin-hostd-protocol) < 0.4)
-BuildRequires: (pkgconfig(omx-contract) >= 3.9.0 with pkgconfig(omx-contract) < 4)
+BuildRequires: (pkgconfig(omx-contract) >= 3.9.1 with pkgconfig(omx-contract) < 4)
 BuildRequires: (pkgconfig(omx-clap-lv2) >= 0.26.2 with pkgconfig(omx-clap-lv2) < 0.30)
 BuildRequires: (pkgconfig(omxdsp) >= 0.21.0 with pkgconfig(omxdsp) < 0.31)
 BuildRequires: systemd-rpm-macros
@@ -161,7 +161,7 @@ fi
 - A CLAP plugin under a directory with a space in its name is pinned: its uri is
   one quoted word of the pin line
 - Floors and ceilings: plugin-db >= 0.1.0 and < 0.2, plugin-hostd-protocol
-  >= 0.3.0 and < 0.4, omx-contract >= 3.9.0 and < 4, omx-clap-core and
+  >= 0.3.0 and < 0.4, omx-contract >= 3.9.1 and < 4, omx-clap-core and
   omx-clap-host < 0.30, plugin-hostd < 0.19, omx-dsp < 0.31
 
 * Sun Nov 01 2026 Pau Aliagas <linuxnow@gmail.com> - 0.18.5-1
