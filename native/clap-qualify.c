@@ -64,9 +64,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <malloc.h>
-#include <pthread.h>
-#include <sched.h>
-#include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -75,6 +72,7 @@
 #include <plugin-hostd/protocol.h>
 #include <omxcontract/omx_json_write.h>
 
+#include "pool-host.h"
 #include "rt-interpose.h"
 
 #define MAX_RATES 16
@@ -308,88 +306,23 @@ static bool host_unregister_fd(const clap_host_t *h, int fd) {
 }
 static const clap_host_posix_fd_support_t g_posix_fd_support = { host_register_fd, host_modify_fd, host_unregister_fd };
 
-/* The pool (--pool <helpers>): real helper threads, so that what a plugin's tasks do on a thread that is not the audio
- * thread is counted by the interposer as the audio thread's work is, which is the question of the pool step
- * (src/qualify-pool.ts). The shape is omx-clap-core's (docs/thread-pool.md): a request is one 64-bit word, a generation,
- * the task count and the next index; the helpers and the audio thread take indices from it with one compare-and-swap
- * each, so a task is taken exactly once; the audio thread takes tasks too and returns when every one has ended. Nothing
- * here allocates, locks or makes a counted call after the helpers are made: a helper that waits spins and yields. */
-#define POOL_HELPERS_MAX 7
-#define POOL_TASKS_MAX 65535u
-static struct {
-  pthread_t thread[POOL_HELPERS_MAX];
-  uint32_t helpers;
-  atomic_int stop;
-  _Atomic uint64_t word;       /* generation (32 bits) | task count (16) | next index (16) */
-  const clap_plugin_t *plugin; /* the request's, set before the word is published */
-  atomic_uint done;
-  uint32_t generation;
-  atomic_ullong requests, tasks_on_helpers, tasks_total;
-} g_pool;
-
-#define POOL_WORD(gen, count, next) (((uint64_t)(gen) << 32) | ((uint64_t)(count) << 16) | (uint64_t)(next))
-
-/* takes tasks of the request the word names until none is left; the count of the tasks it ran */
-static uint32_t pool_take(uint32_t gen, int helper) {
-  uint32_t ran = 0;
-  for (;;) {
-    uint64_t w = atomic_load_explicit(&g_pool.word, memory_order_acquire);
-    const uint32_t count = (uint32_t)((w >> 16) & 0xffff), next = (uint32_t)(w & 0xffff);
-    if ((uint32_t)(w >> 32) != gen || next >= count) return ran;
-    if (!atomic_compare_exchange_weak_explicit(&g_pool.word, &w, w + 1, memory_order_acq_rel, memory_order_acquire)) continue;
-    g_host.plugin_thread_pool->exec(g_pool.plugin, next);
-    atomic_fetch_add_explicit(&g_pool.done, 1, memory_order_release);
-    atomic_fetch_add_explicit(&g_pool.tasks_total, 1, memory_order_relaxed);
-    if (helper) atomic_fetch_add_explicit(&g_pool.tasks_on_helpers, 1, memory_order_relaxed);
-    ran++;
-  }
-}
-
-static void *pool_helper(void *arg) {
-  (void)arg;
-  uint32_t seen = 0;
-  while (!atomic_load_explicit(&g_pool.stop, memory_order_acquire)) {
-    const uint32_t gen = (uint32_t)(atomic_load_explicit(&g_pool.word, memory_order_acquire) >> 32);
-    if (gen == seen) {
-      sched_yield();
-      continue;
-    }
-    seen = gen;
-    pool_take(gen, 1);
-  }
-  return NULL;
-}
-
-static void pool_start(uint32_t helpers) {
-  if (helpers > POOL_HELPERS_MAX) helpers = POOL_HELPERS_MAX;
-  for (uint32_t i = 0; i < helpers; i++)
-    if (pthread_create(&g_pool.thread[g_pool.helpers], NULL, pool_helper, NULL) == 0) g_pool.helpers++;
-}
-
-static void pool_stop(void) {
-  atomic_store_explicit(&g_pool.stop, 1, memory_order_release);
-  for (uint32_t i = 0; i < g_pool.helpers; i++) pthread_join(g_pool.thread[i], NULL);
-  g_pool.helpers = 0;
-}
-
 /* thread-pool: [audio-thread], so gated on the process() window rather than on_main_thread. Without --pool every task
  * runs before the call returns, one after another on the calling thread, exactly as omx-clap-core's own host object runs
- * them; with it, on the helpers too, and the call returns when every task has ended. */
+ * them; with it, on the helpers of pool-host.c too, and the call returns when every task has ended. The pool is for the
+ * interposer's count of what the tasks do off the audio thread: a run with a pool takes no cost figure. */
+static void pool_exec_task(void *ctx, uint32_t task) {
+  (void)ctx;
+  g_host.plugin_thread_pool->exec(g_host.plugin, task);
+}
+
 static bool host_request_exec(const clap_host_t *h, uint32_t num_tasks) {
   (void)h;
   if (!g_host.in_process || !g_host.plugin_thread_pool || !g_host.plugin_thread_pool->exec || g_host.in_exec) return false;
   g_host.in_exec = 1;
-  if (g_pool.helpers == 0 || num_tasks < 2 || num_tasks > POOL_TASKS_MAX) {
+  if (pool_helper_count() == 0 || num_tasks < 2 || num_tasks > POOL_TASKS_MAX) {
     for (uint32_t i = 0; i < num_tasks; i++) g_host.plugin_thread_pool->exec(g_host.plugin, i);
   } else {
-    g_pool.plugin = g_host.plugin;
-    atomic_store_explicit(&g_pool.done, 0, memory_order_relaxed);
-    const uint32_t gen = ++g_pool.generation;
-    atomic_fetch_add_explicit(&g_pool.requests, 1, memory_order_relaxed);
-    atomic_store_explicit(&g_pool.word, POOL_WORD(gen, num_tasks, 0), memory_order_release);
-    pool_take(gen, 0);
-    /* a task a helper has begun is waited for, as the extension requires */
-    while (atomic_load_explicit(&g_pool.done, memory_order_acquire) < num_tasks) sched_yield();
+    pool_run(pool_exec_task, NULL, num_tasks);
   }
   g_host.in_exec = 0;
   return true;
@@ -1970,6 +1903,10 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
       f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";
       continue;
     }
+    if (o->pool_helpers) {
+      f.cost[r].unmeasured = "not-attempted", f.cost[r].detail = "a run with a thread pool counts what the tasks do and times nothing";
+      continue;
+    }
     if (!(p = instance_for_rate(factory, d, p, rows, &n_rows, &f.headless_ok))) break;
     cost_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, clap_dialect, o, &f, r);
   }
@@ -1978,8 +1915,11 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
   if (o->pool_helpers)
-    fprintf(g_out, ",\"threadPool\":{\"helpers\":%u,\"requests\":%llu,\"tasks\":%llu,\"tasksOnHelpers\":%llu}", o->pool_helpers,
-            (unsigned long long)g_pool.requests, (unsigned long long)g_pool.tasks_total, (unsigned long long)g_pool.tasks_on_helpers);
+  {
+    unsigned long long requests, tasks, on_helpers;
+    pool_stats(&requests, &tasks, &on_helpers);
+    fprintf(g_out, ",\"threadPool\":{\"helpers\":%u,\"requests\":%llu,\"tasks\":%llu,\"tasksOnHelpers\":%llu}", o->pool_helpers, requests, tasks, on_helpers);
+  }
   put_integrity(o->path, d->version, sha256, &pin);
   fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;

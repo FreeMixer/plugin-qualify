@@ -120,8 +120,8 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
-$(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ $< $(PLUGIN_HOSTD_LIBS) -ldl -lm
+$(BUILD)/clap-qualify: clap-qualify.c pool-host.c pool-host.h rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ clap-qualify.c pool-host.c $(PLUGIN_HOSTD_LIBS) -ldl -lm -lpthread
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
 LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
