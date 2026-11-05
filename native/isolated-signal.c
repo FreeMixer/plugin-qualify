@@ -5,7 +5,9 @@
  * notes start once the links are made, which an instrument needs to hear them, and walk a wide range of keys across the
  * window, each held: a drum kit answers only its mapped keys, and a patch slow to start is never restarted:
  *   isolated_signal <client> <ms>
- * prints one JSON line, {"latencyFrames":n,"xruns":n,"finite":bool,"silent":bool,"midiInputsLinked":n}. Exit 2 when the server or the client's
+ * prints one JSON line, {"latencyFrames":n,"xruns":n,"finite":bool,"silent":bool,"midiInputsLinked":n,"dspLoad":percent}, where
+ * dspLoad is the server's own DSP load (jack_cpu_load) over the last third of the window, when the notes held are most: the
+ * share of the cycle the whole graph takes, which a plugin that runs faster in the cycle lowers. Exit 2 when the server or the client's
  * ports could not be had: nothing was learned about the plugin. libjack is opened at run time, as jack_peak opens it: the
  * package needs it only on a machine with a JACK server. */
 #include <dlfcn.h>
@@ -49,6 +51,7 @@ static port_t *(*p_port_by_name)(client_t *, const char *);
 static const char **(*p_get_ports)(client_t *, const char *, const char *, unsigned long);
 static void (*p_free)(void *);
 static uint32_t (*p_sample_rate)(client_t *);
+static float (*p_cpu_load)(client_t *);
 static void (*p_latency_range)(port_t *, int, struct latency_range *);
 static void (*p_midi_clear)(void *);
 static int (*p_midi_write)(void *, uint32_t, const unsigned char *, size_t);
@@ -116,11 +119,12 @@ int main(int argc, char **argv) {
   *(void **)&p_get_ports = dlsym(lib, "jack_get_ports");
   *(void **)&p_free = dlsym(lib, "jack_free");
   *(void **)&p_sample_rate = dlsym(lib, "jack_get_sample_rate");
+  *(void **)&p_cpu_load = dlsym(lib, "jack_cpu_load");
   *(void **)&p_latency_range = dlsym(lib, "jack_port_get_latency_range");
   *(void **)&p_midi_clear = dlsym(lib, "jack_midi_clear_buffer");
   *(void **)&p_midi_write = dlsym(lib, "jack_midi_event_write");
   if (!p_client_open || !p_client_close || !p_set_process || !p_set_xrun || !p_activate || !p_port_register || !p_port_buffer || !p_connect ||
-      !p_port_name || !p_port_by_name || !p_get_ports || !p_free || !p_sample_rate || !p_latency_range || !p_midi_clear || !p_midi_write) {
+      !p_port_name || !p_port_by_name || !p_get_ports || !p_free || !p_sample_rate || !p_cpu_load || !p_latency_range || !p_midi_clear || !p_midi_write) {
     fprintf(stderr, "this libjack lacks a call\n");
     return 2;
   }
@@ -164,15 +168,21 @@ int main(int argc, char **argv) {
   long ms = atol(argv[2]);
   long part = ms / NOTE_COUNT;
   struct timespec step = {part / 1000, (part % 1000) * 1000000L};
+  double load_sum = 0;
+  int load_n = 0;
   for (int n = 1; n <= NOTE_COUNT; n++) {
     atomic_store(&g_notes_due, n);
     nanosleep(&step, NULL);
+    if (n > NOTE_COUNT - NOTE_COUNT / 3) {
+      load_sum += p_cpu_load(c);
+      load_n++;
+    }
   }
   struct latency_range range = {0, 0};
   p_latency_range(p_port_by_name(c, outs[0]), JACK_CAPTURE_LATENCY, &range);
   float peak = g_peak;
-  printf("{\"latencyFrames\":%u,\"xruns\":%d,\"finite\":%s,\"silent\":%s,\"midiInputsLinked\":%d}\n", range.max, atomic_load(&g_xruns),
-         atomic_load(&g_nonfinite) ? "false" : "true", peak < SILENCE_PEAK ? "true" : "false", midi_linked);
+  printf("{\"latencyFrames\":%u,\"xruns\":%d,\"finite\":%s,\"silent\":%s,\"midiInputsLinked\":%d,\"dspLoad\":%.3f}\n", range.max, atomic_load(&g_xruns),
+         atomic_load(&g_nonfinite) ? "false" : "true", peak < SILENCE_PEAK ? "true" : "false", midi_linked, load_n ? load_sum / load_n : 0.0);
   p_free(outs);
   if (ins != NULL) p_free(ins);
   if (midis != NULL) p_free(midis);

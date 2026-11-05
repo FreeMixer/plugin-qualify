@@ -8,6 +8,7 @@
  *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>]
  *                [--probe-notes <n>] [--hold <n>] <path.clap> [<id>]
  *   clap-qualify --json <path>...      the scan (below), the document the CLAP loader reads
+ *   clap-qualify --asks-thread-pool <path.clap> <id>   whether the plugin offers clap.thread-pool, one JSON line
  *
  * Per rate the plugin is activated, its latency read, an impulse run through `process()` to see
  * where it lands, and then every parameter is swept across its range through events while noise
@@ -1938,14 +1939,51 @@ static int usage(const char *name) {
   fprintf(stderr,
           "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] [--probe-notes <n>] [--hold <n>]\n"
           "          <path.clap> [<id>]   (--probe-notes and --hold: 1 to " STR(NOTE_KEYS_MAX) " notes)\n"
-          "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n",
-          name, name);
+          "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n"
+          "       %s --asks-thread-pool <path.clap> <id>   (whether the plugin offers clap.thread-pool: {\"threadPool\":true|false})\n",
+          name, name, name);
   return 2;
+}
+
+/* Whether a plugin asks for the host's thread pool: it offers the clap.thread-pool extension after init. The host that
+ * asks is the prober's own, which offers the pool; the answer is one JSON line. Exit 2 when the file or the plugin does
+ * not load. A plugin that hangs in init ends on the alarm, as the scan's child does. */
+static int asks_thread_pool(const char *path, const char *id) {
+  alarm(SCAN_TIMEOUT_S);
+  fflush(stdout);
+  const int out = dup(STDOUT_FILENO);
+  FILE *lines = out >= 0 && dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 ? fdopen(out, "w") : NULL;
+  if (lines) g_out = lines;
+  void *so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (!so) {
+    fprintf(stderr, "%s: %s\n", path, dlerror());
+    return 2;
+  }
+  const clap_plugin_entry_t *entry = dlsym(so, "clap_entry");
+  if (!entry || !clap_version_is_compatible(entry->clap_version) || !entry->init(path)) {
+    fprintf(stderr, "%s: no usable clap_entry\n", path);
+    return 2;
+  }
+  const clap_plugin_factory_t *factory = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
+  const clap_plugin_t *p = factory ? factory->create_plugin(factory, &g_clap_host, id) : NULL;
+  if (!p || !p->init(p)) {
+    if (p) p->destroy(p);
+    fprintf(stderr, "%s: %s does not create or init\n", path, id);
+    entry->deinit();
+    return 2;
+  }
+  const int asks = p->get_extension(p, CLAP_EXT_THREAD_POOL) != NULL;
+  p->destroy(p);
+  entry->deinit();
+  fprintf(g_out, "{\"threadPool\":%s}\n", asks ? "true" : "false");
+  fflush(g_out);
+  return 0;
 }
 
 int main(int argc, char **argv) {
   g_out = stdout;
   if (argc >= 2 && !strcmp(argv[1], "--json")) return scan(argc - 2, argv + 2);
+  if (argc >= 2 && !strcmp(argv[1], "--asks-thread-pool")) return argc == 4 ? asks_thread_pool(argv[2], argv[3]) : usage(argv[0]);
   struct options o = { .n_rates = 0, .frames = 512, .blocks = 512 };
   int a = 1;
   for (; a < argc && argv[a][0] == '-'; a += 2) {

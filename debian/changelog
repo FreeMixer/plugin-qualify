@@ -31,6 +31,12 @@ plugin-qualify (0.19.0) unstable; urgency=medium
     everywhere; a test refuses a copy of the loop (#296).
   * The live memory test reads which limit the runner applies, and CI cannot
     skip it (#297).
+  * The CLAP thread pool is granted by measuring it: a plugin that offers
+    clap.thread-pool is run alone with the pool off and on at the host's rate
+    and quantum, and its pin gets pool=cores when the pool is safe and faster,
+    pool=off when it is not. --pool-only runs the step a record owes.
+  * A CLAP plugin under a directory with a space in its name is pinned: its
+    uri is one quoted word of the pin line.
   * Floors and ceilings: plugin-db >= 0.1.0 and < 0.2, plugin-hostd-protocol
     >= 0.3.0 and < 0.4, omx-contract >= 3.9.0 and < 4, omx-clap-core and
     omx-clap-host < 0.30, plugin-hostd < 0.19, omx-dsp < 0.31.

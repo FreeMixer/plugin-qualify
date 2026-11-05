@@ -49,6 +49,7 @@ import {
   type RunBlock,
 } from "./qualification-record.js";
 import { ISOLATED_RESULT, RUN_STEP, pinAfterStep, provenAlone } from "./qualify-isolated.js";
+import { pinAfterPool, poolStepOf } from "./qualify-pool.js";
 import { PI_CELLS, PROBE_MEMORY_ONLY_ENV, PROBE_NOTES_ENV } from "./qualify-declarations.js";
 import { SYNC_STATE_SCHEMA, digestFiles, recordStem, type SyncContext, type SyncEntry, type SyncPlugin, type SyncState } from "./qualify-sync.js";
 import type { SuitabilityRating } from "./rating.js";
@@ -270,6 +271,13 @@ const nameOf = (record: QualificationRecord): string => record.plugin.id;
 
 /** A state plugin with the verdict its record now holds for the host: the pin's files stay as they are, only its word follows. */
 function pluginWithVerdict(plugin: SyncPlugin, v: RecordVerdict, run?: RunBlock): SyncPlugin {
+  // the pool word is a figure of the record's pool step, not a rating: a re-judge keeps it
+  const judged = pluginWithVerdictOnly(plugin, v, run);
+  const step = poolStepOf(run);
+  return judged.pin === undefined || step === undefined ? judged : { ...judged, pin: pinAfterPool(judged.pin, step)! };
+}
+
+function pluginWithVerdictOnly(plugin: SyncPlugin, v: RecordVerdict, run?: RunBlock): SyncPlugin {
   const { pin, code: _code, ...rest } = plugin;
   const word = v.measured ? pinVerdictOf(v.rating as SuitabilityRating) : undefined;
   // a rating does not make a plugin isolated: a run seen alone does, and a re-judge measures nothing. A record from before

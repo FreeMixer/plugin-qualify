@@ -29,6 +29,13 @@ export const PIN_VERB = "pin_set";
 /** The key of the verdict word, hostd's `PHD_PIN_VERDICT_KEY`. */
 export const PIN_VERDICT_KEY = "verdict=";
 
+/** The key of the pool word, hostd's `PHD_PIN_POOL_KEY`. */
+export const PIN_POOL_KEY = "pool=";
+
+/** The pool words hostd knows (`PHD_PIN_POOLS`): `cores` starts the plugin's worker with the CLAP thread pool on, `off` says it was measured and gains nothing. */
+export const PIN_POOLS = ["cores", "off"] as const;
+export type PinPool = (typeof PIN_POOLS)[number];
+
 /** The verdict words hostd knows (`PHD_PIN_VERDICTS`). */
 export const PIN_VERDICTS = ["in-process", "isolated", "refused"] as const;
 export type PinVerdict = (typeof PIN_VERDICTS)[number];
@@ -57,6 +64,8 @@ export interface PinEntry {
   readonly uri: string;
   readonly integrity: IntegrityMeasurement;
   readonly verdict?: PinVerdict;
+  /** What the pool step measured: the pool is the plugin's qualification to give, never assumed. A refused pin carries none. */
+  readonly pool?: PinPool;
 }
 
 /** A word of the protocol, `word` in its grammar: bare, or quoted when it holds a space or a double quote. A control character cannot be a word, nor can a quoted word end in a backslash (it would read as an escaped quote). */
@@ -131,7 +140,8 @@ export function pinLine(entry: PinEntry): string | undefined {
   if (files === undefined || files.length === 0 || layout === undefined) return undefined;
   const list = files.map((f) => `${f.path}=${f.sha256}`).join(",");
   const verdict = entry.verdict === undefined ? "" : ` ${PIN_VERDICT_KEY}${entry.verdict}`;
-  return `${PIN_VERB} ${uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}`;
+  const pool = entry.pool === undefined || entry.verdict === "refused" ? "" : ` ${PIN_POOL_KEY}${entry.pool}`;
+  return `${PIN_VERB} ${uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}${pool}`;
 }
 
 /** hostd's uri of a CLAP plugin the prober loaded: its file as it was handed, made absolute, and its id. */
@@ -240,6 +250,7 @@ export interface ParsedPin {
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
   readonly layout: { readonly scheme: string; readonly sha256: string };
   readonly verdict?: PinVerdict;
+  readonly pool?: PinPool;
 }
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -253,8 +264,8 @@ export function parsePinLine(line: string): ParsedPin | undefined {
   const words = pinWords(line);
   if (words.length === 0 || words[0]!.startsWith("#")) return undefined;
   if (words[0] === PIN_VERB) words.shift();
-  if (words.length !== 3 && words.length !== 4) throw new Error(`a pin line has 3 or 4 words, not ${words.length}`);
-  const [uri, list, layout, verdictWord] = words as [string, string, string, string | undefined];
+  if (words.length < 3 || words.length > 5) throw new Error(`a pin line has 3 to 5 words, not ${words.length}`);
+  const [uri, list, layout, ...optional] = words as [string, string, string, ...string[]];
   const files = list.split(",").map((item) => {
     const eq = item.lastIndexOf("=");
     if (eq < 0) throw new Error(`${item}: no =`);
@@ -270,10 +281,27 @@ export function parsePinLine(line: string): ParsedPin | undefined {
   const colon = layout.lastIndexOf(":");
   if (colon <= 0 || !HEX.test(layout.slice(colon + 1))) throw new Error(`${layout}: not a layout pin`);
   let verdict: PinVerdict | undefined;
-  if (verdictWord !== undefined) {
-    const word = verdictWord.startsWith(PIN_VERDICT_KEY) ? verdictWord.slice(PIN_VERDICT_KEY.length) : "";
-    if (!(PIN_VERDICTS as readonly string[]).includes(word)) throw new Error(`${verdictWord}: not a verdict`);
-    verdict = word as PinVerdict;
+  let pool: PinPool | undefined;
+  for (const word of optional) {
+    if (word.startsWith(PIN_VERDICT_KEY)) {
+      if (verdict !== undefined) throw new Error(`${word}: a second verdict`);
+      const value = word.slice(PIN_VERDICT_KEY.length);
+      if (!(PIN_VERDICTS as readonly string[]).includes(value)) throw new Error(`${word}: not a verdict`);
+      verdict = value as PinVerdict;
+    } else if (word.startsWith(PIN_POOL_KEY)) {
+      if (pool !== undefined) throw new Error(`${word}: a second pool word`);
+      const value = word.slice(PIN_POOL_KEY.length);
+      if (!(PIN_POOLS as readonly string[]).includes(value)) throw new Error(`${word}: not a pool word`);
+      pool = value as PinPool;
+    } else {
+      throw new Error(`${word}: not a word of a pin`);
+    }
   }
-  return { uri, files, layout: { scheme: layout.slice(0, colon), sha256: layout.slice(colon + 1) }, ...(verdict === undefined ? {} : { verdict }) };
+  return {
+    uri,
+    files,
+    layout: { scheme: layout.slice(0, colon), sha256: layout.slice(colon + 1) },
+    ...(verdict === undefined ? {} : { verdict }),
+    ...(pool === undefined ? {} : { pool }),
+  };
 }
