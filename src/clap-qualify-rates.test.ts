@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 //
 // Each rate is judged in an instance of its own, as a host at a fixed rate makes one: a plugin that aborts when one
-// instance is activated again at another rate (LSP's CLAP builds, docs/notes/lsp-reactivation-at-another-rate.md) is
+// instance is activated again at another rate (LSP's CLAP builds, docs/behaviour/lsp-reactivation-at-another-rate.md) is
 // measured at every rate and does not crash the prober.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";

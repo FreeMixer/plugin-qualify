@@ -19,7 +19,7 @@
  *                   that loads it dies before it can list a parameter.
  *   hangs.clap      built with -DFIXTURE_HANGS, the gain whose process() never returns.
  *   rate-pinned.clap built with -DFIXTURE_RATE_PINNED, the gain that aborts when one instance is activated again at
- *                   another rate than its first: what LSP's CLAP plugins do (docs/notes/lsp-reactivation-at-another-rate.md).
+ *                   another rate than its first: what LSP's CLAP plugins do (docs/behaviour/lsp-reactivation-at-another-rate.md).
  *
  * Nothing else differs, so a verdict that tells them apart is the interposer's count and nothing else.
  */

@@ -1771,7 +1771,7 @@ static uint32_t param_rows(const clap_plugin_t *p, struct param_row *rows)
 /* Each rate is judged in an instance of its own, made for it, as a host at a fixed rate makes one: the instance before is
  * destroyed and a new one made and initialised, and the rows of its parameters read again. A plugin that cannot be made
  * again leaves *ok 0 and NULL. Reactivating one instance at another rate is a path of its own that hosts at a fixed rate
- * never take, and it decides nothing here (docs/notes/lsp-reactivation-at-another-rate.md). */
+ * never take, and it decides nothing here (docs/behaviour/lsp-reactivation-at-another-rate.md). */
 static const clap_plugin_t *instance_for_rate(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d,
                                               const clap_plugin_t *before, struct param_row *rows, uint32_t *n_rows, int *ok)
 {
