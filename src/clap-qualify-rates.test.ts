@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 //
-// Each rate is judged in an instance of its own, as a host at a fixed rate makes one: a plugin that aborts when one
-// instance is activated again at another rate (LSP's CLAP builds, docs/notes/lsp-reactivation-at-another-rate.md) is
-// measured at every rate and does not crash the prober.
+// Each rate is judged in a fresh instance, as a host recreates an instance, carrying its state, when its rate changes:
+// a plugin that aborts when one instance is activated again at another rate is measured at every rate and does not
+// crash the prober.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";

@@ -4,10 +4,11 @@
 # The CLAP prober, the LV2 measurer, the interposer both run under and the fixture plugins their tests
 # qualify.
 #
-#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so,
+#   make -C native           build/clap-qualify, build/lv2_measure, build/lv2_host_probe, build/jack_peak, build/rt_interpose.so, build/rt_watch.so, build/jack_compare,
 #                            build/fixtures/{rt-safe,rt-unsafe,controls,params-2048,params-2049,info-fails,leaky-delay,undeclared-delay}.clap,
 #                            build/fixtures-faulty/{crashes-at-load,hangs}.clap, apart: a scan of build/fixtures never meets them,
 #                            build/fixtures/{synth,synth-alloc,synth-midi,synth-voices,synth-no-voices,synth-input,synth-strict}.clap,
+#                            build/fixtures/{pool-synth,pool-synth-slow,pool-synth-quiet,pool-synth-helper,pool-synth-serial}.clap (the pool step's),
 #                            build/fixtures/{requires-voice-info,requires-timer,requires-thread-pool}.clap,
 #                            build/fixtures/fail-alloc.so, build/fixtures-faulty/hogs-memory.clap (apart, as the faulty ones),
 #                            build/fixtures-faulty/synth-voice-memory.clap (apart, its memory fails any budget),
@@ -17,14 +18,15 @@
 #   build/lv2_measure_path_test       the oracle of the LV2 search path made absolute before lilv reads it
 #   make -C native asan      build/asan/lv2_measure, the measurer under AddressSanitizer, for the tests'
 #                            leak check; never installed, and not in `all` (Fedora's gcc lacks libasan)
-#   make -C native deps      fetch the CLAP and plugin-hostd headers at the pinned tags into deps/, the
+#   make -C native deps      fetch the CLAP, plugin-db and plugin-hostd headers at the pinned tags into deps/, the
 #                            omx-contract header the LV2 measurer reads its rates from, and omx-clap-core's
 #                            LV2 feature provider (libomx-clap-lv2), built and installed into deps/
 #   make -C native install DESTDIR=... LIBEXECDIR=...   the prober, the measurer, the interposer and the LV2 host
 #                            probe, for a package
 #
-# The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; plugin-hostd's pin
-# header from `pkg-config plugin-hostd` (plugin-hostd-devel), else deps/plugin-hostd. omx-contract's limits
+# The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; the pin header from
+# `pkg-config plugin-db` (plugin-db-devel) and the protocol's from `pkg-config plugin-hostd-protocol`
+# (plugin-hostd-protocol-devel), else deps/plugin-db and deps/plugin-hostd. omx-contract's limits
 # header from `pkg-config omx-contract` (omx-contract-devel, libomx-contract-dev), else deps/omx-contract. lilv and the LV2
 # headers from `pkg-config lilv-0` (lilv-devel, liblilv-dev). The LV2 measurer's host features are omx-clap-core's
 # provider, `pkg-config omx-clap-lv2` (omx-clap-lv2-devel, libomx-clap-lv2-dev), else deps/omx-clap-lv2.
@@ -35,9 +37,11 @@ BUILD ?= build
 
 CLAP_REF := 1.2.6
 PLUGIN_HOSTD_REF := v0.15.3
+PLUGIN_DB_REF := v0.1.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
-# reads the contract the packages do.
-OMX_CONTRACT_VERSION := 3.4.0
+# reads the contract the packages do (3.9.1: the first with <omxcontract/omx_json_write.h>, the one JSON string writer
+# every tool here spells its literals through).
+OMX_CONTRACT_VERSION := 3.9.1
 # the omx-clap-core whose LV2 feature provider `make deps` builds where no omx-clap-lv2-devel is installed: the
 # packages' floor
 OMX_CLAP_CORE_VERSION := 0.26.2
@@ -49,13 +53,19 @@ CLAP_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags clap)
 else
 CLAP_CFLAGS ?= -Ideps/clap/include
 endif
-ifeq ($(shell $(PKG_CONFIG) --exists plugin-hostd && echo true),true)
-PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-hostd)
+# pin.h is header-inline and digests through libcrypto: every program that includes it links what
+# `pkg-config --libs plugin-db` names, never a hand-kept library list. The tools read two headers: the pin's and the
+# protocol's, for the separators of a pin's words.
+ifeq ($(shell $(PKG_CONFIG) --exists plugin-db plugin-hostd-protocol && echo true),true)
+PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-db plugin-hostd-protocol)
+PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs plugin-db)
 else
-PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-hostd/include
+PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-db/include -Ideps/plugin-hostd/include
+PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs libcrypto)
 endif
 
-# the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>
+# the measurer's rates are omx-contract's OMX_DECLARED_RATES, from <omxcontract/omx_contract_limits.h>; the JSON string
+# literals of every tool are spelled by <omxcontract/omx_json_write.h> (src/no-json-escape-loop.test.ts)
 ifeq ($(shell $(PKG_CONFIG) --exists omx-contract && echo true),true)
 OMX_CONTRACT_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags omx-contract)
 else
@@ -89,13 +99,14 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type
 
 
-all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
+all: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/rt_watch.so $(BUILD)/jack_compare $(BUILD)/lv2_measure_options_test $(BUILD)/lv2_measure_path_test $(BUILD)/rt_interpose.so $(BUILD)/fixtures/rt-safe.clap $(BUILD)/fixtures/rt-unsafe.clap \
 	$(BUILD)/fixtures/controls.clap $(BUILD)/fixtures/params-2048.clap $(BUILD)/fixtures/params-2049.clap \
 	$(BUILD)/fixtures/info-fails.clap $(BUILD)/fixtures/leaky-delay.clap $(BUILD)/fixtures/undeclared-delay.clap \
 	$(BUILD)/fixtures-faulty/crashes-at-load.clap $(BUILD)/fixtures-faulty/hangs.clap $(BUILD)/fixtures-faulty/rate-pinned.clap \
 	$(BUILD)/fixtures/synth.clap $(BUILD)/fixtures/synth-alloc.clap $(BUILD)/fixtures/synth-midi.clap \
 	$(BUILD)/fixtures/synth-voices.clap $(BUILD)/fixtures/synth-no-voices.clap $(BUILD)/fixtures/synth-input.clap \
 	$(BUILD)/fixtures/synth-strict.clap $(BUILD)/fixtures/synth-drum.clap \
+	$(BUILD)/fixtures/pool-synth.clap $(BUILD)/fixtures/pool-synth-slow.clap $(BUILD)/fixtures/pool-synth-quiet.clap $(BUILD)/fixtures/pool-synth-serial.clap $(BUILD)/fixtures/pool-synth-helper.clap \
 	$(BUILD)/fixtures/requires-voice-info.clap $(BUILD)/fixtures/requires-timer.clap $(BUILD)/fixtures/requires-thread-pool.clap \
 	$(BUILD)/fixtures/fail-alloc.so $(BUILD)/fixtures-faulty/hogs-memory.clap \
 	$(BUILD)/fixtures/lv2/rt-safe.lv2/gain.so $(BUILD)/fixtures/lv2/rt-unsafe.lv2/gain.so $(BUILD)/fixtures/lv2/activate-reads.lv2/gain.so $(BUILD)/fixtures/lv2/needs-display.lv2/gain.so $(BUILD)/fixtures/lv2/abi-breaker.lv2/gain.so \
@@ -109,8 +120,8 @@ $(BUILD) $(BUILD)/fixtures $(BUILD)/fixtures-faulty:
 	mkdir -p $@
 
 # -rdynamic is not needed: the interposer's symbols are found through the preload, never exported by the prober
-$(BUILD)/clap-qualify: clap-qualify.c rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
+$(BUILD)/clap-qualify: clap-qualify.c pool-host.c pool-host.h rt-interpose.h rss-kb.h timing-sched.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ clap-qualify.c pool-host.c $(PLUGIN_HOSTD_LIBS) -ldl -lm -lpthread
 
 LV2_MEASURE_SRC := lv2-measure.c lv2-measure-options.c lv2-measure-pin.c lv2-measure-path.c
 LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt-interpose.h rss-kb.h timing-sched.h
@@ -118,7 +129,7 @@ LV2_MEASURE_HDR := lv2-measure-options.h lv2-measure-pin.h lv2-measure-path.h rt
 # as openmixer built it: no FMA contraction, so a figure is the same on every architecture and compiler
 $(BUILD)/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) $(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) \
-		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
+		$(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) $(PLUGIN_HOSTD_LIBS) -lpthread -lm -ldl
 
 # the same, under AddressSanitizer: the leak check runs it on every way out of main
 asan: $(BUILD)/asan/lv2_measure
@@ -126,11 +137,11 @@ asan: $(BUILD)/asan/lv2_measure
 $(BUILD)/asan/lv2_measure: $(LV2_MEASURE_SRC) $(LV2_MEASURE_HDR) | $(BUILD)
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fsanitize=address -fno-omit-frame-pointer -ffp-contract=off $(OMX_CONTRACT_CFLAGS) $(OMX_DSP_CFLAGS) $(PLUGIN_HOSTD_CFLAGS) \
-		$(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) -lpthread -lm -ldl
+		$(OMX_CLAP_LV2_CFLAGS) $(LILV_CFLAGS) $(LDFLAGS) -o $@ $(LV2_MEASURE_SRC) $(OMX_CLAP_LV2_LIBS) $(LILV_LIBS) $(PLUGIN_HOSTD_LIBS) -lpthread -lm -ldl
 
 # the feature options' oracle, never installed
 $(BUILD)/lv2_measure_options_test: lv2_measure_options.test.c lv2-measure-options.c lv2-measure-options.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CLAP_LV2_CFLAGS) $(LV2_CFLAGS) -I. $(LDFLAGS) -o $@ lv2_measure_options.test.c \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CLAP_LV2_CFLAGS) $(LV2_CFLAGS) $(OMX_CONTRACT_CFLAGS) -I. $(LDFLAGS) -o $@ lv2_measure_options.test.c \
 		lv2-measure-options.c $(OMX_CLAP_LV2_LIBS) -ldl -lpthread
 
 # the search path's oracle, never installed
@@ -147,6 +158,13 @@ $(BUILD)/jack_peak: jack-peak.c | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(LDFLAGS) -o $@ $< -ldl -lm
 
 $(BUILD)/rt_interpose.so: rt-interpose.c rt-interpose.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
+
+# the interposer again, its window put around a JACK host's process callback: the host comparison's watch
+$(BUILD)/jack_compare: jack-compare.c | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Werror $(OMX_CONTRACT_CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
+
+$(BUILD)/rt_watch.so: rt-watch.c rt-interpose.c rt-interpose.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -shared -fPIC -o $@ $< -ldl -lpthread
 
 $(BUILD)/fixtures/rt-safe.clap: fixtures/gain.c | $(BUILD)/fixtures
@@ -200,6 +218,18 @@ $(BUILD)/fixtures/synth-input.clap: fixtures/synth.c | $(BUILD)/fixtures
 # the same aborting on a wildcard key or channel, as two third-party synths do
 $(BUILD)/fixtures/synth-strict.clap: fixtures/synth.c | $(BUILD)/fixtures
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_NO_WILDCARDS -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm
+# the instrument that asks for the CLAP thread pool, and its three variants: a pool that gains nothing, one with too little
+# to run in parallel, and one that never offers the extension
+$(BUILD)/fixtures/pool-synth.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
+$(BUILD)/fixtures/pool-synth-slow.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_SLOW -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
+$(BUILD)/fixtures/pool-synth-quiet.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_QUIET -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
+$(BUILD)/fixtures/pool-synth-helper.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_POOL_HELPER_ALLOC -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
+$(BUILD)/fixtures/pool-synth-serial.clap: fixtures/pool-synth.c | $(BUILD)/fixtures
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(CLAP_CFLAGS) -DFIXTURE_NO_POOL -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $< -lm -lpthread
 # the rt-safe gain whose init() (and, for the thread-pool one, process()) requires a host extension beyond the
 # original six: the known headless-failed effect before the host offered it, suitable after (#133)
 $(BUILD)/fixtures/requires-voice-info.clap: fixtures/host-ext-gate.c | $(BUILD)/fixtures
@@ -307,11 +337,11 @@ $(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
-	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION)
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION) $(PLUGIN_DB_REF)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
-install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak
+install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(BUILD)/lv2_host_probe $(BUILD)/isolated_signal $(BUILD)/jack_peak $(BUILD)/rt_watch.so $(BUILD)/jack_compare
 	install -d $(DESTDIR)$(LIBEXECDIR)
 	install -m 0755 $(BUILD)/clap-qualify $(DESTDIR)$(LIBEXECDIR)/clap-qualify
 	install -m 0755 $(BUILD)/lv2_measure $(DESTDIR)$(LIBEXECDIR)/lv2_measure
@@ -319,6 +349,8 @@ install: $(BUILD)/clap-qualify $(BUILD)/lv2_measure $(BUILD)/rt_interpose.so $(B
 	install -m 0755 $(BUILD)/lv2_host_probe $(DESTDIR)$(LIBEXECDIR)/lv2_host_probe
 	install -m 0755 $(BUILD)/isolated_signal $(DESTDIR)$(LIBEXECDIR)/isolated_signal
 	install -m 0755 $(BUILD)/jack_peak $(DESTDIR)$(LIBEXECDIR)/jack_peak
+	install -m 0755 $(BUILD)/rt_watch.so $(DESTDIR)$(LIBEXECDIR)/rt_watch.so
+	install -m 0755 $(BUILD)/jack_compare $(DESTDIR)$(LIBEXECDIR)/jack_compare
 
 clean:
 	rm -rf $(BUILD)

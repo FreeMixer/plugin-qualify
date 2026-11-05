@@ -231,8 +231,10 @@ class Writing(unittest.TestCase):
 # presets the plugin ships (a sibling directory of their own, spec 6.13).
 NOT_IN_A_DESCRIPTOR = ("bundlePath", "owningRpm", "presets")
 
-CATALOG_UNITS = {"dB": "dB", "Hz": "Hz", "s": "s", "ms": "ms", "%": "%", "st": "semi", "cents": "ct",
-                 "deg": "deg", "x": "x", "oct": "oct", "bpm": "BPM", "midiNote": "note", "frames": "fr"}
+# the catalog spells a unit as the descriptor does, omx-contract's units sheet's word; a unit with no word is
+# `unknown` in the descriptor
+def catalog_unit(word):
+    return None if word in (None, "unknown") else word
 
 
 def lv2_row(doc, class_label):
@@ -251,7 +253,7 @@ def lv2_row(doc, class_label):
             "min": t.get("min"), "max": t.get("max"), "default": t.get("default", t.get("min")),
             "isInteger": t.get("scale") == "stepped", "isToggle": c["kind"] == "toggle",
             "isEnumeration": c["kind"] == "choice", "isLogarithmic": t.get("scale") == "log",
-            "isTrigger": c["kind"] == "trigger", "unit": CATALOG_UNITS.get(t.get("unit")),
+            "isTrigger": c["kind"] == "trigger", "unit": catalog_unit(t.get("unit")),
         })
     for w in writable:
         sym = w["uri"].rsplit("#", 1)[-1].rsplit("/", 1)[-1]

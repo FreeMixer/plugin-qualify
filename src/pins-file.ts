@@ -5,7 +5,10 @@
  * pin store's import): one line per qualified plugin, the SAME line as hostd's `pin_set` verb, with the
  * qualification verdict as a last word.
  *
- *     pin_set <uri> <path>=<sha256>[,<path>=<sha256>...] <scheme>:<sha256> [verdict=<word>]
+ *     pin_set <uri> <path>=<sha256>[,<path>=<sha256>...] <scheme>:<sha256> [verdict=<word>] [pool=<word>]
+ *
+ * A word is the protocol's (plugin-hostd-protocol's `word`): bare, or in double quotes when it holds a space, with `\"`
+ * for a quote inside. A CLAP plugin under a directory with a space in its name has a uri with a space in it: one quoted word.
  *
  * The digests and the layout are the prober's, raw (`IntegrityMeasurement`); nothing here computes a hash. A plugin
  * whose run took no whole pin has no line: a pins file never holds a partial pin. The grammar is plugin-hostd's
@@ -25,6 +28,13 @@ export const PIN_VERB = "pin_set";
 
 /** The key of the verdict word, hostd's `PHD_PIN_VERDICT_KEY`. */
 export const PIN_VERDICT_KEY = "verdict=";
+
+/** The key of the pool word, hostd's `PHD_PIN_POOL_KEY`. */
+export const PIN_POOL_KEY = "pool=";
+
+/** The pool words hostd knows (`PHD_PIN_POOLS`): `cores` starts the plugin's worker with the CLAP thread pool on, `off` says it was measured and gains nothing. */
+export const PIN_POOLS = ["cores", "off"] as const;
+export type PinPool = (typeof PIN_POOLS)[number];
 
 /** The verdict words hostd knows (`PHD_PIN_VERDICTS`). */
 export const PIN_VERDICTS = ["in-process", "isolated", "refused"] as const;
@@ -54,19 +64,84 @@ export interface PinEntry {
   readonly uri: string;
   readonly integrity: IntegrityMeasurement;
   readonly verdict?: PinVerdict;
+  /** What the pool step measured: the pool is the plugin's qualification to give, never assumed. A refused pin carries none. */
+  readonly pool?: PinPool;
 }
 
-/** The line of one pin, or `undefined` when the integrity block is not a whole pin. A uri with whitespace in it would be read back as more words: it is refused, by name. */
-export function pinLine(entry: PinEntry): string | undefined {
-  const spaced = [entry.uri, ...(entry.integrity.files ?? []).map((f) => f.path)].find((w) => /\s/.test(w));
-  if (spaced !== undefined) {
-    throw new Error(`${entry.uri}: ${JSON.stringify(spaced)} has whitespace in it and cannot be a word of a pin line`);
+/** A word of the protocol, `word` in its grammar: bare, or quoted when it holds a space or a double quote. A control character cannot be a word, nor can a quoted word end in a backslash (it would read as an escaped quote). */
+export function pinWord(value: string): string {
+  if (value === "") throw new Error("an empty word cannot be a word of a pin line");
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`${JSON.stringify(value)} has a control character in it and cannot be a word of a pin line`);
+  if (!/[ "]/.test(value)) return value;
+  if (value.endsWith("\\")) throw new Error(`${JSON.stringify(value)} ends in a backslash and cannot be a quoted word of a pin line`);
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+/** The words of a line, the protocol's: a quoted word with its quotes taken off and its `\"` read as a quote. */
+export function pinWords(line: string): string[] {
+  const words: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === " " || line[i] === "\t" || line[i] === "\r") {
+      i++;
+    } else if (line[i] === '"') {
+      let word = "";
+      for (i++; ; i++) {
+        if (i >= line.length) throw new Error("a quote is not closed");
+        if (line[i] === "\\" && line[i + 1] === '"') {
+          word += '"';
+          i++;
+        } else if (line[i] === '"') {
+          i++;
+          break;
+        } else {
+          word += line[i];
+        }
+      }
+      if (i < line.length && line[i] !== " " && line[i] !== "\t" && line[i] !== "\r") throw new Error("a quoted word is followed by more of the word");
+      words.push(word);
+    } else {
+      const start = i;
+      while (i < line.length && line[i] !== " " && line[i] !== "\t" && line[i] !== "\r") {
+        if (line[i] === '"') throw new Error("a quote inside a bare word");
+        i++;
+      }
+      words.push(line.slice(start, i));
+    }
   }
+  return words;
+}
+
+/** The uri of a pin line (or of a `pin_clear` line), with the verb or without: its first word after the verb. */
+export function pinLineUri(line: string): string | undefined {
+  const words = pinWords(line);
+  if (words[0] === PIN_VERB || words[0] === "pin_clear") words.shift();
+  return words[0];
+}
+
+/** The line that takes a pin away: the uri is one word. */
+export function pinClearLine(uri: string): string {
+  return `pin_clear ${pinWord(uri)}`;
+}
+
+/**
+ * The line of one pin, or `undefined` when the integrity block is not a whole pin. The uri is one word, quoted when it
+ * holds a space. A file path inside the bundle cannot hold whitespace, a comma or an equals sign (the protocol's PATH
+ * limit: they are the separators of the words of a pin), so a plugin with such a file has no pin, refused by name.
+ */
+export function pinLine(entry: PinEntry): string | undefined {
   const { files, layout } = entry.integrity;
+  const uri = pinWord(entry.uri);
+  for (const f of files ?? []) {
+    const bad = /[,="\s]/.exec(f.path);
+    if (bad !== null) throw new Error(`${entry.uri}: the file ${JSON.stringify(f.path)} holds ${JSON.stringify(bad[0])}, which a pinned path cannot (a separator of the words of a pin, or a quote)`);
+  }
   if (files === undefined || files.length === 0 || layout === undefined) return undefined;
   const list = files.map((f) => `${f.path}=${f.sha256}`).join(",");
   const verdict = entry.verdict === undefined ? "" : ` ${PIN_VERDICT_KEY}${entry.verdict}`;
-  return `${PIN_VERB} ${entry.uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}`;
+  const pool = entry.pool === undefined || entry.verdict === "refused" ? "" : ` ${PIN_POOL_KEY}${entry.pool}`;
+  return `${PIN_VERB} ${uri} ${list} ${layout.scheme}:${layout.sha256}${verdict}${pool}`;
 }
 
 /** hostd's uri of a CLAP plugin the prober loaded: its file as it was handed, made absolute, and its id. */
@@ -82,7 +157,7 @@ export interface PinsFile {
   readonly written: readonly string[];
   /** The uris of plugins that took no whole pin: they have no line. */
   readonly skipped: readonly string[];
-  /** The uris refused because a word of their line has whitespace in it, each with the reason: they have no line. */
+  /** The uris refused because a word of their line cannot be a word (a control character), each with the reason: they have no line. */
   readonly refused: readonly { readonly uri: string; readonly problem: string }[];
 }
 
@@ -175,6 +250,7 @@ export interface ParsedPin {
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
   readonly layout: { readonly scheme: string; readonly sha256: string };
   readonly verdict?: PinVerdict;
+  readonly pool?: PinPool;
 }
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -185,11 +261,11 @@ const HEX = /^[0-9a-f]{64}$/;
  * 64 lowercase hex digits, a layout without a scheme, a verdict outside the vocabulary, a path named twice).
  */
 export function parsePinLine(line: string): ParsedPin | undefined {
-  const words = line.trim().split(/\s+/).filter((w) => w !== "");
+  const words = pinWords(line);
   if (words.length === 0 || words[0]!.startsWith("#")) return undefined;
   if (words[0] === PIN_VERB) words.shift();
-  if (words.length !== 3 && words.length !== 4) throw new Error(`a pin line has 3 or 4 words, not ${words.length}`);
-  const [uri, list, layout, verdictWord] = words as [string, string, string, string | undefined];
+  if (words.length < 3 || words.length > 5) throw new Error(`a pin line has 3 to 5 words, not ${words.length}`);
+  const [uri, list, layout, ...optional] = words as [string, string, string, ...string[]];
   const files = list.split(",").map((item) => {
     const eq = item.lastIndexOf("=");
     if (eq < 0) throw new Error(`${item}: no =`);
@@ -205,10 +281,27 @@ export function parsePinLine(line: string): ParsedPin | undefined {
   const colon = layout.lastIndexOf(":");
   if (colon <= 0 || !HEX.test(layout.slice(colon + 1))) throw new Error(`${layout}: not a layout pin`);
   let verdict: PinVerdict | undefined;
-  if (verdictWord !== undefined) {
-    const word = verdictWord.startsWith(PIN_VERDICT_KEY) ? verdictWord.slice(PIN_VERDICT_KEY.length) : "";
-    if (!(PIN_VERDICTS as readonly string[]).includes(word)) throw new Error(`${verdictWord}: not a verdict`);
-    verdict = word as PinVerdict;
+  let pool: PinPool | undefined;
+  for (const word of optional) {
+    if (word.startsWith(PIN_VERDICT_KEY)) {
+      if (verdict !== undefined) throw new Error(`${word}: a second verdict`);
+      const value = word.slice(PIN_VERDICT_KEY.length);
+      if (!(PIN_VERDICTS as readonly string[]).includes(value)) throw new Error(`${word}: not a verdict`);
+      verdict = value as PinVerdict;
+    } else if (word.startsWith(PIN_POOL_KEY)) {
+      if (pool !== undefined) throw new Error(`${word}: a second pool word`);
+      const value = word.slice(PIN_POOL_KEY.length);
+      if (!(PIN_POOLS as readonly string[]).includes(value)) throw new Error(`${word}: not a pool word`);
+      pool = value as PinPool;
+    } else {
+      throw new Error(`${word}: not a word of a pin`);
+    }
   }
-  return { uri, files, layout: { scheme: layout.slice(0, colon), sha256: layout.slice(colon + 1) }, ...(verdict === undefined ? {} : { verdict }) };
+  return {
+    uri,
+    files,
+    layout: { scheme: layout.slice(0, colon), sha256: layout.slice(colon + 1) },
+    ...(verdict === undefined ? {} : { verdict }),
+    ...(pool === undefined ? {} : { pool }),
+  };
 }

@@ -18,7 +18,7 @@ import { HOSTING_CODE } from "./hosting-codes.js";
 import { HOST_PROFILES, JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import type { AdmissionRuns } from "./host-admission.js";
 import { GRID_FULL, GRID_HOSTS, cellKey, gridCells } from "./measurement-grid.js";
-import { MEMORY_BOUND_MECHANISM, PROBE_OOM, memoryBoundOf, outOfMemory, parseMemoryLimit, defaultMemoryLimit } from "./memory-bound.js";
+import { MEMORY_BOUND_MECHANISM, MEMORY_CGROUP_MECHANISM, PROBE_MEMORY_LIMIT, PROBE_OOM, memoryBoundOf, outOfMemory, parseMemoryLimit, defaultMemoryLimit } from "./memory-bound.js";
 import { judgeProbeOutput } from "./probe-judge.js";
 import { mergeProbeRuns } from "./probe-merge.js";
 import { fixtureJson } from "./probe-output-fixtures.js";
@@ -275,9 +275,16 @@ const pathRunner = (process.env["PATH"] ?? "").split(":").map((d) => join(d, "pl
 const REAL_RUNNER = process.env[PROBE_RUNNER_ENV] || pathRunner;
 const LIVE = REAL_RUNNER !== undefined && ["clap-qualify", "lv2_measure", "rt_interpose.so", "fixtures/rt-safe.clap", "fixtures-faulty/hogs-memory.clap"].every((f) => existsSync(join(BUILD, f)));
 
+const PROBE_RUNNER_REQUIRED_ENV = "OMX_PROBE_RUNNER_REQUIRED";
+const LIVE_NEEDS = "no plugin-hostd-probe (OMX_PROBE_RUNNER or PATH) or no native/build: make -C native deps all";
+
 function live(name: string, body: () => void): void {
   it(name, { timeout: 300_000 }, (ctx) => {
-    if (!LIVE) ctx.skip("no plugin-hostd-probe (OMX_PROBE_RUNNER or PATH) or no native/build: make -C native deps all");
+    if (!LIVE) {
+      // CI installs the runner and builds the tools, so a skip there would be a green that measured nothing
+      if (process.env[PROBE_RUNNER_REQUIRED_ENV]) throw new Error(`${PROBE_RUNNER_REQUIRED_ENV} is set and ${LIVE_NEEDS}`);
+      ctx.skip(LIVE_NEEDS);
+    }
     body();
   });
 }
@@ -329,7 +336,15 @@ describe("live: the real runner measures the full grid, an LV2 plugin like a CLA
     expect(existsSync(w.recordPath)).toBe(true);
     const at = (key: string) => w.record.measurements.grid.find((p) => cellKey(p) === key);
     expect(at("48000/256")?.outcome).toBe("probe.ok");
-    expect(at("192000/128")).toMatchObject({ rate: 192000, quantum: 128, outcome: PROBE_OOM, memoryLimit: { bytes: bound.bytes, mechanism: MEMORY_BOUND_MECHANISM } });
-    expect(run!.judgment.output.steps.some((s) => s.exitStatus === MEMORY_BOUND_EXIT_STATUS)).toBe(true);
+    // the runner's own answer: memory.max where this machine hands the runner the controller, RLIMIT_DATA where it does not
+    const kernel = spawnSync(REAL_RUNNER!, ["run", "--list-limits", target.binaryPath, target.uri], { encoding: "utf8" }).stdout.split("\n").some((l) => l.startsWith("memory\tcgroup\t"));
+    expect(at("192000/128")).toMatchObject({
+      rate: 192000,
+      quantum: 128,
+      outcome: kernel ? PROBE_MEMORY_LIMIT : PROBE_OOM,
+      memoryLimit: { bytes: bound.bytes, mechanism: kernel ? MEMORY_CGROUP_MECHANISM : MEMORY_BOUND_MECHANISM },
+    });
+    const steps = run!.judgment.output.steps;
+    expect(kernel ? steps.some((s) => s.outcome === PROBE_MEMORY_LIMIT) : steps.some((s) => s.exitStatus === MEMORY_BOUND_EXIT_STATUS)).toBe(true);
   });
 });

@@ -8,6 +8,7 @@
  *   clap-qualify --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>]
  *                [--probe-notes <n>] [--hold <n>] <path.clap> [<id>]
  *   clap-qualify --json <path>...      the scan (below), the document the CLAP loader reads
+ *   clap-qualify --asks-thread-pool <path.clap> <id>   whether the plugin offers clap.thread-pool, one JSON line
  *
  * Per rate the plugin is activated, its latency read, an impulse run through `process()` to see
  * where it lands, and then every parameter is swept across its range through events while noise
@@ -67,9 +68,11 @@
 #include <unistd.h>
 
 #include <clap/clap.h>
-#include <plugin-hostd/pin.h>
+#include <plugin-db/pin.h>
 #include <plugin-hostd/protocol.h>
+#include <omxcontract/omx_json_write.h>
 
+#include "pool-host.h"
 #include "rt-interpose.h"
 
 #define MAX_RATES 16
@@ -303,13 +306,24 @@ static bool host_unregister_fd(const clap_host_t *h, int fd) {
 }
 static const clap_host_posix_fd_support_t g_posix_fd_support = { host_register_fd, host_modify_fd, host_unregister_fd };
 
-/* thread-pool: [audio-thread], so gated on the process() window rather than on_main_thread; every task runs before
- * the call returns, one after another on the calling thread, exactly as omx-clap-core's own host object runs them */
+/* thread-pool: [audio-thread], so gated on the process() window rather than on_main_thread. Without --pool every task
+ * runs before the call returns, one after another on the calling thread, exactly as omx-clap-core's own host object runs
+ * them; with it, on the helpers of pool-host.c too, and the call returns when every task has ended. The pool is for the
+ * interposer's count of what the tasks do off the audio thread: a run with a pool takes no cost figure. */
+static void pool_exec_task(void *ctx, uint32_t task) {
+  (void)ctx;
+  g_host.plugin_thread_pool->exec(g_host.plugin, task);
+}
+
 static bool host_request_exec(const clap_host_t *h, uint32_t num_tasks) {
   (void)h;
   if (!g_host.in_process || !g_host.plugin_thread_pool || !g_host.plugin_thread_pool->exec || g_host.in_exec) return false;
   g_host.in_exec = 1;
-  for (uint32_t i = 0; i < num_tasks; i++) g_host.plugin_thread_pool->exec(g_host.plugin, i);
+  if (pool_helper_count() == 0 || num_tasks < 2 || num_tasks > POOL_TASKS_MAX) {
+    for (uint32_t i = 0; i < num_tasks; i++) g_host.plugin_thread_pool->exec(g_host.plugin, i);
+  } else {
+    pool_run(pool_exec_task, NULL, num_tasks);
+  }
   g_host.in_exec = 0;
   return true;
 }
@@ -576,6 +590,8 @@ struct options {
   /* the notes the cost arm holds for an instrument that declares no voice capacity (--probe-notes), and
    * the count it holds whatever the plugin declares (--hold); 0 when not given */
   uint32_t probe_notes, hold;
+  /* the helper threads of the pool the host offers (--pool), 0 for none: every task then runs on the calling thread */
+  uint32_t pool_helpers;
   const char *path; /* as invoked, before realpath: the name the pin holds */
   const char *id;
 };
@@ -1119,9 +1135,11 @@ static int utf8_length(const unsigned char *s) {
   return 0;
 }
 
-/* a JSON string; a byte that is no UTF-8 becomes ? */
+/* a JSON string, each byte spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>); a byte that is no
+ * UTF-8 becomes ? */
 static void put_string(const char *s) {
   const unsigned char *p = (const unsigned char *)(s ? s : "");
+  char esc[OMX_JSON_ESCAPE_MAX];
   fputc_out('"');
   while (*p) {
     const int n = utf8_length(p);
@@ -1132,9 +1150,7 @@ static void put_string(const char *s) {
       fwrite(p, 1, (size_t)n, g_out);
       p += n;
     } else {
-      if (*p < 0x20 || *p == 0x7F) fprintf(g_out, "\\u%04x", *p);
-      else if (*p == '"' || *p == '\\') fprintf(g_out, "\\%c", *p);
-      else fputc_out(*p);
+      fwrite(esc, 1, omx_json_escape_byte(*p, esc), g_out);
       p++;
     }
   }
@@ -1770,8 +1786,8 @@ static uint32_t param_rows(const clap_plugin_t *p, struct param_row *rows)
 
 /* Each rate is judged in an instance of its own, made for it, as a host at a fixed rate makes one: the instance before is
  * destroyed and a new one made and initialised, and the rows of its parameters read again. A plugin that cannot be made
- * again leaves *ok 0 and NULL. Reactivating one instance at another rate is a path of its own that hosts at a fixed rate
- * never take, and it decides nothing here (docs/notes/lsp-reactivation-at-another-rate.md). */
+ * again leaves *ok 0 and NULL. A host whose rate changes recreates the instance, carrying its state, so one instance
+ * activated again at another rate is not what a rate is judged by. */
 static const clap_plugin_t *instance_for_rate(const clap_plugin_factory_t *factory, const clap_plugin_descriptor_t *d,
                                               const clap_plugin_t *before, struct param_row *rows, uint32_t *n_rows, int *ok)
 {
@@ -1845,6 +1861,8 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
   uint32_t n_rows = param_rows(p, rows);
   f.params = n_rows;
 
+  /* the helpers exist before the interposer counts anything, and end after the last count */
+  if (o->pool_helpers) pool_start(o->pool_helpers);
   struct interposer ip;
   f.interposer = interposer_find(&ip);
   if (f.interposer) ip.reset();
@@ -1885,12 +1903,23 @@ static int qualify_plugin(const clap_plugin_factory_t *factory, const clap_plugi
       f.cost[r].unmeasured = "notes-unplayable", f.cost[r].detail = "a note input in no dialect the prober speaks";
       continue;
     }
+    if (o->pool_helpers) {
+      f.cost[r].unmeasured = "not-attempted", f.cost[r].detail = "a run with a thread pool counts what the tasks do and times nothing";
+      continue;
+    }
     if (!(p = instance_for_rate(factory, d, p, rows, &n_rows, &f.headless_ok))) break;
     cost_rate(p, o->rates[r], o->frames, o->blocks, rows, n_rows, clap_dialect, o, &f, r);
   }
   if (p) p->destroy(p);
+  if (o->pool_helpers) pool_stop();
   put_head(d->id, path, sha256);
   put_facts(d, &f, o->frames);
+  if (o->pool_helpers)
+  {
+    unsigned long long requests, tasks, on_helpers;
+    pool_stats(&requests, &tasks, &on_helpers);
+    fprintf(g_out, ",\"threadPool\":{\"helpers\":%u,\"requests\":%llu,\"tasks\":%llu,\"tasksOnHelpers\":%llu}", o->pool_helpers, requests, tasks, on_helpers);
+  }
   put_integrity(o->path, d->version, sha256, &pin);
   fprintf(g_out, "}\n");
   return f.headless_ok ? 0 : 2;
@@ -1936,15 +1965,53 @@ static int parse_offer(const char *s) {
 static int usage(const char *name) {
   fprintf(stderr,
           "usage: %s --rates <r,...> [--block <frames>] [--blocks <n>] [--offer <ext,...>] [--probe-notes <n>] [--hold <n>]\n"
+          "          [--pool <helpers>]   (helper threads for clap.thread-pool, 1 to " STR(POOL_HELPERS_MAX) ")\n"
           "          <path.clap> [<id>]   (--probe-notes and --hold: 1 to " STR(NOTE_KEYS_MAX) " notes)\n"
-          "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n",
-          name, name);
+          "       %s --json <path>...   (the scan: a .clap file, or a directory searched for them)\n"
+          "       %s --asks-thread-pool <path.clap> <id>   (whether the plugin offers clap.thread-pool: {\"threadPool\":true|false})\n",
+          name, name, name);
   return 2;
+}
+
+/* Whether a plugin asks for the host's thread pool: it offers the clap.thread-pool extension after init. The host that
+ * asks is the prober's own, which offers the pool; the answer is one JSON line. Exit 2 when the file or the plugin does
+ * not load. A plugin that hangs in init ends on the alarm, as the scan's child does. */
+static int asks_thread_pool(const char *path, const char *id) {
+  alarm(SCAN_TIMEOUT_S);
+  fflush(stdout);
+  const int out = dup(STDOUT_FILENO);
+  FILE *lines = out >= 0 && dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 ? fdopen(out, "w") : NULL;
+  if (lines) g_out = lines;
+  void *so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (!so) {
+    fprintf(stderr, "%s: %s\n", path, dlerror());
+    return 2;
+  }
+  const clap_plugin_entry_t *entry = dlsym(so, "clap_entry");
+  if (!entry || !clap_version_is_compatible(entry->clap_version) || !entry->init(path)) {
+    fprintf(stderr, "%s: no usable clap_entry\n", path);
+    return 2;
+  }
+  const clap_plugin_factory_t *factory = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
+  const clap_plugin_t *p = factory ? factory->create_plugin(factory, &g_clap_host, id) : NULL;
+  if (!p || !p->init(p)) {
+    if (p) p->destroy(p);
+    fprintf(stderr, "%s: %s does not create or init\n", path, id);
+    entry->deinit();
+    return 2;
+  }
+  const int asks = p->get_extension(p, CLAP_EXT_THREAD_POOL) != NULL;
+  p->destroy(p);
+  entry->deinit();
+  fprintf(g_out, "{\"threadPool\":%s}\n", asks ? "true" : "false");
+  fflush(g_out);
+  return 0;
 }
 
 int main(int argc, char **argv) {
   g_out = stdout;
   if (argc >= 2 && !strcmp(argv[1], "--json")) return scan(argc - 2, argv + 2);
+  if (argc >= 2 && !strcmp(argv[1], "--asks-thread-pool")) return argc == 4 ? asks_thread_pool(argv[2], argv[3]) : usage(argv[0]);
   struct options o = { .n_rates = 0, .frames = 512, .blocks = 512 };
   int a = 1;
   for (; a < argc && argv[a][0] == '-'; a += 2) {
@@ -1959,6 +2026,8 @@ int main(int argc, char **argv) {
       if (parse_offer(argv[a + 1]) != 0) return usage(argv[0]);
     } else if (!strcmp(argv[a], "--probe-notes")) {
       if (parse_u32(argv[a + 1], &o.probe_notes) != 0 || o.probe_notes > NOTE_KEYS_MAX) return usage(argv[0]);
+    } else if (!strcmp(argv[a], "--pool")) {
+      if (parse_u32(argv[a + 1], &o.pool_helpers) != 0 || o.pool_helpers > POOL_HELPERS_MAX) return usage(argv[0]);
     } else if (!strcmp(argv[a], "--hold")) {
       if (parse_u32(argv[a + 1], &o.hold) != 0 || o.hold > NOTE_KEYS_MAX) return usage(argv[0]);
     } else {

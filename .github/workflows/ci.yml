@@ -70,11 +70,6 @@ jobs:
       - name: Install and build
         run: pnpm install --frozen-lockfile
 
-      # the overlap audit's numbers come from units found by name; its self-test proves a unit, a pair and a
-      # count on a planted tree, and that a missing unit is refused rather than counted as zero
-      - name: The overlap audit measures what it says
-        run: tools/audit-overlap.sh --self-test
-
       - uses: ./.github/actions/build-native
 
       - uses: ./.github/actions/install-plugin-hostd

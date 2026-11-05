@@ -29,13 +29,14 @@ import { clapSearchPath, parseClapScan } from "./clap-loader.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
 import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
-import { judgmentPinEntries, pinsFile, type PinEntry } from "./pins-file.js";
+import { judgmentPinEntries, pinClearLine, pinLineUri, pinsFile, type PinEntry } from "./pins-file.js";
+import { POOL_RESULT, completePool, judgePoolRun, pinAfterPool, pinFromRecordWithPool, poolEnv, spawnedPoolRunner, type PoolRunner } from "./qualify-pool.js";
 import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
 import type { Judgment } from "./probe-judge.js";
 import { qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { GRID_FULL, parseGridSpec, type GridSpec } from "./measurement-grid.js";
 import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./qualify-adapter-pass.js";
-import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, pinFromRecord, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
+import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
 import { lv2World, rejudgeRecord, rejudgeState, rejudgeToolName, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
 import { QUALIFICATION_RECORD_SCHEMA, latencyNeverTaken, rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
@@ -57,7 +58,7 @@ export const ZYNTHIAN_LV2_DIRS = ["/zynthian/zynthian-plugins/lv2", "/zynthian/z
 export interface SyncSetting {
   readonly key: string;
   readonly meaning: string;
-  /** The default as `--help` and the README print it. */
+  /** The default as `--help` and docs/overview.md print it. */
   readonly default: string;
 }
 
@@ -142,6 +143,8 @@ export interface SyncArgs {
   readonly adapterOnly: boolean;
   /** `--isolated-only`: the missing isolated step of each record already judged, extending its run. */
   readonly isolatedOnly: boolean;
+  /** `--pool-only`: the pool step of each CLAP record already judged that owes it, extending its run and giving its pin the word. */
+  readonly poolOnly: boolean;
   readonly help: boolean;
   /** The settings given as flags, by key. */
   readonly values: ReadonlyMap<string, string>;
@@ -162,6 +165,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
   let memoryOnly = false;
   let adapterOnly = false;
   let isolatedOnly = false;
+  let poolOnly = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -174,6 +178,7 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
     else if (a === "--memory-only") memoryOnly = true;
     else if (a === "--adapter-only") adapterOnly = true;
     else if (a === "--isolated-only") isolatedOnly = true;
+    else if (a === "--pool-only") poolOnly = true;
     else if (a === "--help") help = true;
     else if (a === "--grid-hosts") values.set("grid", "hosts");
     else if (a === "--config" || byFlag.has(a)) {
@@ -183,9 +188,9 @@ export function parseSyncArgs(argv: readonly string[]): { ok: true; args: SyncAr
       else values.set(byFlag.get(a)!, v);
     } else return { ok: false, error: `unknown argument ${a}` };
   }
-  if (rejudge && (memoryOnly || adapterOnly || isolatedOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --adapter-only, --force and --refresh-pins" };
-  if ([memoryOnly, adapterOnly, isolatedOnly, refreshPinsOnly].filter(Boolean).length > 1) return { ok: false, error: "--memory-only, --adapter-only and --refresh-pins are different runs: one at a time" };
-  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, adapterOnly, isolatedOnly, help, values } };
+  if (rejudge && (memoryOnly || adapterOnly || isolatedOnly || poolOnly || force || refreshPinsOnly)) return { ok: false, error: "--rejudge measures nothing: it goes with none of --memory-only, --adapter-only, --isolated-only, --pool-only, --force and --refresh-pins" };
+  if ([memoryOnly, adapterOnly, isolatedOnly, poolOnly, refreshPinsOnly].filter(Boolean).length > 1) return { ok: false, error: "--memory-only, --adapter-only, --isolated-only, --pool-only and --refresh-pins are different runs: one at a time" };
+  return { ok: true, args: { ...(config === undefined ? {} : { config }), system, force, noDistributed, noWait, refreshPins: refreshPinsOnly, rejudge, memoryOnly, adapterOnly, isolatedOnly, poolOnly, help, values } };
 }
 
 export function syncHelpText(): string {
@@ -202,6 +207,7 @@ export function syncHelpText(): string {
     "  --rejudge                           derive every record's verdicts, tiers and pin again from the figures it holds; measures nothing",
     "  --memory-only                       measure only the footprint of each recorded plugin at the Pi's cells and merge it; with --force, those already merged too",
     "  --isolated-only                     run only the isolated step each record still owes, adding it to the record's run",
+    "  --pool-only                         run only the pool step each CLAP record still owes: a plugin that asks for the thread pool is run with it off and on, and its pin gets pool=cores or pool=off",
     "  --adapter-only                      run each LV2 plugin only under omx-clap-host's LV2 adapter at the Pi's cells, on private JACK servers, and merge it; with --force, those already done too",
     "  --grid-hosts                        the fast grid, the same as --grid hosts (7 cells with the shipped hosts)",
     "  --help                              this text",
@@ -640,6 +646,8 @@ export interface SyncContext {
   readonly pinFilesRun?: PinFilesRun;
   /** The isolated step, a stand-in in tests. */
   readonly isolatedRunner?: IsolatedRunner;
+  /** The pool step, a stand-in in tests. */
+  readonly poolRunner?: PoolRunner;
 }
 
 /**
@@ -756,6 +764,13 @@ function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgmen
         outcome = "qualified";
         code = undefined;
       }
+    }
+    // the pool is for a CLAP plugin that runs: the thread pool is granted by measuring it, here and nowhere else
+    if (judgment.output.plugin.format === "clap" && pin !== undefined && pin.verdict !== "refused" && outcome === "qualified") {
+      const runner = ctx.poolRunner ?? spawnedPoolRunner();
+      const step = judgePoolRun(runner(pin.uri, isolatedCell(record, host), poolEnv(ctx.env, ctx.settings.budgetS)));
+      steps.push(step);
+      pin = pinAfterPool(pin, step);
     }
     rewriteRecord(recordPath, { ...record, run: { id: judgment.output.run.id, steps } });
     const plugin: SyncPlugin = { uri: pin?.uri ?? judgment.output.plugin.id, outcome, ...(code === undefined ? {} : { code }), ...(pin === undefined ? {} : { pin }), record: recordPath };
@@ -908,7 +923,7 @@ export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly sta
           // a plugin the isolated step already decided but the state holds no pin for: the record keeps the bytes and the
           // step, and the pin follows them (hostd names the files, as at every other pin)
           if (p.pin !== undefined) return p;
-          const rebuilt = withHostdFiles(ctx, pinFromRecord(record));
+          const rebuilt = withHostdFiles(ctx, pinFromRecordWithPool(record));
           if (rebuilt === undefined) return p;
           count.repinned++;
           ctx.log(`${p.uri}: pinned again from its record (isolated step ${rebuilt.verdict ?? "undecided"})`);
@@ -929,6 +944,43 @@ export function isolatedPass(ctx: SyncContext, state: SyncState): { readonly sta
     };
   }
   return { ...count, state: count.isolated + count.refused + count.notRun + count.repinned === 0 ? state : { ...state, entries } };
+}
+
+/**
+ * The pool steps the CLAP records of a state still owe, each extending its record's run. A plugin's pin takes the pool word
+ * of its step (`cores`, or `off` for a plugin that was measured and gains nothing) and none for a plugin that does not ask
+ * for the pool. A step that could not run stays owed: the next pass tries it again.
+ */
+export function poolPass(ctx: SyncContext, state: SyncState): { readonly state: SyncState; readonly cores: number; readonly off: number; readonly notAsked: number; readonly notRun: number } {
+  const count = { cores: 0, off: 0, notAsked: 0, notRun: 0 };
+  const runner = ctx.poolRunner ?? spawnedPoolRunner();
+  const host = ctx.settings.hostProfile.id;
+  const entries: Record<string, SyncEntry> = {};
+  for (const [key, entry] of Object.entries(state.entries)) {
+    entries[key] = {
+      ...entry,
+      plugins: entry.plugins.map((p) => {
+        if (p.record === undefined || !p.record.endsWith(".qualification.json") || p.pin === undefined || p.pin.verdict === "refused") return p;
+        const path = join(ctx.settings.qualificationDir, basename(p.record));
+        let record: QualificationRecord;
+        try {
+          record = JSON.parse(readFileSync(path, "utf8")) as QualificationRecord;
+        } catch {
+          ctx.log(`${p.uri}: its record does not read; no pool step`);
+          return p;
+        }
+        const done = completePool(path, record, p.pin.uri, isolatedCell(record, host), runner, poolEnv(ctx.env, ctx.settings.budgetS));
+        if (done === undefined) return p;
+        ctx.log(`${p.uri}: pool step ${done.step.result}${done.step.code === undefined ? "" : ` (${done.step.code})`}`);
+        if (done.step.result === POOL_RESULT.cores) count.cores++;
+        else if (done.step.result === POOL_RESULT.off) count.off++;
+        else if (done.step.result === POOL_RESULT.notAsked) count.notAsked++;
+        else count.notRun++;
+        return { ...p, pin: pinAfterPool(p.pin, done.step)! };
+      }),
+    };
+  }
+  return { ...count, state: count.cores + count.off + count.notAsked + count.notRun === 0 ? state : { ...state, entries } };
 }
 
 // --- the distributed records ----------------------------------------------------------------------------------------
@@ -1034,7 +1086,7 @@ export function syncPinsText(state: SyncState): string {
 /** The pin lines, by uri. */
 function pinLinesOf(text: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const line of text.split("\n")) if (line !== "" && !line.startsWith("#")) out.set(line.split(" ")[1]!, line);
+  for (const line of text.split("\n")) if (line !== "" && !line.startsWith("#")) out.set(pinLineUri(line)!, line);
   return out;
 }
 
@@ -1235,6 +1287,8 @@ export interface SyncSummary {
   readonly machineFailure?: string;
   /** `--isolated-only`: how the steps ended. */
   readonly isolatedOnly?: { readonly isolated: number; readonly refused: number; readonly notRun: number };
+  /** `--pool-only`: the plugins granted the thread pool, those measured and not granted it, those that do not ask for it, and those the step could not run for. */
+  readonly poolOnly?: { readonly cores: number; readonly off: number; readonly notAsked: number; readonly notRun: number };
   /** `--adapter-only`: the plugins run, those done already at these host versions, and those whose host could not be run. */
   readonly adapterOnly?: { readonly measured: number; readonly already: number; readonly failed: number };
 }
@@ -1320,7 +1374,7 @@ export function pluginCountsLine(c: PluginCounts): string {
 }
 
 export function summaryLine(s: SyncSummary): string {
-  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}${s.adapterOnly === undefined ? "" : `, adapter run ${String(s.adapterOnly.measured)}, already ${String(s.adapterOnly.already)}, failed ${String(s.adapterOnly.failed)}`}, ${s.seconds.toFixed(1)} s`;
+  return `qualified ${String(s.qualified)}, skipped ${String(s.skipped)}, refused ${String(s.refused)}, crashed ${String(s.crashed)}, hung ${String(s.hung)}, unmeasured ${String(s.unmeasured)}, distributed ${String(s.distributed)}${s.refreshed ? `, pins refreshed ${String(s.refreshed)}` : ""}${s.rejudge === undefined ? "" : `, rejudged ${String(s.rejudge.changed)}, unchanged ${String(s.rejudge.unchanged)}, owing ${String(s.rejudge.owing)}`}${s.memoryOnly === undefined ? "" : `, memory measured ${String(s.memoryOnly.measured)}, already ${String(s.memoryOnly.already)}, failed ${String(s.memoryOnly.failed)}, leaks not measured`}${s.poolOnly === undefined ? "" : `, pool granted ${String(s.poolOnly.cores)}, off ${String(s.poolOnly.off)}, not asked ${String(s.poolOnly.notAsked)}, not run ${String(s.poolOnly.notRun)}`}${s.adapterOnly === undefined ? "" : `, adapter run ${String(s.adapterOnly.measured)}, already ${String(s.adapterOnly.already)}, failed ${String(s.adapterOnly.failed)}`}, ${s.seconds.toFixed(1)} s`;
 }
 
 /** The exit status `flock -n` returns when the lock is held (-E), told apart from a failure of flock itself. */
@@ -1374,6 +1428,10 @@ export interface SyncRunOptions {
   readonly isolatedRunner?: IsolatedRunner;
   /** `--isolated-only`: take only the isolated steps records still owe. */
   readonly isolatedOnly?: boolean;
+  /** The pool step, a stand-in in tests. */
+  readonly poolRunner?: PoolRunner;
+  /** `--pool-only`: take only the pool steps records still owe. */
+  readonly poolOnly?: boolean;
   /** `--adapter-only`: take only the adapter runs; `force` takes those already done again. */
   readonly adapterOnly?: boolean;
   /** Stand-ins for the pass's hosts, in tests. */
@@ -1442,6 +1500,7 @@ function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     ...(b.rejudge === undefined ? (a.rejudge === undefined ? {} : { rejudge: a.rejudge }) : { rejudge: b.rejudge }),
     ...(b.memoryOnly === undefined ? (a.memoryOnly === undefined ? {} : { memoryOnly: a.memoryOnly }) : { memoryOnly: b.memoryOnly }),
     ...(b.isolatedOnly === undefined ? (a.isolatedOnly === undefined ? {} : { isolatedOnly: a.isolatedOnly }) : { isolatedOnly: b.isolatedOnly }),
+    ...(b.poolOnly === undefined ? (a.poolOnly === undefined ? {} : { poolOnly: a.poolOnly }) : { poolOnly: b.poolOnly }),
     ...(b.adapterOnly === undefined ? (a.adapterOnly === undefined ? {} : { adapterOnly: a.adapterOnly }) : { adapterOnly: b.adapterOnly }),
   };
 }
@@ -1467,7 +1526,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
-    const ctx: SyncContext = { settings, env, log, ...(options.pinFilesRun === undefined ? {} : { pinFilesRun: options.pinFilesRun }), ...(options.isolatedRunner === undefined ? {} : { isolatedRunner: options.isolatedRunner }) };
+    const ctx: SyncContext = { settings, env, log, ...(options.pinFilesRun === undefined ? {} : { pinFilesRun: options.pinFilesRun }), ...(options.isolatedRunner === undefined ? {} : { isolatedRunner: options.isolatedRunner }), ...(options.poolRunner === undefined ? {} : { poolRunner: options.poolRunner }) };
     // the pins first, before the quiet wait and any measurement: an upgrade of plugin-hostd that collects more files
     // than the pins on disk hold refuses those plugins until their pins name them (plugin-qualify#239)
     const fresh = refreshPins(ctx, readSyncState(settings.stateFile, log));
@@ -1486,6 +1545,12 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       if (r.state !== fresh.state) writeFileWhole(settings.stateFile, `${JSON.stringify(r.state, null, 1)}\n`);
       const summary = await sendRefreshed(settings, r.state, fresh.refreshed.length, started, log);
       return { ...summary, isolatedOnly: { isolated: r.isolated, refused: r.refused, notRun: r.notRun } };
+    }
+    if (options.poolOnly === true) {
+      const r = poolPass(ctx, fresh.state);
+      if (r.state !== fresh.state) writeFileWhole(settings.stateFile, `${JSON.stringify(r.state, null, 1)}\n`);
+      const summary = await sendRefreshed(settings, r.state, fresh.refreshed.length, started, log);
+      return { ...summary, poolOnly: { cores: r.cores, off: r.off, notAsked: r.notAsked, notRun: r.notRun } };
     }
     if (options.adapterOnly === true) {
       const r: AdapterPassResult = adapterPass(ctx, fresh.state, { ...options.adapterPass, force: options.force === true });
@@ -1600,7 +1665,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
     if (unreadable) log("a plugin directory could not be read; no record or descriptor is removed this run");
     else for (const f of pruneStale(settings, stateBefore, state)) log(`${f}: removed, its plugin is gone or changed`);
     // a plugin that was pinned and is not any more is also forgotten by a running daemon
-    const changed = [...changedPinLines(before, after), ...removedPinUris(before, after).map((uri) => `pin_clear ${uri}`)];
+    const changed = [...changedPinLines(before, after), ...removedPinUris(before, after).map(pinClearLine)];
     const sent = await sendPins(settings.hostdPort, settings.hostdFeedbackPort, changed);
     if ("unsent" in sent) {
       const why = {
@@ -1611,7 +1676,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
       log(`${why}; the ${String(changed.length)} changed pins apply at its next start, from the pin file`);
     }
     const replies = "replies" in sent ? sent.replies : [];
-    for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${changed[i]!.split(" ")[1]!}`);
+    for (let i = 0; i < replies.length; i++) if (replies[i] !== "resp 0") log(`plugin-hostd answered ${replies[i]!} to ${pinLineUri(changed[i]!)!}`);
     const taken = replies.filter((r) => r === "resp 0").length;
     for (const [why, n] of byMachine) if (n > 1) log(`${String(n)} plugins unmeasured by the machine (${why}); the first is listed above`);
     const [only] = byMachine.size === 1 ? [...byMachine] : [];

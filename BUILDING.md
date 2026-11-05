@@ -41,8 +41,10 @@ with make. The CLAP headers come from `pkg-config clap` (Fedora
 `clap-devel`), plugin-hostd's `pin.h` from `pkg-config plugin-hostd`, lilv and the LV2 headers from
 `pkg-config lilv-0` (`lilv-devel`, `liblilv-dev` and `lv2-dev`). Where the CLAP and plugin-hostd
 headers are not installed, `make deps` fetches both at their pinned release tags into `native/deps/`.
-The measurer's sample rates are omx-contract's `OMX_DECLARED_RATES`: the header comes from
-`pkg-config omx-contract` (`omx-contract-devel`, `libomx-contract-dev`), else `make deps` fetches it.
+The measurer's sample rates are omx-contract's `OMX_DECLARED_RATES`, and every tool spells its JSON
+string literals through omx-contract's one writer, `<omxcontract/omx_json_write.h>`: the headers come
+from `pkg-config omx-contract` (`omx-contract-devel`, `libomx-contract-dev`, 3.9.1 or later), else
+`make deps` fetches them.
 Its host features are omx-clap-core's LV2 feature provider, the static `libomx-clap-lv2` and its
 header: `pkg-config omx-clap-lv2` (`omx-clap-lv2-devel`, `libomx-clap-lv2-dev`), else `make deps`
 fetches omx-clap-core at the packages' floor, builds the archive against the fetched CLAP headers and
@@ -90,8 +92,8 @@ dpkg-buildpackage -b -uc -us                      # the DEB
 Both are built per architecture: they carry the CLAP prober, the LV2 measurer and their interposer,
 in `/usr/libexec/plugin-qualify/` on Fedora and `/usr/lib/plugin-qualify/` on Debian. Their headers
 come from packages, never from `make deps`: `clap-devel`, `lilv-devel`, `lv2-devel`,
-`plugin-hostd-devel` and `omx-clap-lv2-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev`,
-`plugin-hostd-dev` and `libomx-clap-lv2-dev` on Debian (`clap-headers`, `plugin-hostd-dev` and
+`plugin-db-devel`, `plugin-hostd-protocol-devel` and `omx-clap-lv2-devel` on Fedora, `clap-headers`, `liblilv-dev`, `lv2-dev`,
+`plugin-db-dev`, `libplugin-hostd-protocol-dev` and `libomx-clap-lv2-dev` on Debian (`clap-headers`, `plugin-db-dev` and
 `libomx-clap-lv2-dev` from the FreeMixer channel). An installed package is
 checked with `packaging/check-installed.sh <rt-safe.clap> <rt-unsafe.clap> <lv2-fixture-dir>`, run
 with nothing set.

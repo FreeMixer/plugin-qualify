@@ -38,7 +38,9 @@ jobs:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
       needs-mod-host: false
-      # plugin-hostd-devel, whose pin.h the CLAP prober builds against, and omx-clap-lv2-devel, the
+      # the channel publishes no fedora 45 tree yet (its noarch repodata answers 404), so the build installs from fc44 only
+      fedora-versions: '["44"]'
+      # plugin-db-devel, whose pin.h the CLAP prober builds against, plugin-hostd-protocol-devel, and omx-clap-lv2-devel, the
       # LV2 measurer's host features
       channel-deps: true
       arch-matrix: ${{ (github.event_name != 'push' && inputs.arm == false) && '["x86_64"]' || '["x86_64", "aarch64"]' }}
@@ -52,7 +54,7 @@ jobs:
     with:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
-      # the CLAP headers from the pin, plugin-hostd-dev (pin.h) from the channel: the CLAP prober's build;
+      # the CLAP headers from the pin, plugin-db-dev (pin.h) and libplugin-hostd-protocol-dev from the channel: the CLAP prober's build;
       # libomx-clap-lv2-dev from the channel: the LV2 measurer's host features
       dependencies: 'clap-headers'
       requires: ''
@@ -81,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { image: 'fedora:44', artifact: plugin-qualify-rpms-x86_64 }
+          - { image: 'fedora:44', artifact: plugin-qualify-rpms-fc44-x86_64 }
           - { image: 'debian:bookworm', artifact: plugin-qualify-debs-bookworm-amd64 }
           - { image: 'debian:trixie', artifact: plugin-qualify-debs-trixie-amd64 }
     steps:
@@ -118,6 +120,11 @@ jobs:
           rpm -q omx-clap-host
           rpm -qf /usr/share/omx-clap-core/ts | grep -q '^omx-clap-core-[0-9]'
           if rpm -qa --qf '%{NAME}\n' | grep -E -- '-devel$'; then echo "plugin-qualify pulled a -devel package"; exit 1; fi
+          # mod-host is only suggested: the install with weak dependencies on does not pull it, so the qualification below
+          # runs on a machine without it
+          rpm -q --suggests plugin-qualify | grep -qx mod-host
+          if rpm -q --recommends --requires plugin-qualify | grep -q mod-host; then echo "plugin-qualify needs or recommends mod-host"; exit 1; fi
+          if rpm -q mod-host; then echo "plugin-qualify pulled mod-host"; exit 1; fi
           dnf_retry --setopt=install_weak_deps=False gcc make pkgconf-pkg-config clap-devel lv2-devel
 
       - name: Prepare the container (Debian)
@@ -140,6 +147,10 @@ jobs:
           dpkg -s omx-clap-host >/dev/null
           dpkg -S /usr/share/omx-clap-core/ts | grep -q '^libomx-clap-core1'
           if dpkg-query -W -f '${Package}\n' | grep -E -- '-dev$'; then echo "plugin-qualify pulled a -dev package"; exit 1; fi
+          # mod-host is only suggested, and the qualification below runs without it
+          dpkg-query -W -f '${Suggests}\n' plugin-qualify | grep -qw mod-host
+          if dpkg-query -W -f '${Depends} ${Recommends}\n' plugin-qualify | grep -qw mod-host; then echo "plugin-qualify needs or recommends mod-host"; exit 1; fi
+          if dpkg -s mod-host >/dev/null 2>&1; then echo "plugin-qualify pulled mod-host"; exit 1; fi
           apt-get install -y --no-install-recommends gcc libc6-dev make pkgconf clap-headers lv2-dev
         env:
           IMAGE: ${{ matrix.image }}

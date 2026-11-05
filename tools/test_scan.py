@@ -1,10 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 """Pure-unit tests for scan.py's owner mapping (no lilv, no rpm needed)."""
+import ast
+import glob
+import json
+import os
+import tempfile
 import types
 import unittest
 
+import descriptors as desc
 import scan as s
+
+TOOLS = os.path.dirname(os.path.abspath(__file__))
 
 
 def fake_run(stdout="", returncode=0):
@@ -117,6 +125,78 @@ class Annotate(unittest.TestCase):
         catalog = [{"uri": "urn:a", "name": "A"}, {"uri": "urn:b", "name": "B"}]
         s.annotate(catalog, self.FakeScanner({"urn:a": {"uri": "urn:a", "name": "A"}}))
         self.assertEqual([e["uri"] for e in catalog], ["urn:a", "urn:b"])
+
+
+class UnitsFromTheSheet(unittest.TestCase):
+    """A port's unit is spelled by omx-contract's units sheet, the owner of the words; no table of units is kept here."""
+
+    class FakePort:
+        def __init__(self, unit):
+            self.unit = unit
+
+        def get_value(self, _uri):
+            return [self.unit] if self.unit is not None else []
+
+    class FakeWorld:
+        def __init__(self, symbols):
+            self.symbols = symbols
+
+        def find_nodes(self, subject, _pred, _obj):
+            return [self.symbols[subject]] if subject in self.symbols else []
+
+    def scanner(self, symbols=None):
+        return types.SimpleNamespace(u={s.UNITS + "unit": s.UNITS + "unit", s.UNITS + "symbol": s.UNITS + "symbol"},
+                                     w=self.FakeWorld(symbols or {}))
+
+    def test_the_catalog_spells_a_unit_as_the_sheet_does(self):
+        words = desc.unit_words()
+        self.assertEqual(words[s.UNITS + "cent"], "cents")
+        for uri, word in words.items():
+            self.assertEqual(s.Scanner.unit_symbol(self.scanner(), self.FakePort(uri)), word)
+            self.assertEqual(s.Scanner.descriptor_unit(self.scanner(), self.FakePort(uri)), word)
+
+    def test_a_unit_the_sheet_has_no_word_for_falls_to_the_plugins_symbol(self):
+        uri = "urn:example#furlong"
+        self.assertNotIn(uri, desc.unit_words())
+        self.assertEqual(s.Scanner.unit_symbol(self.scanner({uri: "fur"}), self.FakePort(uri)), "fur")
+        self.assertEqual(s.Scanner.descriptor_unit(self.scanner({uri: "fur"}), self.FakePort(uri)), "unknown")
+        self.assertIsNone(s.Scanner.unit_symbol(self.scanner(), self.FakePort(None)))
+
+    def test_the_sheet_is_read_from_the_omx_contract_the_schema_is_found_in(self):
+        with tempfile.TemporaryDirectory() as root:
+            schema = os.path.join(root, "schema", "omx-contract.schema.json")
+            sheet = os.path.join(root, "data", desc.UNITS_SHEET)
+            os.makedirs(os.path.dirname(schema))
+            os.makedirs(os.path.dirname(sheet))
+            open(schema, "w").close()
+            env = {desc.DESCRIPTOR_SCHEMA_ENV: schema}
+            with self.assertRaises(desc.DescriptorRefused):
+                desc.unit_words(env)
+            with open(sheet, "w") as f:
+                json.dump({"LV2_UNITS_TERMS": {"terms": {
+                    "cent": {"uri": s.UNITS + "cent", "kind": "unit", "word": "cents"},
+                    "coef": {"uri": s.UNITS + "coef", "kind": "unit"},
+                    "Unit": {"uri": s.UNITS + "Unit", "kind": "class", "word": "no"}}}}, f)
+            self.assertEqual(desc.unit_words(env), {s.UNITS + "cent": "cents"})
+
+    def test_no_table_of_units_comes_back(self):
+        """No module of tools/ maps LV2 unit URIs itself: the sheet is the one table, and a copy here is refused."""
+        found = []
+        for path in sorted(glob.glob(os.path.join(TOOLS, "*.py"))):
+            if os.path.basename(path).startswith("test_"):
+                continue
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Dict):
+                    continue
+                for key in node.keys:
+                    unit_key = (isinstance(key, ast.BinOp) and isinstance(key.left, ast.Name) and key.left.id == "UNITS") \
+                        or (isinstance(key, ast.Constant) and isinstance(key.value, str) and key.value.startswith(s.UNITS))
+                    if unit_key:
+                        found.append(f"{os.path.basename(path)}:{node.lineno}")
+                        break
+        self.assertEqual(found, [], "a table of LV2 units; read omx-contract's units sheet (desc.unit_words) instead")
 
 
 if __name__ == "__main__":

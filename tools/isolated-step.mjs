@@ -10,6 +10,8 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { pinWord } from "../dist/pins-file.js";
+
 const [uri, windowMsWord] = process.argv.slice(2);
 const windowMs = Number(windowMsWord);
 const signalTool = process.env.OMX_ISOLATED_SIGNAL;
@@ -80,7 +82,7 @@ async function main() {
   const sock = await connect();
   if (sock === undefined) return { started: false, problem: `${hostd} did not listen` };
   const send = commander(sock);
-  const added = await send(`add ${uri} ${String(INSTANCE)}`);
+  const added = await send(`add ${pinWord(uri)} ${String(INSTANCE)}`);
   // WORKER_SPAWN: no worker came up to hold the plugin, which says nothing of the plugin. The next pass tries it again.
   if (added?.code === WORKER_SPAWN) return { started: false, problem: `no worker came up: add answered ${String(WORKER_SPAWN)}` };
   if (added === undefined || added.code < 0) return { started: true, added: false, problem: added === undefined ? "the host gave no answer to add" : `add answered ${String(added.code)}` };

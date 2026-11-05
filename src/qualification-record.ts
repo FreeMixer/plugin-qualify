@@ -76,6 +76,23 @@ export interface IsolatedFigures {
   readonly midiInputsLinked?: number;
 }
 
+/**
+ * What the pool step measured. With real helper threads under the interposer: the allocations, locks and system calls
+ * counted while the plugin's tasks ran on them, and how many tasks the helpers ran. Under a real host's pool on a private
+ * server: the server's DSP load and the xruns of the window without the thread pool and of the one with it.
+ */
+export interface PoolFigures {
+  readonly allocationsOn?: number;
+  readonly locksOn?: number;
+  readonly syscallsOn?: number;
+  readonly tasksOnHelpers?: number;
+  /** Percent of the cycle the whole graph took, over the last third of the window. */
+  readonly dspLoadOff?: number;
+  readonly dspLoadOn?: number;
+  readonly xrunsOff?: number;
+  readonly xrunsOn?: number;
+}
+
 /** One step of a plugin's pass and how it ended. */
 export interface RunStep {
   readonly step: string;
@@ -83,6 +100,8 @@ export interface RunStep {
   readonly code?: string;
   readonly detail?: string;
   readonly figures?: IsolatedFigures;
+  /** The pool step's figures. */
+  readonly pool?: PoolFigures;
 }
 
 /** The pass that judged a record: its id, and every step that ran. */

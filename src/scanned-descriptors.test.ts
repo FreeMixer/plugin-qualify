@@ -179,7 +179,7 @@ describe("the CLAP fixture set through clap-qualify and descriptors.py", () => {
     const doc = parseClapScan(text);
     const rows = clapScanDescriptors(doc);
     const written = readDir(dir);
-    expect(rows.length).toBe(19);
+    expect(rows.length).toBe(24);
     expect([...written.keys()].sort()).toEqual(rows.map((r) => r.uri.replace(/^urn:clap:/, "")).sort());
     for (const row of rows) {
       const id = row.uri.replace(/^urn:clap:/, "");
@@ -243,8 +243,8 @@ describe("the CLAP fixture set through clap-qualify and descriptors.py", () => {
   });
 });
 
-describe("the README states the directory, its key and the name as the code declares them", () => {
-  const readme = readFileSync(join(PKG, "README.md"), "utf8");
+describe("the guide (docs/overview.md) states the directory, its key and the name as the code declares them", () => {
+  const readme = readFileSync(join(PKG, "docs", "overview.md"), "utf8");
   it("the key, the user and system defaults, the file name and the codes", () => {
     expect(readme).toContain(`the key \`${DESCRIPTOR_DIR_KEY}\``);
     expect(readme).toContain(`\`$XDG_STATE_HOME/${DESCRIPTOR_DIR_STATE_SUBDIR}\`, else \`~/.local/state/${DESCRIPTOR_DIR_STATE_SUBDIR}\``);
@@ -257,7 +257,7 @@ describe("the README states the directory, its key and the name as the code decl
     expect(readme).toContain(`\`${DESCRIPTOR_SCHEMA_ENV}\``);
   });
 
-  it("the writer resolves the same defaults the README states", () => {
+  it("the writer resolves the same defaults the guide states", () => {
     const run = spawnSync("python3", ["-c",
       "import sys; sys.path.insert(0, sys.argv[1]); import descriptors as d; "
       + "print(d.descriptor_dir(env={'XDG_STATE_HOME': '/s'})); print(d.descriptor_dir(env={}, home='/h')); print(d.descriptor_dir(system=True))",

@@ -8,6 +8,8 @@
  * Every named plugin, CLAP or LV2, is measured by plugin-hostd's probe runner (`plugin-hostd-probe`,
  * named by `OMX_PROBE_RUNNER` when it is not on `PATH`), which keeps the deadline and the limits, and is
  * judged from the probe output it writes: the verdict and the qualification record, per host profile.
+ * `plugin-qualify compare` runs the plugins through omx-clap-host, plugin-hostd, mod-host and jalv with the same checks
+ * (tools/compare-run.mjs).
  * `--all` finds the LV2 plugins of the bundles on the LV2 path, then the CLAP plugins on the standard CLAP search path (`CLAP_PATH`, then `~/.clap`, then
  * `/usr/lib/clap`). `plugin-qualify judge` judges probe outputs already written.
  */
@@ -60,6 +62,11 @@ function writePins(path, file) {
   }
   writeFileWhole(path, file.text);
   process.stderr.write(`plugin-qualify: ${file.written.length} pin${file.written.length === 1 ? "" : "s"} written to ${path}\n`);
+}
+
+if (process.argv[2] === "compare") {
+  const { compareMain } = await import("../tools/compare-run.mjs");
+  process.exit(await compareMain(process.argv.slice(3)));
 }
 
 if (process.argv[2] === "judge") {

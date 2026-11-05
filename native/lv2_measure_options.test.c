@@ -228,7 +228,8 @@ static void test_record(void) {
   parse(&o, "--log", "capture", &why);
   parse(&o, "--log-capture-bytes", "128", &why);
   want = ",\"featureOptions\":{\"features\":[],\"strict\":true,\"block\":{\"declares\":[\"fixed\",\"pow2\"],\"min\":1,"
-         "\"max\":1024,\"nominal\":0},\"log\":{\"mode\":\"capture\",\"bytes\":128,\"lines\":\"say \\\"hi\\\"\\u000a\"}}";
+         "\"max\":1024,\"nominal\":0},\"log\":{\"mode\":\"capture\",\"bytes\":128,\"lines\":\"say \\\"hi\\\"\\n\"}}";
+  /* the newline is \n, as omx-contract's one JSON writer spells a control byte with a short escape */
   got = printed(&o, "say \"hi\"\n");
   CHECK(!strcmp(got, want), "a changed record:\n  want %s\n  got  %s", want, got);
 }

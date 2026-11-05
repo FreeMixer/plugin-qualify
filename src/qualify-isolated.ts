@@ -206,7 +206,7 @@ export function pinAfterStep(pin: PinEntry | undefined, step: RunStep): PinEntry
 }
 
 /** The run id of a record from before the steps: its probe output's, read from the copy beside it. */
-function runIdOf(record: QualificationRecord, dir: string): string | undefined {
+export function runIdOf(record: QualificationRecord, dir: string): string | undefined {
   if (record.run !== undefined) return record.run.id;
   if (record.rejudged !== undefined) return record.rejudged.figures.runId;
   try {

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /*
  * lv2-measure-pin.c — the integrity block of an LV2 plugin; see lv2-measure-pin.h. Nothing here
- * hashes or serialises: plugin-hostd's pin.h does both, over the records lilv fills.
+ * hashes or serialises: plugin-db's pin.h does both, over the records lilv fills.
  */
 #define _GNU_SOURCE
 #include "lv2-measure-pin.h"
@@ -12,8 +12,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <plugin-hostd/pin.h>
+#include <plugin-db/pin.h>
 #include <plugin-hostd/protocol.h>
+#include <omxcontract/omx_json_write.h>
 
 #define MANIFEST "manifest.ttl"
 #define PIN_FILES_MAX 64
@@ -23,14 +24,9 @@ struct pin_file {
   char sha256[PHD_SHA256_HEX_LEN + 1];
 };
 
+/* a JSON string literal, spelled by omx-contract's one writer (<omxcontract/omx_json_write.h>) */
 static void json_text(FILE *out, const char *s) {
-  fputc('"', out);
-  for (const char *p = s; *p; p++) {
-    if (*p == '"' || *p == '\\') fprintf(out, "\\%c", *p);
-    else if ((unsigned char)*p < 0x20) fprintf(out, "\\u%04x", *p);
-    else fputc(*p, out);
-  }
-  fputc('"', out);
+  omx_json_write_string(out, s);
 }
 
 static void print_reason(FILE *out, const char *reason, const char *detail) {

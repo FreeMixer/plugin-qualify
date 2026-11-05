@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 /**
  * A pin written before plugin-qualify 0.17.3 holds an LV2's binary, plugin TTL and manifest, not the preset files its
  * manifest names; plugin-hostd 0.15.0 checks those too, and answers -509 until the plugin is qualified again

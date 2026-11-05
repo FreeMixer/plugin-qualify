@@ -110,9 +110,9 @@ describe("every hosting.* code plugin-qualify names is omx-clap-core's", () => {
   const files = trackedTextFiles();
 
   it("the scan reaches the sources, the tools, the native measurers and the docs — positive control", () => {
-    for (const rel of ["src/hosting-suitability.ts", "tools/benchmark.py", "README.md"]) expect(files).toContain(rel);
+    for (const rel of ["src/hosting-suitability.ts", "tools/benchmark.py", "docs/overview.md"]) expect(files).toContain(rel);
     expect(files.some((f) => f.startsWith("native/") && f.endsWith(".c"))).toBe(true);
-    expect(hostingTokens(readPkg("README.md")).length).toBeGreaterThan(0);
+    expect(hostingTokens(readPkg("docs/overview.md")).length).toBeGreaterThan(0);
   });
 
   it("no file names a hosting code the contract lacks", () => {
@@ -129,8 +129,8 @@ describe("every hosting.* code plugin-qualify names is omx-clap-core's", () => {
     // the removed code is built from two parts: the batch's removals check (a grep over the seven tips) must find it nowhere
     const removed = ["hosting.features.required", "not-provided"].join("-");
     const sabotaged = (rel: string) =>
-      rel === "README.md" ? `${readPkg(rel)}\n\`${removed}\`` : readPkg(rel);
-    expect(undeclared(files, sabotaged)).toContain(`README.md: ${removed}`);
+      rel === "docs/overview.md" ? `${readPkg(rel)}\n\`${removed}\`` : readPkg(rel);
+    expect(undeclared(files, sabotaged)).toContain(`docs/overview.md: ${removed}`);
   });
 
   it("a code inside a regular expression is read as the code", () => {

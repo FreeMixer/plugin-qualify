@@ -9,7 +9,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,8 @@ import {
   measuredPinEntries,
   parsePinLine,
   pinLine,
+  pinClearLine,
+  pinLineUri,
   pinVerdictOf,
   pinsFile,
   type PinEntry,
@@ -94,14 +96,53 @@ describe("pinLine — hostd's pin_set line", () => {
   });
 });
 
-describe("a word with whitespace in it", () => {
-  it("is refused by name in pinLine, and left out (and named) by pinsFile", () => {
-    expect(() => pinLine(entry("clap:/p/My Plugins/x.clap#id"))).toThrow(/clap:\/p\/My Plugins\/x\.clap#id/);
-    expect(() => pinLine({ uri: "u", integrity: { files: [{ path: "a b.clap", sha256: A }], layout: { scheme: "omx-layout/1", sha256: B } } })).toThrow(/whitespace/);
-    const file = pinsFile([entry("clap:/p/My Plugins/x.clap#id"), entry("clap:/p/x.clap#id")]);
+describe("a word with a space in it", () => {
+  const spaced = (path: string): PinEntry => ({
+    uri: `clap:/p/My Plugins/${path}#id`,
+    integrity: { files: [{ path, sha256: A }], layout: { scheme: "omx-layout/1", sha256: B } },
+    verdict: "isolated",
+  });
+
+  it("is written as a quoted word, the protocol's: the uri of a path with a space is one word", () => {
+    expect(pinLine(spaced("x.clap"))).toBe(`pin_set "clap:/p/My Plugins/x.clap#id" x.clap=${A} omx-layout/1:${B} verdict=isolated`);
+  });
+
+  it("a file inside the bundle with a space, a comma or an equals sign is refused by name: a pinned path cannot hold the separators of a pin's words", () => {
+    for (const path of ["a b.clap", "a,b.clap", "a=b.clap", 'a"b.clap']) {
+      const e: PinEntry = { uri: "u", integrity: { files: [{ path, sha256: A }], layout: { scheme: "omx-layout/1", sha256: B } } };
+      expect(() => pinLine(e)).toThrow(/pinned path cannot/);
+      const file = pinsFile([e, entry("clap:/p/x.clap#id")]);
+      expect(file.written).toEqual(["clap:/p/x.clap#id"]);
+      expect(file.refused.map((r) => r.uri)).toEqual(["u"]);
+    }
+  });
+
+  it("round-trips through parsePinLine to the entry it came from, a quote and a backslash in the directory included", () => {
+    for (const dir of ["My Plugins", 'My "Best" Plugins', "back\\slash dir", "a  b"]) {
+      const e: PinEntry = { ...spaced("x.clap"), uri: `clap:/p/${dir}/x.clap#id` };
+      const p = parsePinLine(pinLine(e)!)!;
+      expect(p).toEqual({ uri: e.uri, files: e.integrity.files, layout: e.integrity.layout, verdict: "isolated" });
+    }
+  });
+
+  it("is in the file pinsFile writes, and the uri of the line is the same word the sync compares", () => {
+    const file = pinsFile([spaced("x.clap"), entry("clap:/p/x.clap#id")]);
+    expect(file.refused).toEqual([]);
+    expect(file.written).toEqual(["clap:/p/My Plugins/x.clap#id", "clap:/p/x.clap#id"]);
+    const lines = file.text.split("\n").filter((l) => l !== "" && !l.startsWith("#"));
+    expect(lines.map((l) => pinLineUri(l))).toEqual(["clap:/p/My Plugins/x.clap#id", "clap:/p/x.clap#id"]);
+  });
+
+  it("a control character or a word that ends in a backslash inside quotes cannot be a word, and is refused by name", () => {
+    expect(() => pinLine(entry("clap:/p/a\tb.clap#id"))).toThrow(/control character/);
+    expect(() => pinLine(entry("clap:/p/a b\\"))).toThrow(/backslash/);
+    const file = pinsFile([entry("clap:/p/a\tb.clap#id"), entry("clap:/p/x.clap#id")]);
     expect(file.written).toEqual(["clap:/p/x.clap#id"]);
-    expect(file.refused.map((r) => r.uri)).toEqual(["clap:/p/My Plugins/x.clap#id"]);
-    expect(file.text).not.toContain("My Plugins");
+    expect(file.refused.map((r) => r.uri)).toEqual(["clap:/p/a\tb.clap#id"]);
+  });
+
+  it("an unterminated quote is a line the daemon would refuse", () => {
+    expect(() => parsePinLine(`u "x.clap=${A} omx-layout/1:${B}`)).toThrow(/quote/);
   });
 
   it("every line written round-trips through parsePinLine to the entry it came from", () => {
@@ -133,9 +174,41 @@ describe("parsePinLine — the daemon's grammar, so a drifting writer is a red t
     ["a path named twice", `u x.clap=${A},x.clap=${B} omx-layout/1:${B}`],
     ["a layout without a scheme", `u x.clap=${A} ${B}`],
     ["a verdict outside the vocabulary", `u x.clap=${A} omx-layout/1:${B} verdict=fine`],
-    ["a fifth word", `u x.clap=${A} omx-layout/1:${B} verdict=refused extra`],
+    ["a sixth word", `u x.clap=${A} omx-layout/1:${B} verdict=refused pool=off extra`],
+    ["a pool word outside the vocabulary", `u x.clap=${A} omx-layout/1:${B} pool=all`],
+    ["a pool word twice", `u x.clap=${A} omx-layout/1:${B} pool=off pool=cores`],
+    ["a verdict twice", `u x.clap=${A} omx-layout/1:${B} verdict=isolated verdict=refused`],
   ])("refuses %s", (_what, line) => {
     expect(() => parsePinLine(line)).toThrow();
+  });
+});
+
+describe("the pool word", () => {
+  it("follows the verdict in the line, as hostd writes it", () => {
+    expect(pinLine(entry("u", { verdict: "isolated", pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=isolated pool=cores`);
+    expect(pinLine(entry("u", { verdict: "isolated", pool: "off" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=isolated pool=off`);
+    expect(pinLine(entry("u", { pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} pool=cores`);
+  });
+
+  it("is read back in either order, and a line with none has none", () => {
+    const base = `u x.clap=${A} omx-layout/1:${B}`;
+    expect(parsePinLine(`${base} verdict=isolated pool=cores`)).toMatchObject({ verdict: "isolated", pool: "cores" });
+    expect(parsePinLine(`${base} pool=off verdict=in-process`)).toMatchObject({ verdict: "in-process", pool: "off" });
+    expect(parsePinLine(base)).not.toHaveProperty("pool");
+  });
+
+  it("round-trips through parsePinLine to the entry it came from", () => {
+    for (const pool of ["cores", "off"] as const) {
+      const e = entry("clap:/p/My Plugins/x.clap#id", { verdict: "isolated", pool });
+      expect(parsePinLine(pinLine(e)!)).toMatchObject({ uri: e.uri, verdict: "isolated", pool });
+    }
+  });
+
+  it("is kept with the line whose verdict is the worse one, and stays out of a pin that is refused", () => {
+    const file = pinsFile([entry("u", { verdict: "in-process", pool: "cores" }), entry("u", { verdict: "isolated", pool: "off" })]);
+    expect(file.text).toContain("verdict=isolated pool=off");
+    expect(file.text).not.toContain("pool=cores");
+    expect(pinLine(entry("u", { verdict: "refused", pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=refused`);
   });
 });
 
@@ -300,6 +373,44 @@ describe("plugin-hostd on the file, with require_pins on and no pin_set", () => 
       expect(await withNone.control.send(`add ${uri} 0`)).toBe("resp -508");
     } finally {
       withNone.close();
+    }
+  });
+});
+
+describe("plugin-hostd on a plugin under a directory with a space in its name", () => {
+  /**
+   * The protocol's grammar (plugin-hostd-protocol, `word`) has quoted words, and the pin line is written in them. Whether
+   * the daemon in the channel reads them is its own: plugin-hostd 0.17 splits a command at every space, so a quoted uri
+   * with a space reaches `pin_set` as several words (-902) and `add` as a uri cut at the space. This arm runs the plugin
+   * through the daemon when the daemon reads a quoted word, and skips by name, with what the daemon answered, when it does
+   * not; the writer's side is held by the tests above.
+   */
+  it("takes the pin as the one line the sync sends and adds the plugin by its uri, quoted", async (ctx) => {
+    if (!BUILT && process.env["CI"]) throw new Error("native/build is needed and CI builds it");
+    if (HOSTD === undefined || FAKE_HOST === undefined) {
+      if (process.env["CI"]) throw new Error("PLUGIN_HOSTD and PLUGIN_HOSTD_FAKE_HOST are needed: CI installs plugin-hostd and plugin-hostd-tests");
+      ctx.skip("needs plugin-hostd with its fake worker: PLUGIN_HOSTD, PLUGIN_HOSTD_FAKE_HOST (plugin-hostd-tests)");
+    }
+    if (!BUILT) ctx.skip("native/build is missing: make -C native deps all");
+    const dir = join(scratch, "My Plugins");
+    mkdirSync(dir, { recursive: true });
+    const spaced = join(dir, "rt-safe.clap");
+    copyFileSync(SAFE, spaced);
+    const { entries } = pinsOf(spaced, SAFE_ID);
+    const uri = clapPinUri(spaced, `urn:clap:${SAFE_ID}`);
+    expect(uri).toContain("My Plugins");
+    const fakeLayout = spawnSync(FAKE_HOST!, ["-L"], { encoding: "utf8" }).stdout.trim();
+    const [scheme, layoutSha] = [fakeLayout.slice(0, fakeLayout.lastIndexOf(":")), fakeLayout.slice(fakeLayout.lastIndexOf(":") + 1)];
+    const line = pinLine({ ...entries[0]!, integrity: { ...entries[0]!.integrity, layout: { scheme, sha256: layoutSha } } })!;
+    expect(line.startsWith(`pin_set "${uri}" `)).toBe(true);
+    const d = await daemon({ mod_host: FAKE_HOST!, clap_host: FAKE_HOST!, state_root: scratch, require_pins: 1, pin_mode: "strict", pin_store: join(scratch, "no-store-spaced") });
+    try {
+      const set = await d.control.send(line);
+      if (set !== "resp 0") ctx.skip(`this plugin-hostd does not read a quoted word with a space in it: pin_set answered ${set}`);
+      expect(await d.control.send(`add "${uri}" 0`)).toBe("resp 0");
+      expect(await d.control.send(pinClearLine(uri))).toBe("resp 0");
+    } finally {
+      d.close();
     }
   });
 });
