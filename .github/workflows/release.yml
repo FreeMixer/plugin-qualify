@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { image: 'fedora:44', artifact: plugin-qualify-rpms-x86_64 }
+          - { image: 'fedora:44', artifact: plugin-qualify-rpms-fc44-x86_64 }
           - { image: 'debian:bookworm', artifact: plugin-qualify-debs-bookworm-amd64 }
           - { image: 'debian:trixie', artifact: plugin-qualify-debs-trixie-amd64 }
     steps:
