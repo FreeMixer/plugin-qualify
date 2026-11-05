@@ -155,7 +155,8 @@ fi
 - The live memory test reads which limit the runner applies, and CI cannot skip
   it (#297)
 - The CLAP thread pool is granted by measuring it: a plugin that offers
-  clap.thread-pool is run alone with the pool off and on, and its pin gets
+  clap.thread-pool is first watched on real helper threads under the
+  interposer, then run alone with the pool off and on, and its pin gets
   pool=cores when the pool is safe and faster, pool=off when it is not;
   --pool-only runs the step a record owes
 - A CLAP plugin under a directory with a space in its name is pinned: its uri is
