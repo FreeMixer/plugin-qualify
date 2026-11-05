@@ -38,6 +38,8 @@ jobs:
       package-name: plugin-qualify
       publish: ${{ github.event_name == 'push' || inputs.publish == true }}
       needs-mod-host: false
+      # the channel publishes no fedora 45 tree yet (its noarch repodata answers 404), so the build installs from fc44 only
+      fedora-versions: '["44"]'
       # plugin-db-devel, whose pin.h the CLAP prober builds against, plugin-hostd-protocol-devel, and omx-clap-lv2-devel, the
       # LV2 measurer's host features
       channel-deps: true
