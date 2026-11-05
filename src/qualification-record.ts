@@ -76,6 +76,15 @@ export interface IsolatedFigures {
   readonly midiInputsLinked?: number;
 }
 
+/** What the pool step measured: the server's DSP load and the xruns of the window without the thread pool and of the one with it. */
+export interface PoolFigures {
+  /** Percent of the cycle the whole graph took, over the last third of the window. */
+  readonly dspLoadOff: number;
+  readonly dspLoadOn: number;
+  readonly xrunsOff: number;
+  readonly xrunsOn: number;
+}
+
 /** One step of a plugin's pass and how it ended. */
 export interface RunStep {
   readonly step: string;
@@ -83,6 +92,8 @@ export interface RunStep {
   readonly code?: string;
   readonly detail?: string;
   readonly figures?: IsolatedFigures;
+  /** The pool step's figures. */
+  readonly pool?: PoolFigures;
 }
 
 /** The pass that judged a record: its id, and every step that ran. */

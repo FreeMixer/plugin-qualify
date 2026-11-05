@@ -760,6 +760,19 @@ the probe, added alone under a plugin-hostd of its own on a private JACK server,
 record's `run` keeps its id and gains the step, and the pin follows it; nothing else is measured. A step the machine could
 not run stays owed.
 
+**The CLAP thread pool is granted by measuring it.** omx-clap-host can run a plugin's `clap.thread-pool` tasks on helper
+threads, one per core of the worker's cpu set but one, and plugin-hostd starts a worker with the pool only for a plugin
+whose pin says `pool=cores`. The pool step is the one place that writes that word. A CLAP plugin that was not refused is
+asked whether it offers the extension; one that does not has no word and runs serial. One that does is added alone under
+a plugin-hostd of its own on a private JACK server, at the host's rate and quantum, with its pin set `pool=off` and with
+it set `pool=cores`, the same notes held for 3 seconds each time. The two modes are taken in turn twice and each is read
+at its best window, since what else runs on the machine can only make a window worse. The plugin gets `pool=cores` when
+the worker really started with the pool, its output stayed finite and sounding, the best window with the pool took no
+more xruns than the best without it, and the server's DSP load fell to at most 85 % of the load without it and by at
+least 3 points of the cycle. A plugin that was measured and fails any of these gets `pool=off`, the word that says it was
+looked at. The step runs in the same pass as the isolated step; `--pool-only` runs the one a record still owes, and a
+step the machine could not run stays owed. The figures are in the record's `run`, and `--rejudge` keeps the word.
+
 `--adapter-only` starts each LV2 plugin the state holds under a fresh omx-clap-host, `add` then `remove` through the LV2
 adapter, once per cell: 48 kHz in blocks of 128 and 256 frames. Each cell has a private JACK server (`jackd -d dummy`, so
 `jackd` must be installed), so the device's live server is never touched. A command has `budget_s` seconds, the host's

@@ -174,9 +174,41 @@ describe("parsePinLine — the daemon's grammar, so a drifting writer is a red t
     ["a path named twice", `u x.clap=${A},x.clap=${B} omx-layout/1:${B}`],
     ["a layout without a scheme", `u x.clap=${A} ${B}`],
     ["a verdict outside the vocabulary", `u x.clap=${A} omx-layout/1:${B} verdict=fine`],
-    ["a fifth word", `u x.clap=${A} omx-layout/1:${B} verdict=refused extra`],
+    ["a sixth word", `u x.clap=${A} omx-layout/1:${B} verdict=refused pool=off extra`],
+    ["a pool word outside the vocabulary", `u x.clap=${A} omx-layout/1:${B} pool=all`],
+    ["a pool word twice", `u x.clap=${A} omx-layout/1:${B} pool=off pool=cores`],
+    ["a verdict twice", `u x.clap=${A} omx-layout/1:${B} verdict=isolated verdict=refused`],
   ])("refuses %s", (_what, line) => {
     expect(() => parsePinLine(line)).toThrow();
+  });
+});
+
+describe("the pool word", () => {
+  it("follows the verdict in the line, as hostd writes it", () => {
+    expect(pinLine(entry("u", { verdict: "isolated", pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=isolated pool=cores`);
+    expect(pinLine(entry("u", { verdict: "isolated", pool: "off" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=isolated pool=off`);
+    expect(pinLine(entry("u", { pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} pool=cores`);
+  });
+
+  it("is read back in either order, and a line with none has none", () => {
+    const base = `u x.clap=${A} omx-layout/1:${B}`;
+    expect(parsePinLine(`${base} verdict=isolated pool=cores`)).toMatchObject({ verdict: "isolated", pool: "cores" });
+    expect(parsePinLine(`${base} pool=off verdict=in-process`)).toMatchObject({ verdict: "in-process", pool: "off" });
+    expect(parsePinLine(base)).not.toHaveProperty("pool");
+  });
+
+  it("round-trips through parsePinLine to the entry it came from", () => {
+    for (const pool of ["cores", "off"] as const) {
+      const e = entry("clap:/p/My Plugins/x.clap#id", { verdict: "isolated", pool });
+      expect(parsePinLine(pinLine(e)!)).toMatchObject({ uri: e.uri, verdict: "isolated", pool });
+    }
+  });
+
+  it("is kept with the line whose verdict is the worse one, and stays out of a pin that is refused", () => {
+    const file = pinsFile([entry("u", { verdict: "in-process", pool: "cores" }), entry("u", { verdict: "isolated", pool: "off" })]);
+    expect(file.text).toContain("verdict=isolated pool=off");
+    expect(file.text).not.toContain("pool=cores");
+    expect(pinLine(entry("u", { verdict: "refused", pool: "cores" }))).toBe(`pin_set u x.clap=${A} omx-layout/1:${B} verdict=refused`);
   });
 });
 
