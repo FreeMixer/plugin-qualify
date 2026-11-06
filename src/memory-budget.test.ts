@@ -126,9 +126,9 @@ describe("a verdict is the host's: the same plugin on the desk and on a Pi", () 
 });
 
 describe("the Pi profiles state what a Pi runs and what is not measured", () => {
-  it("48000/128 and 48000/256, zynthian-sys's settings: a Pi profile is judged at both, and cost is read at the first", () => {
+  it("128 and 256 frames at 48000 and 96000, zynthian-sys's settings and the owner's rule: a Pi profile is judged at all four, and cost is read at the first", () => {
     for (const p of [PI_4GB_PROFILE, PI_8GB_PROFILE]) {
-      expect(p.cost.memory!.cells).toEqual([{ rate: 48000, quantum: 128 }, { rate: 48000, quantum: 256 }]);
+      expect(p.cost.memory!.cells).toEqual([{ rate: 48000, quantum: 128 }, { rate: 48000, quantum: 256 }, { rate: 96000, quantum: 128 }, { rate: 96000, quantum: 256 }]);
       expect({ rate: p.cost.rate, quantum: p.cost.quantum }).toEqual(p.cost.memory!.cells![0]);
     }
   });

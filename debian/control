@@ -13,7 +13,7 @@ Build-Depends: debhelper-compat (= 13),
                libplugin-hostd-protocol-dev (>= 0.4.0~), libplugin-hostd-protocol-dev (<< 0.5~),
                libomx-contract-dev (>= 3.9.1~), libomx-contract-dev (<< 4~),
                libomx-clap-lv2-dev (>= 0.26.2~), libomx-clap-lv2-dev (<< 0.31~),
-               libomxdsp-dev (>= 0.21.0~), libomxdsp-dev (<< 0.31~)
+               libomxdsp-dev (>= 0.21.0~), libomxdsp-dev (<< 0.32~)
 Standards-Version: 4.6.2
 Homepage: https://github.com/FreeMixer/plugin-qualify
 Rules-Requires-Root: no

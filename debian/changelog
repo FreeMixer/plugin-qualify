@@ -1,3 +1,22 @@
+plugin-qualify (0.19.2) unstable; urgency=medium
+
+  * An LV2 bundle or binary named with a space (Surge XT's libSurge%20XT.so, a
+    bundle under a directory with a space) is read as the file its URI names:
+    the escapes are decoded, in the sync and in the scanner's bundle path.
+  * A finished isolated step that refused the plugin is a verdict, not an
+    owed step.
+  * --adapter-only runs a plugin whose probe crashed, hung or measured nothing
+    too, and its run replaces the code the main run left.
+  * The adapter, isolated, memory and pool passes run at 128 and 256 frames at
+    48000 and 96000, and the main run of a Pi host measures the same four
+    cells; a pass takes about twice as long.
+  * A run with no JACK server stops by name (no JACK server) instead of
+    recording resp -201 in every record.
+  * omx-dsp builds up to << 0.32 (only omx_lin_to_db_d is used); the channel
+    now carries 0.31.0.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Fri, 06 Nov 2026 18:30:00 +0100
+
 plugin-qualify (0.19.1) unstable; urgency=medium
 
   * Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3,

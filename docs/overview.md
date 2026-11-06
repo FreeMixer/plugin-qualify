@@ -136,7 +136,7 @@ one more costs.
 A host with a memory budget reads them, at every cell it runs, and the verdict follows:
 `hosting.memory.within-ceiling`, `hosting.memory.above-ceiling` (`unsuitable`), or `hosting.memory.unmeasured` (`unknown`,
 since a missing figure never reads as fitting). `openmixer-console` has one, sized for a console machine, and the Raspberry Pi hosts
-`openmixer-pi-4gb` and `openmixer-pi-8gb`, at 48000/128 and 48000/256, have one each. The Pi budgets are not measured on a Pi
+`openmixer-pi-4gb` and `openmixer-pi-8gb`, at 128 and 256 frames at 48000 and 96000, have one each. The Pi budgets are not measured on a Pi
 yet, so a plugin under them is `conditional`, `hosting.memory.within-provisional-ceiling`: that gives the figure and the
 ceiling and does not say the plugin fits. The other hosts have no budget, and read nothing.
 

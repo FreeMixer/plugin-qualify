@@ -22,7 +22,7 @@ import type { HostProfile } from "./host-profiles.js";
 import { OPENMIXER_CONSOLE_PROFILE, shippedHostProfile } from "./host-profiles.js";
 import { IN_PROCESS_TIER_HOST, ISOLATED_TIER_HOST } from "./qualification-record.js";
 import type { PluginTarget } from "./loader.js";
-import { ADAPTER_RUN_HOSTS, SPAWNED_ADMISSIONS, admitPlugin, admitUnderAdapter, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
+import { ADAPTER_RUN_HOSTS, SPAWNED_ADMISSIONS, noJackServerProblem, admitPlugin, admitUnderAdapter, admittedHostOf, type AdmissionRuns, type HostAdmission } from "./host-admission.js";
 import { judgeProbeOutput, judgmentVerdicts, type Judgment } from "./probe-judge.js";
 import { readProbeOutput, type ProbeOutput } from "./probe-output.js";
 import { budgetCells, gridCells, hostCells, runnerInvocations, type GridCell, type GridSpec, type RunnerInvocation } from "./measurement-grid.js";
@@ -312,12 +312,17 @@ export function qualifyTargets(
     const admissions: Record<string, HostAdmission> = {};
     // an LV2 plugin is also run once under plugin-hostd's LV2 adapter, recorded beside the verdicts (#223)
     const adapter = target.format === "lv2" ? admitUnderAdapter(target.uri, admissionRuns, admissionEnv) : undefined;
+    // no JACK server is the machine's, not the plugin's: the run stops by name instead of recording resp -201 in every record
+    const noJack = noJackServerProblem(adapter);
+    if (noJack !== undefined) throw new ProbeRunnerError(noJack);
     // and that run decides its omx-clap-host verdict, the isolated tier
     if (adapter !== undefined) for (const host of ADAPTER_RUN_HOSTS) admissions[host] = adapter;
     if (target.format === "lv2") {
       for (const profile of judgedProfiles) {
         const host = admittedHostOf(profile);
         if (host !== undefined) admissions[profile.id] = admitPlugin(host, target.uri, admissionRuns, admissionEnv);
+        const noJackHost = noJackServerProblem(admissions[profile.id]);
+        if (noJackHost !== undefined) throw new ProbeRunnerError(noJackHost);
       }
     }
     for (const profile of judgedProfiles) {

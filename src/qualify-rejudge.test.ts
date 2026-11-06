@@ -80,6 +80,28 @@ describe("--rejudge: a record judged unsuitable for RT violations", () => {
   });
 });
 
+describe("--rejudge: a finished isolated step owes nothing", () => {
+  const withStep = (step: object) => (r: QualificationRecord): QualificationRecord => ({ ...r, adapter: adapterAdmitted, run: { id: "run-1", steps: [step] } } as unknown as QualificationRecord);
+
+  it.each([
+    ["refused as silent, with its notes linked", { step: "isolated", result: "refused", code: "isolated.silent-output", figures: { midiInputsLinked: 1 } }],
+    ["refused as not added", { step: "isolated", result: "refused", code: "isolated.not-added" }],
+    ["isolated", { step: "isolated", result: "isolated" }],
+  ])("a step %s is a verdict, not debt", async (_name, step) => {
+    const d = device([LV2_RT], { patch: withStep(step) });
+    await rejudge(d);
+    expect(owesOf(d.record(LV2_RT))).toEqual([]);
+  });
+
+  it("a step that could not run, or silence before notes were played, is still owed", async () => {
+    for (const step of [{ step: "isolated", result: "not-run", code: "isolated.no-host" }, { step: "isolated", result: "refused", code: "isolated.silent-output" }]) {
+      const d = device([LV2_RT], { patch: withStep(step) });
+      await rejudge(d);
+      expect(owesOf(d.record(LV2_RT))).toEqual(["isolated-step"]);
+    }
+  });
+});
+
 describe("--rejudge: what it says about itself", () => {
   it("names who took the figures and when, and leaves the figures, the probe copy and their provenance as they were", async () => {
     const d = device([CLAP_RT]);
@@ -344,7 +366,7 @@ describe("--memory-only", () => {
     for (const s of seenClap) {
       expect(s.args[s.args.indexOf("--wall-s") + 1]).toBe("17");
       expect(s.args[s.args.indexOf("--data-bytes") + 1]).toBe(String(2 * 2 ** 30));
-      expect(s.args[s.args.indexOf("--rates") + 1]).toBe("48000");
+      expect(s.args[s.args.indexOf("--rates") + 1]).toBe("48000,96000");
       expect(s.args).toContain("--offer");
       expect(s.env).toMatchObject({ OMX_PROBE_MEMORY_ONLY: "1", OMX_PROBE_NOTES: String(MEMORY_PASS_PROBE_NOTES), OMX_RT_OOM_EXIT: "1", LD_PRELOAD: "/bin/true" });
     }
@@ -352,7 +374,7 @@ describe("--memory-only", () => {
     const l = idOf(LV2_CLEAN);
     const seenLv2: { args: readonly string[]; env: Readonly<Record<string, string | undefined>> }[] = [];
     await memoryPassOf(lv2, fakeRunner(l.id, l.sha, l.format, seenLv2));
-    expect(seenLv2.length).toBe(2);
+    expect(seenLv2.length).toBe(4);
     expect(seenLv2[0]!.args.at(-1)).toBe(`lv2:${l.id}`);
     expect(seenLv2[0]!.env["LV2_PATH"]).toContain("plugin-qualify-sync-world-");
   });
@@ -368,7 +390,7 @@ describe("--memory-only", () => {
       tool: { runner: "plugin-hostd-probe 0.15.3", child: "clap-qualify" },
       measuredAt: "2026-10-31T01:00:00+00:00",
       runId: "memory-run-1",
-      cells: [{ rate: 48000, quantum: 128, outcome: "probe.ok" }, { rate: 48000, quantum: 256, outcome: "probe.ok" }],
+      cells: [[48000, 128], [48000, 256], [96000, 128], [96000, 256]].map(([rate, quantum]) => ({ rate, quantum, outcome: "probe.ok" })),
     });
   });
 

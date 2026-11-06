@@ -109,6 +109,19 @@ export function admissionRating(admission: HostAdmission): "unsuitable" | "unkno
  */
 const JACK_CLIENT_RESPS: readonly number[] = [-201, -202];
 
+/** The name of the reason a run stops on when no JACK server answers: the admission cannot say anything of any plugin. */
+export const NO_JACK_SERVER = "no JACK server";
+
+/**
+ * The refusal to go on when an admission found no JACK client to have (`<host>.no-jack-client`): the server the host is
+ * pointed at (the default one, or `JACK_DEFAULT_SERVER`) is not there, and every plugin would be recorded with the same
+ * resp -201 as if it were the plugin's. `undefined` for any other run.
+ */
+export function noJackServerProblem(admission: HostAdmission | undefined): string | undefined {
+  if (admission === undefined || admission.measured || !admission.code?.endsWith(".no-jack-client")) return undefined;
+  return `${NO_JACK_SERVER}: ${admission.host} could not open a JACK client (resp ${String(admission.params["resp"] ?? "-201")}), so nothing is learned of any plugin; start the JACK server it is pointed at (JACK_DEFAULT_SERVER names it) and run again`;
+}
+
 /** The verdict of a run of a host that speaks mod-host's protocol: the first step that did not answer `resp 0` decides. */
 export function classifyProtocolRun(host: ProtocolHost, run: ModHostRun): HostAdmission {
   if (!run.installed) return notInstalled(host);

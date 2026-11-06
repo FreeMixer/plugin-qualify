@@ -41,6 +41,26 @@ class OwningRpm(unittest.TestCase):
         self.assertEqual(s.owning_rpm("/usr/lib64/lv2/calf.lv2", run), "calf")
 
 
+class BundlePath(unittest.TestCase):
+    """A lilv bundle URI is a file: URI; its path is the percent-decoded one, as serd reads it."""
+
+    class P:
+        def __init__(self, uri):
+            self.uri = uri
+
+        def get_bundle_uri(self):
+            return self.uri
+
+    def test_decodes_the_escapes_of_a_directory_with_a_space(self):
+        self.assertEqual(s.bundle_path(self.P("file:///home/zyn/My%20Plugins/Surge%20XT.lv2/")), "/home/zyn/My Plugins/Surge XT.lv2")
+
+    def test_a_plain_bundle_is_unchanged(self):
+        self.assertEqual(s.bundle_path(self.P("file:///usr/lib64/lv2/x.lv2/")), "/usr/lib64/lv2/x.lv2")
+
+    def test_no_uri_is_none(self):
+        self.assertIsNone(s.bundle_path(self.P(None)))
+
+
 class DeclaredComment(unittest.TestCase):
     """`rdfs:comment` is a declared fact, read from the bundle or absent — never invented."""
 

@@ -17,7 +17,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { HOST_PROFILES, JALV_PROFILE, MOD_HOST_PROFILE, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import type { AdmissionRuns } from "./host-admission.js";
-import { GRID_FULL, GRID_HOSTS, cellKey, gridCells } from "./measurement-grid.js";
+import { GRID_FULL, GRID_HOSTS, cellKey, gridCells, hostCells } from "./measurement-grid.js";
 import { MEMORY_BOUND_MECHANISM, MEMORY_CGROUP_MECHANISM, PROBE_MEMORY_LIMIT, PROBE_OOM, memoryBoundOf, outOfMemory, parseMemoryLimit, defaultMemoryLimit } from "./memory-bound.js";
 import { judgeProbeOutput } from "./probe-judge.js";
 import { mergeProbeRuns } from "./probe-merge.js";
@@ -99,7 +99,7 @@ describe("the runner is invoked at every cell of the grid, an LV2 plugin like a 
 
     it(`${target.format}: the hosts' grid is each host's own cell and 512 at every rate`, () => {
       qualifyTargets([target], { rates: QUALIFY_RATES, quanta: QUALIFY_QUANTA, grid: GRID_HOSTS, profiles: HOST_PROFILES, env: env(), exists, admissions: HOSTS_ADMIT });
-      const want = gridCells(GRID_HOSTS, { rates: QUALIFY_RATES, quanta: QUALIFY_QUANTA, hosts: HOST_PROFILES.map((p) => p.cost) }).map(cellKey).sort();
+      const want = gridCells(GRID_HOSTS, { rates: QUALIFY_RATES, quanta: QUALIFY_QUANTA, hosts: HOST_PROFILES.flatMap(hostCells) }).map(cellKey).sort();
       const cs = calls();
       expect(invokedCells(target.format === "clap" ? cs.slice(0, cs.length / 2) : cs)).toEqual(want);
       for (const h of HOST_PROFILES) expect(want).toContain(`${h.cost.rate}/${h.cost.quantum}`);

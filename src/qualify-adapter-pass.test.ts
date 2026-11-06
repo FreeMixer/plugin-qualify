@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { classifyProtocolRun, type AdmissionRuns, type ModHostRun } from "./host-admission.js";
 import { AdapterPassRefused, NO_PRIVATE_SERVER, adapterBlockOf, adapterFinished, hostVersions, parseVersion, type AdapterPassOptions, type PrivateJack } from "./qualify-adapter-pass.js";
+import type { QualificationRecord } from "./qualification-record.js";
 import { OWED_CODE, owedFile } from "./qualify-rejudge.js";
 import { parseSyncArgs, runSync, summaryLine } from "./qualify-sync.js";
 import { CLAP_RT, LV2_CLEAN, LV2_CRASHED, LV2_RT, device, probeFile, readJson, recordFile, rejudge, removeDevices, row, stored, type Device } from "./qualify-rejudge.support.js";
@@ -52,7 +53,7 @@ describe("--adapter-only: the run", () => {
     const d = device([LV2_CLEAN]);
     const seen: Seen[] = [];
     await pass(d, stand(seen));
-    expect(seen.map((s) => s.env["JACK_DEFAULT_SERVER"])).toEqual(["private-128", "private-256"]);
+    expect(seen.map((s) => s.env["JACK_DEFAULT_SERVER"])).toEqual(["private-128", "private-256", "private-128", "private-256"]);
     for (const s of seen) {
       expect(s.uri).toBe(stored(LV2_CLEAN).plugin.id);
       expect(s.env).toMatchObject({ JACK_NO_START_SERVER: "1", OMX_ADMIT_STEP_MS: "17000", LV2_PATH: d.settings.lv2Dirs.join(":") });
@@ -78,6 +79,8 @@ describe("--adapter-only: the run", () => {
       cells: [
         { rate: 48000, quantum: 128, measured: true, admitted: true, params: {} },
         { rate: 48000, quantum: 256, measured: true, admitted: true, params: {} },
+        { rate: 96000, quantum: 128, measured: true, admitted: true, params: {} },
+        { rate: 96000, quantum: 256, measured: true, admitted: true, params: {} },
       ],
     });
     const { adapter: _adapter, ...rest } = now;
@@ -87,13 +90,26 @@ describe("--adapter-only: the run", () => {
     expect(summaryLine(summary!)).toContain("adapter run 1, already 0, failed 0");
   });
 
-  it("does not touch a CLAP plugin, or one whose probe failed: no run could decide its verdict", async () => {
-    const d = device([CLAP_RT, LV2_CRASHED]);
-    const before = [bytes(d, CLAP_RT), bytes(d, LV2_CRASHED)];
+  it("does not touch a CLAP plugin", async () => {
+    const d = device([CLAP_RT]);
+    const before = bytes(d, CLAP_RT);
     const seen: Seen[] = [];
     await pass(d, stand(seen));
     expect(seen).toEqual([]);
-    expect([bytes(d, CLAP_RT), bytes(d, LV2_CRASHED)]).toEqual(before);
+    expect(bytes(d, CLAP_RT)).toEqual(before);
+  });
+
+  it("runs a plugin whose probe failed too, and its run replaces the code the main run left (no JACK server then)", async () => {
+    const stale = { host: "omx-clap-host", measured: false, admitted: false, code: "omx-clap-host.no-jack-client", params: { resp: -201 } };
+    const d = device([LV2_CRASHED], { patch: (r) => ({ ...r, adapter: stale } as unknown as QualificationRecord) });
+    expect(d.record(LV2_CRASHED).probe.outcome).not.toBe("probe.ok");
+    const seen: Seen[] = [];
+    await pass(d, stand(seen));
+    expect(seen.length).toBe(4);
+    const now = d.record(LV2_CRASHED);
+    expect(now.adapter).toMatchObject({ measured: true, admitted: true, versions: VERSIONS });
+    expect(now.adapter?.code).toBeUndefined();
+    expect(now.probe.outcome).toBe(stored(LV2_CRASHED).probe.outcome);
   });
 
   it("does not touch a plugin whose bytes changed", async () => {
@@ -114,7 +130,7 @@ describe("--adapter-only: a crash or a timeout is a recorded outcome", () => {
     const summary = await pass(d, stand([], (uri, q) => (uri === stored(LV2_CLEAN).plugin.id && q === 256 ? crash : admitted)));
     const a = d.record(LV2_CLEAN).adapter!;
     expect(a).toMatchObject({ measured: true, admitted: false, code: "omx-clap-host.signal-SIGSEGV", params: { rate: 48000, quantum: 256 } });
-    expect(a.cells!.map((c) => [c.quantum, c.admitted])).toEqual([[128, true], [256, false]]);
+    expect(a.cells!.map((c) => [c.quantum, c.admitted])).toEqual([[128, true], [256, false], [128, true], [256, false]]);
     expect(d.record(LV2_RT).adapter).toMatchObject({ measured: true, admitted: true });
     expect(summary!.adapterOnly).toEqual({ measured: 2, already: 0, failed: 0 });
   });
@@ -134,7 +150,7 @@ describe("--adapter-only: a crash or a timeout is a recorded outcome", () => {
     expect(row(d.record(LV2_CLEAN), "omx-clap-host")).toMatchObject({ rating: "unknown", deciding: OWED_CODE.adapterRun });
     const seen: Seen[] = [];
     await pass(d, stand(seen));
-    expect(seen.length).toBe(2);
+    expect(seen.length).toBe(4);
     expect(d.record(LV2_CLEAN).adapter).toMatchObject({ measured: true, admitted: true });
   });
 
@@ -159,7 +175,7 @@ describe("--adapter-only: resuming", () => {
     expect(again!.adapterOnly).toEqual({ measured: 0, already: 2, failed: 0 });
     expect([bytes(d, LV2_CLEAN), bytes(d, LV2_RT)]).toEqual(before);
     await pass(d, stand(seen), true);
-    expect(seen.length).toBe(4);
+    expect(seen.length).toBe(8);
   });
 
   it("a run cut short keeps what it finished, and the next pass does only the rest", async () => {
@@ -167,10 +183,10 @@ describe("--adapter-only: resuming", () => {
     const order: string[] = [];
     const cut = stand([], (uri) => {
       order.push(uri);
-      if (order.length > 2) throw new Error("cut");
+      if (order.length > 4) throw new Error("cut");
       return admitted;
     });
-    // the first plugin's two cells finish; the second's run breaks, which reads as not measured
+    // the first plugin's four cells finish; the second's run breaks, which reads as not measured
     await pass(d, cut);
     const first = order[0]!;
     const finished = [LV2_CLEAN, LV2_RT].find((s) => stored(s).plugin.id === first)!;
@@ -196,7 +212,7 @@ describe("--adapter-only: resuming", () => {
     expect(adapterFinished(d.record(LV2_CLEAN), { ...VERSIONS, "omx-clap-host": "0.26.0" })).toBe(false);
     const seen: Seen[] = [];
     await pass(d, stand(seen, () => admitted, { versions: (tool) => ({ status: 0, stdout: `x version: ${tool.includes("omx-clap") ? "0.26.0" : "0.15.3"}\n` }) }));
-    expect(seen.length).toBe(2);
+    expect(seen.length).toBe(4);
     expect(d.record(LV2_CLEAN).adapter!.versions).toEqual({ "omx-clap-host": "0.26.0", "plugin-hostd": "0.15.3" });
   });
 
@@ -204,7 +220,7 @@ describe("--adapter-only: resuming", () => {
     const d = device([LV2_CLEAN], { patch: (r) => ({ ...r, adapter: { host: "omx-clap-host", measured: true, admitted: true, params: {} } }) });
     const seen: Seen[] = [];
     await pass(d, stand(seen));
-    expect(seen.length).toBe(2);
+    expect(seen.length).toBe(4);
   });
 });
 

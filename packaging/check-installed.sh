@@ -99,12 +99,29 @@ fi
 mkdir -p "$out/sync/clap" "$out/sync/lv2"
 cp "$safe" "$out/sync/clap/"
 cp -r "$lv2/rt-safe.lv2" "$out/sync/lv2/"
-bare plugin-qualify-sync --clap-path "$out/sync/clap" --lv2-path "$out/sync/lv2" --lv2-extra "" --pin-file "$out/sync/qualified.pins" \
+# an LV2 plugin is admitted under omx-clap-host, which needs a JACK server: with jackd installed the check gives the sync a dummy
+# one; without it, the sync must say so by name ("no JACK server") and qualify the CLAP alone, never record resp -201 as the plugin's
+jack=
+if command -v jackd >/dev/null 2>&1; then
+  jack="omx-check-$$"
+  jackd -n "$jack" -d dummy -r 48000 -p 256 >"$out/jackd.log" 2>&1 &
+  jackpid=$!
+  trap 'kill "$jackpid" 2>/dev/null; rm -rf "$out"' EXIT
+  for _ in $(seq 1 50); do ls /dev/shm 2>/dev/null | grep -q "jack_${jack}_" && break; sleep 0.2; done
+fi
+bare_jack() { if [ -n "$jack" ]; then env -i PATH=/usr/bin:/bin HOME="$HOME" JACK_DEFAULT_SERVER="$jack" JACK_NO_START_SERVER=1 "$@"; else bare "$@"; fi; }
+bare_jack plugin-qualify-sync --clap-path "$out/sync/clap" --lv2-path "$out/sync/lv2" --lv2-extra "" --pin-file "$out/sync/qualified.pins" \
   --qualification-dir "$out/sync/q" --descriptor-dir "$out/sync/d" --state-file "$out/sync/state.json" --hostd-port 0 > "$out/sync.txt" 2> "$out/sync.err" ||
   fail "plugin-qualify-sync failed: $(cat "$out/sync.err")"
 cat "$out/sync.err"
 # a release with no python3-lilv says so; one with the bindings loads the library from the runtime package alone
 ! grep -q 'cannot open shared object' "$out/sync.err" || fail "the sync could not load a library the package depends on"
-grep -q '^qualified 2, skipped 0, refused 0, crashed 0, hung 0, unmeasured 0, ' "$out/sync.txt" || fail "plugin-qualify-sync: $(cat "$out/sync.txt")"
-[ "$(grep -c ' verdict=in-process$' "$out/sync/qualified.pins")" -eq 2 ] || fail "the sync's pin file does not pin both fixtures in-process"
+if [ -n "$jack" ]; then
+  grep -q '^qualified 2, skipped 0, refused 0, crashed 0, hung 0, unmeasured 0, ' "$out/sync.txt" || fail "plugin-qualify-sync: $(cat "$out/sync.txt")"
+  [ "$(grep -c ' verdict=in-process$' "$out/sync/qualified.pins")" -eq 2 ] || fail "the sync's pin file does not pin both fixtures in-process"
+else
+  grep -q '^qualified 1, skipped 0, refused 0, crashed 0, hung 0, unmeasured 1, ' "$out/sync.txt" || fail "plugin-qualify-sync: $(cat "$out/sync.txt")"
+  grep -q 'no JACK server' "$out/sync.err" || fail "the sync did not name the missing JACK server: $(cat "$out/sync.err")"
+  [ "$(grep -c ' verdict=in-process$' "$out/sync/qualified.pins")" -eq 1 ] || fail "the sync's pin file does not pin the CLAP fixture in-process"
+fi
 echo "check-installed: plugin-qualify-sync qualifies a CLAP and an LV2 plugin, and its units are enabled"

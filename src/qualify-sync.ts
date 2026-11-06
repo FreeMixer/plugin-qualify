@@ -28,7 +28,8 @@ import { DISTRIBUTED_DIR_SYSTEM, EMPTY_LAYER, applyDistributed, distributedUri, 
 import { clapSearchPath, parseClapScan } from "./clap-loader.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
 import { shippedHostProfile, type HostProfile } from "./host-profiles.js";
-import { lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
+import { NO_JACK_SERVER } from "./host-admission.js";
+import { iriPath, lv2BundlesOnPath, manifestPlugins } from "./lv2-loader.js";
 import { judgmentPinEntries, pinClearLine, pinLineUri, pinsFile, type PinEntry } from "./pins-file.js";
 import { POOL_RESULT, completePool, judgePoolRun, pinAfterPool, pinFromRecordWithPool, poolEnv, spawnedPoolRunner, type PoolRunner } from "./qualify-pool.js";
 import { hostdPinFiles, type PinFilesRun } from "./hostd-pin-files.js";
@@ -441,7 +442,7 @@ export function discoverSyncItems(
         const binary = lilv?.binary ?? (p.binary === undefined ? undefined : join(bundle, p.binary));
         const files = ["manifest.ttl", ...p.files.filter((f) => f !== "manifest.ttl")];
         // a binary named by an absolute IRI (a complement's) is tracked through the bundle's link to it, when it has one
-        if (binary !== undefined && !files.includes(basename(binary)) && linksTo(join(bundle, basename(binary)), binary)) files.push(basename(binary));
+        if (binary !== undefined && !files.some((f) => iriPath(f) === basename(binary)) && linksTo(join(bundle, basename(binary)), binary)) files.push(basename(binary));
         items.push({ key: `lv2:${p.uri}`, format: "lv2", root: bundle, files, uri: p.uri, ...(binary === undefined ? {} : { binary }) });
       }
     }
@@ -481,7 +482,10 @@ export function fileSha256(path: string): string {
 export function digestFiles(root: string, files: readonly string[], known: readonly FileDigest[] = []): FileDigest[] | undefined {
   const out: FileDigest[] = [];
   for (const path of [...new Set(files)].sort()) {
-    const full = join(root, path);
+    // a name may be an IRI's word (the pin keeps `libSurge%20XT.so`); the file is the path it decodes to, and a name
+    // that is a file as written (a .clap with a % in it) is read as written when the decoded one is not there
+    const decoded = join(root, iriPath(path));
+    const full = existsSync(decoded) ? decoded : join(root, path);
     try {
       const st = statSync(full);
       if (!st.isFile()) return undefined;
@@ -525,6 +529,7 @@ export function machineReason(p: Pick<SyncPlugin, "outcome" | "code" | "detail">
   if (p.outcome !== "unmeasured" || p.code !== SYNC_CODE.notMeasured) return undefined;
   const errno = /\b(EACCES|EPERM|ENOSPC)\b/.exec(p.detail ?? "")?.[1];
   if (errno !== undefined) return errno;
+  if ((p.detail ?? "").startsWith(NO_JACK_SERVER)) return NO_JACK_SERVER;
   return /wrote no document|cannot run the probe runner/.test(p.detail ?? "") ? "the measurement wrote no document" : undefined;
 }
 
@@ -622,7 +627,7 @@ export function recordedAsIs(item: SyncItem, entry: SyncEntry | undefined): { sa
  */
 export function sameBinaryElsewhere(item: SyncItem, entry: SyncEntry | undefined): SyncEntry | undefined {
   if (item.format !== "lv2" || entry === undefined || item.binary === undefined || resolve(entry.root) === resolve(item.root)) return undefined;
-  const was = entry.files.find((f) => basename(f.path) === basename(item.binary!));
+  const was = entry.files.find((f) => basename(iriPath(f.path)) === basename(item.binary!));
   if (was === undefined) return undefined;
   let now: string;
   try {
