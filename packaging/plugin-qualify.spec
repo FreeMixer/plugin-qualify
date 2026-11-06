@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.19.0
+Version:        0.19.1
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -20,8 +20,8 @@ BuildRequires: pkgconfig
 BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
-BuildRequires: (pkgconfig(plugin-db) >= 0.1.0 with pkgconfig(plugin-db) < 0.2)
-BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.3.0 with pkgconfig(plugin-hostd-protocol) < 0.4)
+BuildRequires: (pkgconfig(plugin-db) >= 0.2.0 with pkgconfig(plugin-db) < 0.3)
+BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.4.0 with pkgconfig(plugin-hostd-protocol) < 0.5)
 BuildRequires: (pkgconfig(omx-contract) >= 3.9.1 with pkgconfig(omx-contract) < 4)
 BuildRequires: (pkgconfig(omx-clap-lv2) >= 0.26.2 with pkgconfig(omx-clap-lv2) < 0.30)
 BuildRequires: (pkgconfig(omxdsp) >= 0.21.0 with pkgconfig(omxdsp) < 0.31)
@@ -36,19 +36,19 @@ Requires: python3-lilv
 Requires: python3-jsonschema
 # plugin-hostd-probe, the runner every CLAP plugin is measured through; --pin-files, which the sync takes its pins from, first released in 0.15.0
 # 0.15.3: the memory footprint in the probe output, without which every host with a budget reads unmeasured (#114)
-Requires: (plugin-hostd >= 0.15.3 with plugin-hostd < 0.19)
+Requires: (plugin-hostd >= 0.15.3 with plugin-hostd < 0.20)
 # mod-host is the comparison host: --host-profile mod-host and the hosting sweep run it when it is installed, and
 # without it those verdicts read mod-host.not-installed. Nothing else uses it, so it is only suggested; a machine
 # that runs a published comparison or benchmark installs mod-host (and jalv) itself.
 Suggests: mod-host
 # omx-clap-scan, which lists the plugins in a .clap before each is qualified; from 0.23.0 its rows carry the
 # remote-control pages (remote_controls), which the descriptors keep
-Requires: (omx-clap-host >= 0.23.0 with omx-clap-host < 0.30)
+Requires: (omx-clap-host >= 0.23.0 with omx-clap-host < 0.31)
 # the hosting codes' TypeScript modules, which the shipped tools/gen-hosting-codes.mjs reads through
 # tools/clap-core-tsdir.mjs (the CLI's codes are generated at build time, src/hosting-codes.generated.ts):
 # /usr/share/omx-clap-core/ts, in the runtime package omx-clap-core from 0.17.0 on; the host above brings the same version
 # 0.25.1: the hosting.memory.* codes (#114); 0.26.2: the guarded plugin call and hosting.stability.callee-saved-clobbered
-Requires: (omx-clap-core >= 0.26.2 with omx-clap-core < 0.30)
+Requires: (omx-clap-core >= 0.26.2 with omx-clap-core < 0.31)
 %{?systemd_requires}
 
 # The JavaScript and Python are scripts run by their interpreters, never compiled modules.
@@ -133,6 +133,9 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.1-1
+- Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3, plugin-hostd-protocol
+  >= 0.4.0 and < 0.5, plugin-hostd < 0.20, omx-clap-core and omx-clap-host < 0.31
 * Wed Nov 04 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.0-1
 - plugin-qualify compare: every plugin under omx-clap-host, plugin-hostd, mod-host
   and jalv with the same checks on one private JACK server, one row per plugin
