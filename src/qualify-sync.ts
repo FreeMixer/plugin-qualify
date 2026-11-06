@@ -1531,7 +1531,7 @@ async function runLocked(settings: SyncSettings, options: SyncRunOptions): Promi
   {
     const started = Date.now();
     const dirs = [...settings.clapDirs, ...settings.lv2Dirs];
-    const ctx: SyncContext = { settings, env, log, ...(options.pinFilesRun === undefined ? {} : { pinFilesRun: options.pinFilesRun }), ...(options.isolatedRunner === undefined ? {} : { isolatedRunner: options.isolatedRunner }),, ...(options.poolRunner === undefined ? {} : { poolRunner: options.poolRunner }) };
+    const ctx: SyncContext = { settings, env, log, ...(options.pinFilesRun === undefined ? {} : { pinFilesRun: options.pinFilesRun }), ...(options.isolatedRunner === undefined ? {} : { isolatedRunner: options.isolatedRunner }), ...(options.poolRunner === undefined ? {} : { poolRunner: options.poolRunner }) };
     // the pins first, before the quiet wait and any measurement: an upgrade of plugin-hostd that collects more files
     // than the pins on disk hold refuses those plugins until their pins name them (plugin-qualify#239)
     const fresh = refreshPins(ctx, readSyncState(settings.stateFile, log));
