@@ -7,10 +7,10 @@ plugin-qualify-records-package \- the Debian package of a device's qualification
 \fB\-\-host\-class\fR \fIclass\fR \fB\-\-set\fR \fIset\fR \fB\-\-provenance\fR \fIjson\fR
 [\fB\-\-version\fR \fIversion\fR] [\fB\-\-out\fR \fIdir\fR] [\fB\-\-maintainer\fR \fIwho\fR]
 .SH DESCRIPTION
-Builds \fBomx-qualification-\fIclass\fB-\fIset\fB_\fIversion\fB_all.deb\fR from the qualification directory
+Builds \fBplugin-db-qualification-\fIclass\fB-\fIset\fB_\fIversion\fB_all.deb\fR, a package of plugin-db's qualification layer, from the qualification directory
 plugin-qualify-sync(1) left on a device. The package installs every record, with the probe output it judged, under
-/usr/share/omx/qualification/\fIclass\fR/\fIset\fR/ beside \fBprovenance.json\fR, and depends on the
-plugin-qualify that reads that directory. On another device of the class, plugin-qualify-sync takes a plugin from
+/usr/share/omx/qualification/\fIclass\fR/\fIset\fR/ beside \fBprovenance.json\fR, and depends on the minor
+of the plugin-qualify that wrote it, up to the next minor. On another device of the class, plugin-qualify-sync takes a plugin from
 those records instead of measuring it, and only when every file of the installed plugin hashes as the measured one
 did.
 .PP

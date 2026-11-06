@@ -52,7 +52,7 @@ export function fixtureProvenance(hostClass: string, set: string): Record<string
     schema: "plugin-qualify.distributed-provenance/1",
     set,
     hostClass,
-    package: { name: `omx-qualification-${hostClass}-${set}`, version: "2026.10.29" },
+    package: { name: `plugin-db-qualification-${hostClass}-${set}`, version: "2026.10.29" },
     date: "2026-10-29",
     image: "a test image",
     packages: { "plugin-qualify": "0.16.1" },

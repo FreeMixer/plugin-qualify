@@ -4,7 +4,8 @@
  * `plugin-qualify-records-package`: the Debian package of a device's qualification records, so other devices of the
  * machine class install them as the distributed layer instead of measuring the same plugin set again.
  *
- * In: a qualification directory as plugin-qualify-sync leaves it. Out: `omx-qualification-<class>-<set>_<version>_all.deb`
+ * In: a qualification directory as plugin-qualify-sync leaves it. Out: `plugin-db-qualification-<class>-<set>_<version>_all.deb`,
+ * a package of plugin-db's qualification layer,
  * installing every record and the probe output it judged under `/usr/share/omx/qualification/<class>/<set>/`, beside
  * the set's `provenance.json`. A record goes in only with its probe output, byte for byte the copy the record names;
  * an unmeasured record never applies and stays out. The archive is written here, `ar` and two `tar.xz` members, so a
@@ -16,7 +17,7 @@ import { closeSync, copyFileSync, mkdirSync, mkdtempSync, openSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DISTRIBUTED_DIR_SYSTEM, DISTRIBUTED_LAYER_SINCE, DISTRIBUTED_PROVENANCE_FILE, DISTRIBUTED_PROVENANCE_SCHEMA, type DistributedProvenance } from "./distributed-records.js";
+import { DISTRIBUTED_DIR_SYSTEM, DISTRIBUTED_PROVENANCE_FILE, DISTRIBUTED_PROVENANCE_SCHEMA, type DistributedProvenance } from "./distributed-records.js";
 import { sha256Hex } from "./probe-output.js";
 import { QUALIFICATION_RECORD_SCHEMA } from "./qualification-record.js";
 
@@ -53,7 +54,7 @@ export function recordsPackageHelp(): string {
     "  --maintainer <who>       the package's Maintainer field",
     "  --help                   this text",
     "",
-    `the package installs ${DISTRIBUTED_DIR_SYSTEM}/<class>/<set>/ and depends on plugin-qualify (>= ${DISTRIBUTED_LAYER_SINCE})`,
+    `the package installs ${DISTRIBUTED_DIR_SYSTEM}/<class>/<set>/ and depends on this plugin-qualify's minor, up to the next one`,
     "exit 0 the package was written, 2 it could not be",
     "",
   ].join("\n");
@@ -97,7 +98,21 @@ export function parseRecordsPackageArgs(argv: readonly string[]): { ok: true; ar
 }
 
 /** The package of a class and a set. */
-export const recordsPackageName = (hostClass: string, set: string): string => `omx-qualification-${hostClass}-${set}`;
+export const recordsPackageName = (hostClass: string, set: string): string => `plugin-db-qualification-${hostClass}-${set}`;
+
+/** The plugin-qualify a package of records depends on: the minor that wrote them, up to the next minor. */
+export function recordsDependsRange(version: string): { floor: string; ceiling: string } | undefined {
+  const m = /^(\d+)\.(\d+)\.\d+/.exec(version);
+  if (m === null) return undefined;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  return { floor: `${String(major)}.${String(minor)}.0`, ceiling: `${String(major)}.${String(minor + 1)}` };
+}
+
+/** This plugin-qualify's own version, read where it is installed. */
+function ownVersion(): string {
+  return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "";
+}
 
 /** Today as a package version, `2026.10.29`, and as a date, `2026-10-29`, in local time. */
 export function today(now = new Date()): { version: string; date: string } {
@@ -199,6 +214,8 @@ export interface BuiltRecordsPackage {
 /** The package of `args`, written into `args.out`. Throws, naming why, when it cannot be built. */
 export function buildRecordsPackage(args: RecordsPackageArgs, now = new Date()): BuiltRecordsPackage {
   const name = recordsPackageName(args.hostClass, args.set);
+  const range = recordsDependsRange(ownVersion());
+  if (range === undefined) throw new Error("this plugin-qualify names no version, so the package cannot say which one reads it");
   const day = today(now);
   const version = args.version ?? day.version;
   statSync(args.stateDir);
@@ -238,13 +255,13 @@ export function buildRecordsPackage(args: RecordsPackageArgs, now = new Date()):
         "Architecture: all",
         `Maintainer: ${args.maintainer}`,
         `Installed-Size: ${String(kib)}`,
-        `Depends: plugin-qualify (>= ${DISTRIBUTED_LAYER_SINCE}~)`,
+        `Depends: plugin-qualify (>= ${range.floor}~), plugin-qualify (<< ${range.ceiling}~)`,
         "Section: sound",
         "Priority: optional",
         "Multi-Arch: foreign",
-        `Description: qualification records of the ${args.set} plugin set for ${args.hostClass}`,
-        ` The plugin-qualify records of the ${args.set} plugin set, measured on a`,
-        ` ${args.hostClass} device. plugin-qualify-sync takes a plugin from them instead of`,
+        `Description: plugin-db qualification layer: ${args.set} set for ${args.hostClass}`,
+        ` The qualification layer of the plugin database: the plugin-qualify records`,
+        ` of the ${args.set} plugin set, measured on a ${args.hostClass} device. plugin-qualify-sync takes a plugin from them instead of`,
         " measuring it, and only when every file of the installed plugin hashes as the",
         " measured one did; any other plugin is measured on the device as before.",
         "",
