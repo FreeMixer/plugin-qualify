@@ -71,7 +71,11 @@ def descriptor_dir(named=None, system=False, env=None, home=None):
 
 
 def _safe(text):
-    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+    """each byte of the UTF-8 text outside [A-Za-z0-9._-] as one '_', plugin-hostd-protocol's descriptor name rule"""
+    return "".join(chr(b) if chr(b) in _SAFE else "_" for b in text.encode("utf-8"))
+
+
+_SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
 
 
 def descriptor_file_name(plugin_id, version, sha256):

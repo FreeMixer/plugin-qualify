@@ -419,7 +419,19 @@ export interface NotMeasured {
   readonly code: string;
 }
 
-const safe = (text: string): string => text.replace(/[^A-Za-z0-9._-]/g, "_");
+/**
+ * A name part as plugin-hostd-protocol's descriptor name rule writes it (PHD_DESCRIPTOR_SAFE_CHAR): each byte of the
+ * UTF-8 text outside [A-Za-z0-9._-] is one "_", as plugin-hostd's descriptors.c reads the name. "é" is two bytes: "__".
+ */
+export function descriptorNamePart(text: string): string {
+  let out = "";
+  for (const byte of Buffer.from(text, "utf8")) {
+    const c = String.fromCharCode(byte);
+    out += /[A-Za-z0-9._-]/.test(c) && byte < 0x80 ? c : "_";
+  }
+  return out;
+}
+const safe = descriptorNamePart;
 
 /** `<id>@<version>-<sha256 first 12>.<offer>`: one binary and one offer, whatever the run. */
 export function qualificationBaseName(output: ProbeOutput): string {

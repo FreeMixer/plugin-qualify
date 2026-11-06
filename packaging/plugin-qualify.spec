@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.19.1
+Version:        0.19.3
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -21,7 +21,7 @@ BuildRequires: pkgconfig(clap)
 BuildRequires: pkgconfig(lilv-0)
 BuildRequires: pkgconfig(lv2)
 BuildRequires: (pkgconfig(plugin-db) >= 0.2.0 with pkgconfig(plugin-db) < 0.3)
-BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.4.0 with pkgconfig(plugin-hostd-protocol) < 0.5)
+BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.4.1 with pkgconfig(plugin-hostd-protocol) < 0.5)
 BuildRequires: (pkgconfig(omx-contract) >= 3.9.1 with pkgconfig(omx-contract) < 4)
 BuildRequires: (pkgconfig(omx-clap-lv2) >= 0.26.2 with pkgconfig(omx-clap-lv2) < 0.31)
 BuildRequires: (pkgconfig(omxdsp) >= 0.21.0 with pkgconfig(omxdsp) < 0.31)
@@ -133,6 +133,13 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.3-1
+- A CLAP file whose name holds a space or a separator of pin_set (Surge XT's
+  "Surge XT.clap") is pinned: clap-qualify writes the name as one
+  percent-encoded word, as plugin-hostd-protocol 0.4.1 declares a pin path,
+  where it was unpinnable. lv2-measure writes its paths with the same
+  encoder, and its Qt platform is the protocol's PHD_HEADLESS_QT_PLATFORM
+- plugin-hostd-protocol floor 0.4.1, ceiling below 0.5
 * Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.1-1
 - Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3, plugin-hostd-protocol
   >= 0.4.0 and < 0.5, plugin-hostd < 0.20, omx-clap-core and omx-clap-host < 0.31

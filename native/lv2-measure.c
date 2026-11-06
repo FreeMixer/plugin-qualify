@@ -79,6 +79,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <plugin-hostd/protocol.h>
 #include <malloc.h>
 #include <sys/wait.h>
 
@@ -1263,7 +1265,7 @@ int main(int argc, char **argv) {
   /* A Qt plugin aborts at instantiate when it finds no display (synthv1, samplv1, padthv1, drumkv1). The console's hosts
    * on a Zynthian run under its X server; this measurer runs without one, so a display-less run names Qt's offscreen
    * platform, which instantiates as the X server does. A display or a platform already named is left as it is. */
-  if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) setenv("QT_QPA_PLATFORM", "offscreen", 0);
+  if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) setenv("QT_QPA_PLATFORM", PHD_HEADLESS_QT_PLATFORM, 0);
   /* lilv refuses a relative LV2_PATH segment and the world it leaves is a null dereference: resolve them first. */
   if (lv2_path_resolve_env() != 0) {
     fprintf(stderr, "lv2-measure: cannot resolve LV2_PATH against the working directory: %s\n", strerror(errno));

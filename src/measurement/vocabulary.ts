@@ -94,9 +94,9 @@ const UNMEASURED_DESCRIPTIONS: Readonly<Record<UnmeasuredCode, string>> = {
   "needs-impulse-response":
     "A convolver requiring an IR file the prober did not load.",
   "unpinnable":
-    "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a path holding ',', '=' or " +
-      "whitespace, a manifest using @base or a percent-encoded IRI, or a CLAP plugin with more parameters than the " +
-      "host accepts. The plugin stays unpinned, never partly pinned.",
+    "The files the host loads cannot be pinned (plugin-qualify spec §11.1): a manifest using @base, a file name " +
+      "longer than a pin path, or a CLAP plugin with more parameters than the host accepts. A name with a space or a " +
+      "separator of pin_set is pinned percent-encoded. The plugin stays unpinned, never partly pinned.",
   "no-voices":
     "An instrument whose voice-info declares a voice capacity of 0: there is no voice to hold down, so its " +
       "cost with notes held cannot be taken.",

@@ -10,7 +10,7 @@ Build-Depends: debhelper-compat (= 13),
                liblilv-dev,
                lv2-dev,
                plugin-db-dev (>= 0.2.0~), plugin-db-dev (<< 0.3~),
-               libplugin-hostd-protocol-dev (>= 0.4.0~), libplugin-hostd-protocol-dev (<< 0.5~),
+               libplugin-hostd-protocol-dev (>= 0.4.1~), libplugin-hostd-protocol-dev (<< 0.5~),
                libomx-contract-dev (>= 3.9.1~), libomx-contract-dev (<< 4~),
                libomx-clap-lv2-dev (>= 0.26.2~), libomx-clap-lv2-dev (<< 0.31~),
                libomxdsp-dev (>= 0.21.0~), libomxdsp-dev (<< 0.31~)

@@ -39,7 +39,7 @@ import { adapterPass, type AdapterPassOptions, type AdapterPassResult } from "./
 import { ISOLATED_RESULT, baseSteps, completeIsolated, isolatedCell, missingSteps, judgeIsolatedRun, owesIsolated, pinAfterStep, spawnedIsolatedRunner, type IsolatedRunner } from "./qualify-isolated.js";
 import { lv2World, rejudgeRecord, rejudgeState, rejudgeToolName, memoryPass, type MemoryPassResult, type RejudgeResult } from "./qualify-rejudge.js";
 import { memoryBoundOf, parseMemoryLimit, type MemoryBound } from "./memory-bound.js";
-import { QUALIFICATION_RECORD_SCHEMA, latencyNeverTaken, rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
+import { QUALIFICATION_RECORD_SCHEMA, descriptorNamePart, latencyNeverTaken, rewriteRecord, writeQualification, type NotMeasured, type QualificationRecord } from "./qualification-record.js";
 import { ADMIT_STEP_MS_ENV, DESCRIPTOR_DIR_STATE_SUBDIR, DESCRIPTOR_DIR_SYSTEM, MEMORY_PASS_PROBE_NOTES, QUALIFY_QUANTA, QUALIFY_RATES } from "./qualify-declarations.js";
 import { toolsDir } from "./tool-paths.js";
 import { writeFileWhole } from "./whole-file.js";
@@ -711,7 +711,7 @@ function outcomeOf(judgment: Judgment, host: string): { outcome: SyncOutcome; co
   return { outcome: v.rating === "unsuitable" ? "refused" : "unmeasured", ...(code === undefined ? {} : { code }) };
 }
 
-const safe = (text: string): string => text.replace(/[^A-Za-z0-9._-]/g, "_");
+const safe = descriptorNamePart;
 
 /** The record of a plugin no probe output exists for: what it is, the bytes it was, and why nothing was measured. */
 function writeUnmeasuredRecord(ctx: SyncContext, item: SyncItem, files: readonly FileDigest[], plugin: Omit<SyncPlugin, "record">): string {

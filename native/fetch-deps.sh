@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 #
-# The headers the prober builds against, each at a release tag: the CLAP SDK, plugin-db (pin.h) and plugin-hostd
-# (its protocol.h).
+# The headers the prober builds against, each at a release tag: the CLAP SDK, plugin-db (pin.h) and
+# plugin-hostd-protocol (<plugin-hostd/protocol.h>).
 # The omx-contract C header the LV2 measurer reads its rates from, at the version the packages require,
 # for a build with no omx-contract-devel installed.
 # omx-clap-core's LV2 feature provider, the static libomx-clap-lv2 and its header, at the version the
@@ -11,10 +11,10 @@
 # build with no omx-clap-lv2-devel installed. The same checkout's own ts/ (committed, not built) is
 # tools/gen-hosting-codes.mjs's fallback when no omx-clap-core-devel is installed (<dir>/omx-clap-core/ts).
 #
-#   fetch-deps.sh <dir> <clap-tag> <plugin-hostd-tag> <omx-contract-version> <omx-clap-core-version> <omx-dsp-version> <plugin-db-tag>
+#   fetch-deps.sh <dir> <clap-tag> <plugin-hostd-protocol-tag> <omx-contract-version> <omx-clap-core-version> <omx-dsp-version> <plugin-db-tag>
 set -eu
 
-usage="usage: fetch-deps.sh <dir> <clap-tag> <plugin-hostd-tag> <omx-contract-version> <omx-clap-core-version> <omx-dsp-version> <plugin-db-tag>"
+usage="usage: fetch-deps.sh <dir> <clap-tag> <plugin-hostd-protocol-tag> <omx-contract-version> <omx-clap-core-version> <omx-dsp-version> <plugin-db-tag>"
 dir=${1:?$usage}
 clap_ref=${2:?$usage}
 hostd_ref=${3:?$usage}
@@ -32,7 +32,7 @@ fetch() { # <url> <tag> <into>
 
 mkdir -p "$dir"
 fetch https://github.com/free-audio/clap "$clap_ref" "$dir/clap"
-fetch https://github.com/FreeMixer/plugin-hostd "$hostd_ref" "$dir/plugin-hostd"
+fetch https://github.com/FreeMixer/plugin-hostd-protocol "$hostd_ref" "$dir/plugin-hostd-protocol"
 fetch https://github.com/FreeMixer/plugin-db "$pin_ref" "$dir/plugin-db"
 
 rm -rf "$dir/omx-contract"
