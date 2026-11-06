@@ -317,11 +317,14 @@ const piMemory = (ramGib: number): NonNullable<HostBudget["memory"]> => ({
 /**
  * The cells a Raspberry Pi runs: zynthian-sys's JACK settings, 48000/128 on a Pi 5 with the V5 kit and 48000/256 on a Pi 4 and
  * the other kits, the one a Pi 5 with no kit card also ran its stress and first boot at. The Zynthian benchmark's matrix sweeps
- * more cells; these two are what a Pi is set to.
+ * more cells; these two are what a Pi is set to. Every Pi matrix carries 96000 beside 48000, so each of the two quanta
+ * is also run at twice the base rate: the passes that follow these cells (adapter, isolated, memory, pool) cost twice as long.
  */
 export const PI_CELLS = [
   { rate: MEASURE_BASE_RATE, quantum: 128 },
   { rate: MEASURE_BASE_RATE, quantum: 256 },
+  { rate: 2 * MEASURE_BASE_RATE, quantum: 128 },
+  { rate: 2 * MEASURE_BASE_RATE, quantum: 256 },
 ];
 
 export const HOST_BUDGETS = {

@@ -14,7 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { HOSTING_CODE } from "./hosting-codes.js";
 import type { AdmissionRuns } from "./host-admission.js";
-import { JALV_PROFILE, OMX_CLAP_HOST_CONFIGURED_EXTENSIONS, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
+import { shippedHostProfile, JALV_PROFILE, OMX_CLAP_HOST_CONFIGURED_EXTENSIONS, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { ProbeRunnerError, clapRunnerArgs, lv2RunnerArgs, probeRunnerTool, probeTarget, qualifyTargets, type ProbeRun } from "./probe-runner.js";
 import { fixtureJson, fixtureText, clapLineFixture, probeOutputOfLine, withoutMemoryBudget } from "./probe-output-fixtures.js";
 import {
@@ -255,6 +255,24 @@ describe("qualifyTargets: a pass over the targets", () => {
       [LV2.uri, "jalv", "conditional", HOSTING_CODE.rtSafetyViolations],
     ]);
     expect(pass.documents).toEqual([]);
+  });
+
+  it("no JACK server stops the pass by name, and the probe runner is never started", () => {
+    const { run, calls } = runner(() => JSON.stringify(fixtureJson("success-msi")));
+    const noJack: AdmissionRuns = { ...HOSTS_ADMIT, adapter: () => ({ installed: true, steps: [{ cmd: "add", resp: -201 }] }) };
+    const go = () => qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: noJack });
+    expect(go).toThrow(ProbeRunnerError);
+    expect(go).toThrow(/^no JACK server: omx-clap-host could not open a JACK client \(resp -201\)/);
+    expect(calls).toEqual([]);
+  });
+
+  it("the same for mod-host with no JACK server, the adapter being fine", () => {
+    const { run, calls } = runner(() => JSON.stringify(fixtureJson("success-msi")));
+    const ok = { installed: true, steps: [{ cmd: "add" as const, resp: 0 }, { cmd: "remove" as const, resp: 0 }] };
+    const noJack: AdmissionRuns = { ...HOSTS_ADMIT, adapter: () => ok, modHost: () => ({ installed: true, steps: [{ cmd: "add", resp: -201 }] }) };
+    const profile = shippedHostProfile("mod-host")!;
+    expect(() => qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [profile], admissions: noJack })).toThrow(/^no JACK server: mod-host could not open a JACK client/);
+    expect(calls).toEqual([]);
   });
 
   it("a run that crashed is a verdict of unknown, unmeasured, with the run's outcome, and its document is kept", () => {

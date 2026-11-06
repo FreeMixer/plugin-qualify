@@ -106,6 +106,7 @@ describe("a plugin the machine left unmeasured (#192)", () => {
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe exited 2 measuring x, and wrote no document: open: ENOSPC"))).toBe("ENOSPC");
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe exited 2 measuring x, and wrote no document"))).toBe("the measurement wrote no document");
     expect(machineReason(u(SYNC_CODE.notMeasured, "probe: no such plugin x"))).toBeUndefined();
+    expect(machineReason(u(SYNC_CODE.notMeasured, "no JACK server: omx-clap-host could not open a JACK client (resp -201)"))).toBe("no JACK server");
     expect(machineReason(u("probe.limit.not-implemented"))).toBeUndefined();
     expect(machineReason({ outcome: "qualified" })).toBeUndefined();
   });

@@ -22,7 +22,6 @@ import { HOSTD_ENV } from "./hostd-pin-files.js";
 import { freeDeadJackSlots } from "./jack-registry.js";
 import { cellKey, type GridCell } from "./measurement-grid.js";
 import { defaultAddressSpaceLimit } from "./direct-limit.js";
-import { PROBE_OK } from "./probe-output.js";
 import { QUALIFICATION_RECORD_SCHEMA, type AdapterBlock, type QualificationRecord } from "./qualification-record.js";
 import { ADMIT_ADDRESS_KB_ENV, ADMIT_STATE_DIR_ENV, ADMIT_STEP_MS_ENV, PI_CELLS } from "./qualify-declarations.js";
 import { digestFiles, type SyncContext, type SyncState } from "./qualify-sync.js";
@@ -90,7 +89,8 @@ const REAPING_JACKD = `trap 'kill -TERM $p 2>/dev/null' TERM; trap 'kill -KILL $
 
 /** `jackd` on a name of its own and the dummy driver, at the cell's rate and quantum; `undefined` when none came up. */
 export const startPrivateJack: JackStarter = (cell) => {
-  const name = `omx-qualify-${String(process.pid)}-${String(cell.quantum)}`;
+  // the rate is in the name: the cells of one pass run at the same quantum at two rates, on servers alive together
+  const name = `omx-qualify-${String(process.pid)}-${String(cell.rate)}-${String(cell.quantum)}`;
   // the rows of servers of ours that were killed, freed before this one asks for a row
   freeDeadJackSlots();
   let child: ChildProcess;
@@ -238,8 +238,7 @@ const readRecord = (path: string): QualificationRecord | undefined => {
 };
 
 /**
- * The run of each LV2 plugin of the state whose probe ended well (one that did not has no verdict a run could decide), at
- * each cell. Each record is written whole as its plugin ends.
+ * The run of each LV2 plugin of the state, whatever its probe ended with, at each cell. Each record is written whole as its plugin ends.
  */
 export function adapterPass(ctx: SyncContext, state: SyncState, options: AdapterPassOptions = {}): AdapterPassResult {
   const read = hostVersions(ctx.env, options.versions);
@@ -279,7 +278,9 @@ export function adapterPass(ctx: SyncContext, state: SyncState, options: Adapter
           count.failed++;
           continue;
         }
-        if (record.probe.outcome !== PROBE_OK) continue;
+        // a probe that crashed, hung or measured nothing is run too: the adapter's own process is not the probe's, and its
+        // answer replaces whatever the main run recorded there (a missing JACK server's no-jack-client), so no record keeps a
+        // stale code. The probe's outcome stays in the record beside it.
         if (options.force !== true && adapterFinished(record, versions)) {
           count.already++;
           continue;

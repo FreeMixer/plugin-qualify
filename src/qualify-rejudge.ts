@@ -48,7 +48,7 @@ import {
   type RecordVerdict,
   type RunBlock,
 } from "./qualification-record.js";
-import { ISOLATED_RESULT, RUN_STEP, pinAfterStep, provenAlone } from "./qualify-isolated.js";
+import { ISOLATED_RESULT, RUN_STEP, isolatedFinished, pinAfterStep } from "./qualify-isolated.js";
 import { pinAfterPool, poolStepOf } from "./qualify-pool.js";
 import { PI_CELLS, PROBE_MEMORY_ONLY_ENV, PROBE_NOTES_ENV } from "./qualify-declarations.js";
 import { SYNC_STATE_SCHEMA, digestFiles, recordStem, type SyncContext, type SyncEntry, type SyncPlugin, type SyncState } from "./qualify-sync.js";
@@ -198,9 +198,9 @@ export function rejudgeRecord(record: QualificationRecord, probeBytes: Uint8Arra
   const { profiles, kept } = rejudgeProfiles(record, output, options.host);
   const { reasons, owes: runs } = runsOwed(record, output, profiles);
   const judgment = judgeProbeOutput(output, profiles, { admissions: admissionsOf(record), owed: reasons });
-  // decides no verdict: a record from before the steps that reads isolated stays offered, runs alone, and is not proven by the step
+  // decides no verdict: a record from before the steps that reads isolated stays offered and runs alone, and owes the step until one has finished; a refusal is finished: it is the step's verdict, not debt
   const readsIsolated = judgment.hosts.some((h) => h.verdict.measured && h.verdict.rating === "conditional");
-  const owes = readsIsolated && !provenAlone(record) ? [...runs, { measurement: "isolated-step" as const, code: OWED_CODE.isolatedStep }] : runs;
+  const owes = readsIsolated && !isolatedFinished(record) ? [...runs, { measurement: "isolated-step" as const, code: OWED_CODE.isolatedStep }] : runs;
   const memory = record.memoryRun === undefined ? {} : { memory: { tool: record.memoryRun.tool, measuredAt: record.memoryRun.measuredAt } };
   const a = record.adapter;
   const adapterTaken = a?.versions === undefined || a.measuredAt === undefined ? {} : { adapter: { versions: a.versions, measuredAt: a.measuredAt } };

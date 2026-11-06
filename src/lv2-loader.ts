@@ -64,11 +64,28 @@ function turtleTokens(ttl: string): Token[] {
   return out;
 }
 
+/**
+ * The path a file IRI names, as lilv and serd read it: a `file:` URI loses its scheme and authority, and the percent
+ * escapes of its path are decoded (`libSurge%20XT.so` is `libSurge XT.so` on the disk). A relative IRI is decoded the
+ * same way. A malformed escape leaves the text as written: the name is then looked up as it stands and not found, which
+ * is its own, named failure.
+ */
+export function iriPath(iri: string): string {
+  let path = iri;
+  const scheme = /^file:(?:\/\/[^/]*)?(?=\/)/i.exec(iri);
+  if (scheme !== null) path = iri.slice(scheme[0].length);
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 /** A plugin a manifest declares, with the files it names for it, each relative to the bundle, in the order named. */
 export interface ManifestPlugin {
   readonly uri: string;
   readonly files: readonly string[];
-  /** The basename of its `lv2:binary`, when it names one. */
+  /** The basename of its `lv2:binary` as it is on the disk (the IRI's escapes decoded), when it names one. `files` keep the IRI's word, which is what a pin holds. */
   readonly binary?: string;
 }
 
@@ -142,7 +159,7 @@ export function manifestPlugins(ttl: string): ManifestPlugin[] {
       if ((predicate === LV2_BINARY || predicate === RDFS_SEE_ALSO) && t.kind === "iri" && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(t.text) && !t.text.startsWith("/")) {
         const file = t.text.replace(/^(\.\/)+/, "");
         if (!entry.files.includes(file)) entry.files.push(file);
-        if (predicate === LV2_BINARY && entry.binary === undefined) entry.binary = basename(file);
+        if (predicate === LV2_BINARY && entry.binary === undefined) entry.binary = basename(iriPath(file));
       }
     }
   }

@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+from urllib.parse import unquote, urlparse
 
 import descriptors as desc
 from lv2_presets import read_presets
@@ -142,8 +143,9 @@ def bundle_path(plugin):
     if uri is None:
         return None
     p = str(uri)
-    if p.startswith("file://"):
-        p = p[len("file://"):]
+    if p.startswith("file:"):
+        # a file: URI's path is percent-decoded, as lilv and serd read it (`My%20Plugins` is `My Plugins` on the disk)
+        p = unquote(urlparse(p).path)
     return p.rstrip("/") or None
 
 

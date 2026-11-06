@@ -128,6 +128,21 @@ export function pinFromRecord(record: QualificationRecord): PinEntry | undefined
   return pinAfterStep({ uri, integrity: { files: sorted, layout } }, step);
 }
 
+/**
+ * Whether a step of the isolated kind is a verdict. A refusal (`isolated.silent-output`, `isolated.not-added`) is one: the
+ * plugin was tried and the answer is no. A step that could not run decided nothing, and neither did silence before the
+ * notes were played where a plugin could hear them: a step of that tool does not say how many inputs it linked. Those two
+ * are owed, and a pass tries them again.
+ */
+export function isolatedDecided(s: RunStep): boolean {
+  return s.step === RUN_STEP.isolated && s.result !== ISOLATED_RESULT.notRun && !(s.code === ISOLATED_CODE.silent && s.figures?.midiInputsLinked === undefined);
+}
+
+/** Whether the record holds a finished isolated step, of whatever answer: nothing about it is owed. */
+export function isolatedFinished(record: QualificationRecord): boolean {
+  return record.run?.steps.some(isolatedDecided) === true;
+}
+
 /** Whether the isolated step saw this plugin running alone. A record's word alone never says so. */
 export function provenAlone(record: QualificationRecord): boolean {
   return record.run?.steps.some((s) => s.step === RUN_STEP.isolated && s.result === ISOLATED_RESULT.isolated) === true;
@@ -223,10 +238,7 @@ export function runIdOf(record: QualificationRecord, dir: string): string | unde
  */
 export function completeIsolated(path: string, record: QualificationRecord, uri: string, cell: GridCell, runner: IsolatedRunner, env: Readonly<Record<string, string | undefined>>): { readonly record: QualificationRecord; readonly step: RunStep } | undefined {
   const isStep = (s: RunStep): boolean => s.step === RUN_STEP.isolated;
-  // a step that could not run decided nothing, and neither did silence before the notes were played where a plugin could
-  // hear them: a step of that tool does not say how many inputs it linked. A pass tries these again, and it takes their place
-  const decided = (s: RunStep): boolean => s.result !== ISOLATED_RESULT.notRun && !(s.code === ISOLATED_CODE.silent && s.figures?.midiInputsLinked === undefined);
-  if (!owesIsolated(record) || record.run?.steps.some((s) => isStep(s) && decided(s)) === true) return undefined;
+  if (!owesIsolated(record) || isolatedFinished(record)) return undefined;
   const id = runIdOf(record, join(path, ".."));
   if (id === undefined) return undefined;
   const step = judgeIsolatedRun(runner(uri, cell, env));

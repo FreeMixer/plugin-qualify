@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.19.1
+Version:        0.19.2
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -133,6 +133,14 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.2-1
+- An LV2 bundle or binary named with a space (Surge XT's libSurge%20XT.so, a bundle under a directory with a space) is
+  read as the file its URI names: the escapes are decoded, in the sync and in the scanner's bundle path
+- A finished isolated step that refused the plugin is a verdict, not an owed step
+- --adapter-only runs a plugin whose probe crashed, hung or measured nothing too, and its run replaces the code the main run left
+- The adapter, isolated, memory and pool passes run at 128 and 256 frames at 48000 and 96000, and the main run of a Pi host
+  measures the same four cells; a pass takes about twice as long
+- A run with no JACK server stops by name (no JACK server) instead of recording resp -201 in every record
 * Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.1-1
 - Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3, plugin-hostd-protocol
   >= 0.4.0 and < 0.5, plugin-hostd < 0.20, omx-clap-core and omx-clap-host < 0.31

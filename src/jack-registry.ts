@@ -3,7 +3,7 @@
 /**
  * JACK's table of its servers, /dev/shm/jack-shm-registry: a header, then eight rows of a pid and a name
  * (`jack-<uid>:<server>:`). A server that is killed never clears its row, and once the eight are taken no server starts.
- * The adapter pass starts and stops servers of its own, `omx-qualify-<pid>-<quantum>`; a row of one of those whose
+ * The adapter pass starts and stops servers of its own, `omx-qualify-<pid>-<rate>-<quantum>`; a row of one of those whose
  * process is gone is freed (pid 0, name empty) before the next start, as jackd frees its own row when it ends well.
  * Rows of any other server are never touched, and a file of another layout is left as it is.
  */
