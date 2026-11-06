@@ -12,10 +12,26 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { DISTRIBUTED_LAYER_SINCE } from "./distributed-records.js";
 import { FIXTURE_CLAP_ID, writeFakeClap, writeFixtureRecord } from "./distributed-records.support.js";
 import { parseSyncArgs, resolveSyncSettings, runSync } from "./qualify-sync.js";
-import { readDeb } from "./records-package.js";
+import { readDeb, recordsDependsRange, recordsPackageName } from "./records-package.js";
+
+// the plugin-qualify these records are written by: its minor, up to the next one
+const ownVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+const [ownMajor = 0, ownMinor = 0] = ownVersion.split(".").map(Number);
+const recordsFloor = `${String(ownMajor)}.${String(ownMinor)}.0`;
+const recordsCeiling = `${String(ownMajor)}.${String(ownMinor + 1)}`;
+
+describe("the records package's name and dependency", () => {
+  it("is named for plugin-db's qualification layer, the class and the set", () => {
+    expect(recordsPackageName("rpi5", "zynthian-vangelis")).toBe("plugin-db-qualification-rpi5-zynthian-vangelis");
+  });
+  it("depends on the minor of the plugin-qualify that wrote it, up to the next minor", () => {
+    expect(recordsDependsRange("0.19.3")).toEqual({ floor: "0.19.0", ceiling: "0.20" });
+    expect(recordsDependsRange("1.4.0")).toEqual({ floor: "1.4.0", ceiling: "1.5" });
+    expect(recordsDependsRange("x")).toBeUndefined();
+  });
+});
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TOOL = join(PKG, "bin", "plugin-qualify-records-package.mjs");
@@ -48,7 +64,7 @@ describe("plugin-qualify-records-package", () => {
   const given = join(scratch, "given.json");
   writeFileSync(given, JSON.stringify({ image: "a test image", packages: { "plugin-qualify": "0.16.1" }, sources: { ui: "0123abc" } }));
   const r = run([device.state, "--host-class", "test-class", "--set", "test-set", "--provenance", given, "--version", "2026.10.29", "--out", out]);
-  const deb = join(out, "omx-qualification-test-class-test-set_2026.10.29_all.deb");
+  const deb = join(out, "plugin-db-qualification-test-class-test-set_2026.10.29_all.deb");
   const dir = "./usr/share/omx/qualification/test-class/test-set";
 
   it("builds the package of the records, named for the class, the set and the version", () => {
@@ -63,16 +79,16 @@ describe("plugin-qualify-records-package", () => {
     const d = readDeb(deb);
     expect(d.members).toEqual(["debian-binary", "control.tar.xz", "data.tar.xz"]);
     expect(d.debianBinary).toBe("2.0\n");
-    expect(d.control["Package"]).toBe("omx-qualification-test-class-test-set");
+    expect(d.control["Package"]).toBe("plugin-db-qualification-test-class-test-set");
     expect(d.control["Version"]).toBe("2026.10.29");
     expect(d.control["Architecture"]).toBe("all");
-    expect(d.control["Depends"]).toBe(`plugin-qualify (>= ${DISTRIBUTED_LAYER_SINCE}~)`);
+    expect(d.control["Depends"]).toBe(`plugin-qualify (>= ${recordsFloor}~), plugin-qualify (<< ${recordsCeiling}~)`);
     expect(d.files).toEqual([...device.kept, "provenance.json"].map((f) => `${dir}/${f}`).sort());
     expect(d.controlFiles).toEqual(["./control", "./md5sums"]);
     if (dpkgDeb) {
       const listed = spawnSync("dpkg-deb", ["-c", deb], { encoding: "utf8" }).stdout.split("\n").filter((l) => l.startsWith("-")).map((l) => l.split(/\s+/).at(-1));
       expect(listed.sort()).toEqual(d.files);
-      expect(spawnSync("dpkg-deb", ["-f", deb, "Package"], { encoding: "utf8" }).stdout.trim()).toBe("omx-qualification-test-class-test-set");
+      expect(spawnSync("dpkg-deb", ["-f", deb, "Package"], { encoding: "utf8" }).stdout.trim()).toBe("plugin-db-qualification-test-class-test-set");
     }
   });
 
@@ -87,7 +103,7 @@ describe("plugin-qualify-records-package", () => {
       schema: "plugin-qualify.distributed-provenance/1",
       set: "test-set",
       hostClass: "test-class",
-      package: { name: "omx-qualification-test-class-test-set", version: "2026.10.29" },
+      package: { name: "plugin-db-qualification-test-class-test-set", version: "2026.10.29" },
       date: p.date,
     });
     expect(p.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);

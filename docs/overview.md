@@ -432,7 +432,7 @@ real-time safe of those observed, crashes, its median CPU, and the plugins where
 others, on running clean or on a clean audio thread). A run into a directory that holds a record made under the same
 conditions keeps it (`--force` compares again), so a long run that stopped is started again where it stopped.
 
-**`--publish`** makes a summary for the records (FreeMixer/omx-qualification-records, and from them the site's plugin
+**`--publish`** makes a summary for the records (FreeMixer/plugin-db-qualification, and from them the site's plugin
 pages). It needs `--host-class` and `--set`, and it is refused, before anything runs and with each missing host named,
 unless mod-host and jalv are both installed: a comparison is measured against them. Without `--publish` a run is a
 local look, and its summary says it is not publishable.
@@ -856,10 +856,10 @@ plugin-qualify-records-package /var/lib/omx/qualification --host-class rpi5 --se
   --provenance provenance.json --out .
 ```
 
-It writes `omx-qualification-<host class>-<set>_<version>_all.deb`, the version the build date
-(`2026.10.29`) unless `--version` names one. The package installs the records under
-`/usr/share/omx/qualification/<host class>/<set>/` with `provenance.json`, depends on the plugin-qualify that reads
-the layer, and is `Architecture: all`. `--provenance` names a JSON file (or holds the JSON itself) with what the tool
+It writes `plugin-db-qualification-<host class>-<set>_<version>_all.deb`, a package of plugin-db's qualification
+layer, the version the build date (`2026.10.29`) unless `--version` names one. The package installs the records under
+`/usr/share/omx/qualification/<host class>/<set>/` with `provenance.json`, depends on the minor of the plugin-qualify
+that wrote it up to the next minor (`plugin-qualify (>= 0.19.0~), plugin-qualify (<< 0.20~)`), and is `Architecture: all`. `--provenance` names a JSON file (or holds the JSON itself) with what the tool
 cannot know: the image, the package versions and the source revisions of the device. The tool adds the set, the host
 class, the package and the date. A record whose probe output is missing or does not match its SHA-256 is left out
 and named; a record of a plugin that could not be measured (`*.unmeasured.json`) is left out, since it never

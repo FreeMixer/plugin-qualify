@@ -29,9 +29,6 @@ export const DISTRIBUTED_DIR_SYSTEM = "/usr/share/omx/qualification";
 export const DISTRIBUTED_PROVENANCE_FILE = "provenance.json";
 export const DISTRIBUTED_PROVENANCE_SCHEMA = "plugin-qualify.distributed-provenance/1";
 
-/** The first plugin-qualify that reads the layer: what a package of records depends on. */
-export const DISTRIBUTED_LAYER_SINCE = "0.17.0";
-
 /** Where the records of a set come from. The keys below are always there; the rest is what the builder was given. */
 export interface DistributedProvenance {
   readonly schema: typeof DISTRIBUTED_PROVENANCE_SCHEMA;
