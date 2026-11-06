@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { startPrivateJack, type PrivateJack } from "./qualify-adapter-pass.js";
 import { launchDaemon, startDaemon, type RunningDaemon } from "./hostd-daemon.support.js";
 import { manifestPlugins } from "./lv2-loader.js";
 import { parsePinLine } from "./pins-file.js";
@@ -328,10 +329,17 @@ interface SyncRun {
   readonly ms: number;
 }
 
+// an LV2 plugin is admitted under omx-clap-host, which needs a JACK server; a run with none stops by name ("no JACK server"),
+// so the sweep gets a dummy one of its own, as the service has the device's. Where jackd is not installed the test skips (needs).
+let sweepJack: PrivateJack | undefined;
+afterAll(() => sweepJack?.stop());
+const sweepJackName = (): string | undefined => (sweepJack ??= startPrivateJack({ rate: 48000, quantum: 256 }))?.name;
+
 /** The entry point as the service runs it, and its summary line read back into numbers. */
 function sync(flags: readonly string[]): SyncRun {
   const started = Date.now();
-  const r = spawnSync(process.execPath, [SYNC, ...flags], { encoding: "utf8", env: { ...process.env, ...(RUNNER === undefined ? {} : { OMX_PROBE_RUNNER: RUNNER }) } });
+  const jack = sweepJackName();
+  const r = spawnSync(process.execPath, [SYNC, ...flags], { encoding: "utf8", env: { ...process.env, ...(RUNNER === undefined ? {} : { OMX_PROBE_RUNNER: RUNNER }), ...(jack === undefined ? {} : { JACK_DEFAULT_SERVER: jack, JACK_NO_START_SERVER: "1" }) } });
   const summary: Record<string, number> = {};
   for (const m of r.stdout.matchAll(/(qualified|skipped|refused|crashed|hung|unmeasured) (\d+)/g)) summary[m[1]!] = Number(m[2]);
   return { status: r.status, summary, stderr: r.stderr, ms: Date.now() - started };

@@ -277,7 +277,7 @@ describe("qualifyTargets: a pass over the targets", () => {
 
   it("a run that crashed is a verdict of unknown, unmeasured, with the run's outcome, and its document is kept", () => {
     const { run } = runner(() => fixtureText("plugin-crash"), 1);
-    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE] });
+    const pass = qualifyTargets([LV2], { rates: [48000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: HOSTS_ADMIT });
     expect(pass.failures).toEqual([]);
     expect(pass.verdicts).toEqual([{ uri: LV2.uri, host: "openmixer-console", measured: false, rating: "unknown", qualified: false, deciding: "probe.crashed" }]);
     expect(pass.runs).toHaveLength(1);
