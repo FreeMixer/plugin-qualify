@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.19.2
+Version:        0.19.3
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -133,7 +133,7 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
-* Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.2-1
+* Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.3-1
 - A CLAP file whose name holds a space or a separator of pin_set (Surge XT's
   "Surge XT.clap") is pinned: clap-qualify writes the name as one
   percent-encoded word, as plugin-hostd-protocol 0.4.1 declares a pin path,

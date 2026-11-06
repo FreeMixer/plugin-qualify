@@ -1,4 +1,4 @@
-plugin-qualify (0.19.2) unstable; urgency=medium
+plugin-qualify (0.19.3) unstable; urgency=medium
 
   * A CLAP file whose name holds a space or a separator of pin_set (Surge
     XT's "Surge XT.clap") is pinned: clap-qualify writes the name as one
