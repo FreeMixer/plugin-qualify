@@ -12,6 +12,8 @@ plugin-qualify (0.19.2) unstable; urgency=medium
     cells; a pass takes about twice as long.
   * A run with no JACK server stops by name (no JACK server) instead of
     recording resp -201 in every record.
+  * omx-dsp builds up to << 0.32 (only omx_lin_to_db_d is used); the channel
+    now carries 0.31.0.
 
  -- Pau Aliagas <linuxnow@gmail.com>  Fri, 06 Nov 2026 18:30:00 +0100
 
