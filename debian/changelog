@@ -1,3 +1,15 @@
+plugin-qualify (0.19.2) unstable; urgency=medium
+
+  * A CLAP file whose name holds a space or a separator of pin_set (Surge
+    XT's "Surge XT.clap") is pinned: clap-qualify writes the name as one
+    percent-encoded word, as plugin-hostd-protocol 0.4.1 declares a pin
+    path, where it was unpinnable. lv2-measure writes its paths with the
+    same encoder, and its Qt platform is the protocol's
+    PHD_HEADLESS_QT_PLATFORM.
+  * plugin-hostd-protocol floor 0.4.1, ceiling below 0.5.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Fri, 06 Nov 2026 17:45:00 +0100
+
 plugin-qualify (0.19.1) unstable; urgency=medium
 
   * Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3,

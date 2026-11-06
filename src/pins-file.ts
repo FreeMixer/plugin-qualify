@@ -127,8 +127,9 @@ export function pinClearLine(uri: string): string {
 
 /**
  * The line of one pin, or `undefined` when the integrity block is not a whole pin. The uri is one word, quoted when it
- * holds a space. A file path inside the bundle cannot hold whitespace, a comma or an equals sign (the protocol's PATH
- * limit: they are the separators of the words of a pin), so a plugin with such a file has no pin, refused by name.
+ * holds a space. A file path is the prober's, percent-encoded as plugin-hostd-protocol writes a pin path (Surge XT's
+ * "Surge XT.clap" is Surge%20XT.clap), so it holds no whitespace, comma or equals sign; one that does was not encoded,
+ * and the plugin has no pin, refused by name.
  */
 export function pinLine(entry: PinEntry): string | undefined {
   const { files, layout } = entry.integrity;

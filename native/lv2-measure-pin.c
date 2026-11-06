@@ -56,15 +56,15 @@ static char *plugin_version(LilvWorld *world, const LilvPlugin *plugin) {
   return version;
 }
 
-/* a file's path as the word of a pin: one word, a separator of pin_set or whitespace percent-encoded, as plugin-hostd reads it
+/* a file's path as the word of a pin: one word, percent-encoded as plugin-hostd-protocol writes a pin path
  * (libSurge XT.so is libSurge%20XT.so); malloc'd */
 static char *pin_word(const char *rel) {
-  char *word = malloc(strlen(rel) * 3 + 1), *o = word;
-  if (!word) return NULL;
-  for (const char *c = rel; *c; c++)
-    if (*c == '%' || strchr(PHD_PIN_PATH_EXCLUDED, *c)) o += sprintf(o, "%%%02X", (unsigned char)*c);
-    else *o++ = *c;
-  *o = '\0';
+  size_t size = strlen(rel) * 3 + 1;
+  char *word = malloc(size);
+  if (word && phd_pin_path_encode(rel, word, size) != 0) {
+    free(word);
+    return NULL;
+  }
   return word;
 }
 

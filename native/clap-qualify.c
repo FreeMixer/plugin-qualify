@@ -1351,9 +1351,12 @@ static void put_integrity(const char *named, const char *version, const char *sh
     put_string(version);
     fputc_out(',');
   }
-  if (strpbrk(base, PHD_PIN_PATH_EXCLUDED)) {
+  /* the file is one word of the pin, percent-encoded as plugin-hostd-protocol writes a pin path ("Surge XT.clap" is
+   * Surge%20XT.clap): any file name is pinned */
+  char word[PATH_MAX * 3];
+  if (phd_pin_path_encode(base, word, sizeof(word)) != 0) {
     fprintf(g_out, "\"unmeasuredReason\":\"unpinnable\",\"unmeasuredDetail\":");
-    put_string("the file name holds a separator of pin_set or whitespace");
+    put_string("the file name is longer than a pin path");
   } else if (pin->reason) {
     fprintf(g_out, "\"unmeasuredReason\":");
     put_string(pin->reason);
@@ -1361,7 +1364,7 @@ static void put_integrity(const char *named, const char *version, const char *sh
     put_string(pin->detail);
   } else {
     fprintf(g_out, "\"files\":[{\"path\":");
-    put_string(base);
+    put_string(word);
     fprintf(g_out, ",\"sha256\":");
     put_string(sha256);
     fprintf(g_out, "}],\"layout\":{\"scheme\":\"%s\",\"sha256\":\"%s\"}", PHD_PIN_LAYOUT_SCHEME, pin->layout);

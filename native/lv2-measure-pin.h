@@ -8,8 +8,8 @@
  * `rdfs:seeAlso` names for the plugin, each by its path relative to the bundle root, hashed over one
  * open descriptor. The layout: every control port, input and output, as the loaded world describes
  * it, in plugin-hostd's omx-layout/1. Both are plugin-hostd's `pin.h` records: this
- * unit only fills its records from lilv. A plugin whose files cannot be pinned (a path holding a
- * separator of `pin_set` or whitespace, a manifest using `@base`, a percent-encoded IRI) prints a
+ * unit only fills its records from lilv. A file name with a space or a separator of `pin_set` is
+ * pinned percent-encoded; a plugin whose files cannot be pinned (a manifest using `@base`) prints a
  * reason and no pin, never a partial one.
  */
 #ifndef LV2_MEASURE_PIN_H

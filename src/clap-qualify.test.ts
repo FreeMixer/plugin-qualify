@@ -28,7 +28,7 @@ import {
 } from "./clap-qualify.js";
 import { qualifyClap } from "./direct-prober.support.js";
 import { HOSTING_CODE } from "./hosting-codes.js";
-import { pinVerdictOf } from "./pins-file.js";
+import { clapPinUri, pinLine, pinVerdictOf, pinWord, pinWords } from "./pins-file.js";
 import { clapFeatureReasons } from "./hosting-suitability.js";
 import {
   OMX_CLAP_HOST_CONFIGURED_EXTENSIONS,
@@ -205,16 +205,19 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     expect(rtSafetyDocument(safe!).measured.integrity).toEqual(safe!.integrity);
   });
 
-  live("a .clap whose name holds a separator of pin_set or whitespace is unpinnable, not pinned", () => {
-    for (const name of ["a,b.clap", "sp ace.clap"]) {
+  live("a .clap whose name holds a space or a separator of pin_set is pinned as one percent-encoded word", () => {
+    // Surge XT ships as "Surge XT.clap": the pin names it Surge%20XT.clap (plugin-hostd-protocol's phd_pin_path_encode),
+    // and the pins file line is one plugin-hostd admits: the uri quoted, the file one bare word
+    for (const [name, word] of [["Surge XT.clap", "Surge%20XT.clap"], ["a,b=c.clap", "a%2Cb%3Dc.clap"], ["100%.clap", "100%25.clap"]] as const) {
       const named = join(scratch, name);
       copyFileSync(SAFE, named);
       const [l] = qualifyClap(named, SAFE_ID, { rates: [QUALIFY_RATES[0]!] });
-      expect(l!.integrity).toEqual({
-        version: "1",
-        unmeasuredReason: "unpinnable",
-        unmeasuredDetail: "the file name holds a separator of pin_set or whitespace",
-      });
+      expect(l!.integrity.unmeasuredReason).toBeUndefined();
+      expect(l!.integrity.files).toEqual([{ path: word, sha256: sha256(SAFE) }]);
+      const uri = clapPinUri(named, SAFE_ID);
+      const line = pinLine({ uri, integrity: l!.integrity });
+      expect(line).toBe(`pin_set ${pinWord(uri)} ${word}=${sha256(SAFE)} omx-layout/1:${l!.integrity.layout!.sha256}`);
+      expect(pinWords(line!)).toEqual(["pin_set", uri, `${word}=${sha256(SAFE)}`, `omx-layout/1:${l!.integrity.layout!.sha256}`]);
     }
   });
 
