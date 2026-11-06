@@ -26,7 +26,7 @@
 #
 # The CLAP headers come from `pkg-config clap` (Fedora clap-devel), else deps/clap; the pin header from
 # `pkg-config plugin-db` (plugin-db-devel) and the protocol's from `pkg-config plugin-hostd-protocol`
-# (plugin-hostd-protocol-devel), else deps/plugin-db and deps/plugin-hostd. omx-contract's limits
+# (plugin-hostd-protocol-devel), else deps/plugin-db and deps/plugin-hostd-protocol. omx-contract's limits
 # header from `pkg-config omx-contract` (omx-contract-devel, libomx-contract-dev), else deps/omx-contract. lilv and the LV2
 # headers from `pkg-config lilv-0` (lilv-devel, liblilv-dev). The LV2 measurer's host features are omx-clap-core's
 # provider, `pkg-config omx-clap-lv2` (omx-clap-lv2-devel, libomx-clap-lv2-dev), else deps/omx-clap-lv2.
@@ -36,8 +36,9 @@ PKG_CONFIG ?= pkg-config
 BUILD ?= build
 
 CLAP_REF := 1.2.6
-PLUGIN_HOSTD_REF := v0.15.3
-PLUGIN_DB_REF := v0.1.0
+# the protocol and the pin headers `make deps` fetches where no -devel is installed: the packages' floors
+PLUGIN_HOSTD_PROTOCOL_REF := v0.4.1
+PLUGIN_DB_REF := v0.2.0
 # the omx-contract `make deps` fetches where no omx-contract-devel is installed: the packages' floor, so the build
 # reads the contract the packages do (3.9.1: the first with <omxcontract/omx_json_write.h>, the one JSON string writer
 # every tool here spells its literals through).
@@ -60,7 +61,7 @@ ifeq ($(shell $(PKG_CONFIG) --exists plugin-db plugin-hostd-protocol && echo tru
 PLUGIN_HOSTD_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags plugin-db plugin-hostd-protocol)
 PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs plugin-db)
 else
-PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-db/include -Ideps/plugin-hostd/include
+PLUGIN_HOSTD_CFLAGS ?= -Ideps/plugin-db/include -Ideps/plugin-hostd-protocol/include
 PLUGIN_HOSTD_LIBS ?= $(shell $(PKG_CONFIG) --libs libcrypto)
 endif
 
@@ -337,7 +338,7 @@ $(BUILD)/fixtures/lv2/host-faithfulness.lv2/host-faithfulness.so: fixtures/lv2-h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LV2_CFLAGS) -shared -fPIC -fvisibility=hidden $(LDFLAGS) -o $@ $<
 
 deps:
-	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION) $(PLUGIN_DB_REF)
+	./fetch-deps.sh deps $(CLAP_REF) $(PLUGIN_HOSTD_PROTOCOL_REF) $(OMX_CONTRACT_VERSION) $(OMX_CLAP_CORE_VERSION) $(OMX_DSP_VERSION) $(PLUGIN_DB_REF)
 
 # the fixtures are the tests' own, never installed; the interposer is executable so rpm strips it (dh_fixperms clears the bit)
 # exactly src/qualify-declarations.ts's NATIVE_TOOLS (src/native-install-dirs.test.ts holds the two together)
