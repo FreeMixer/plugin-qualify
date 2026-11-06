@@ -733,6 +733,7 @@ static int count_threads(void) {
 /* A plugin that leaks shows in the resident set long before it crashes. */
 #include "rss-kb.h"
 #include "timing-sched.h"
+#include "note-onset.h"
 
 static const char *rt_kind_name(int k) {
   switch (k) {
@@ -902,7 +903,8 @@ static void release(struct host *h, LilvNodes *required, LilvNodes *optional, Li
  *            defaults, the response kept as the loudest output at each frame up to the declared figure plus
  *            LATENCY_TAIL, and the arrival read as the first frame at or above LATENCY_ONSET_OF_PEAK of the
  *            response's own peak. An instrument (no audio input, a MIDI input) is played A4 at velocity 127
- *            at frame 0 instead and let go at the end (`from: note`). A response that never leaves silence
+ *            at frame 0 instead and let go at the end (`from: note`), and its onset is the first frame above
+ *            LATENCY_SILENCE (note-onset.h): never its attack. A response that never leaves silence
  *            has no measured figure: it says why, never a guessed 0.
  *   cost     every control swept across its range, noise on every audio input, each run() timed alone: the
  *            warm-up head dropped, nanoseconds per sample, the median and the 95th percentile. An instrument
@@ -1015,16 +1017,21 @@ static void measure_latency(struct host *H, double rate, uint32_t block, struct 
     if (nonfinite) L->unmeasured = "non-finite-output", L->detail = "the response held a NaN or an infinity";
   }
   if (!L->unmeasured) {
-    float peak = 0.0f;
-    for (uint32_t i = 0; i < horizon; i++)
-      if (mag[i] > peak) peak = mag[i];
-    const float floor = peak * LATENCY_ONSET_OF_PEAK > LATENCY_SILENCE ? peak * LATENCY_ONSET_OF_PEAK : LATENCY_SILENCE;
     uint32_t seen_at = UINT32_MAX;
-    for (uint32_t i = 0; i < horizon && peak > LATENCY_SILENCE; i++)
-      if (mag[i] >= floor) {
-        seen_at = i;
-        break;
-      }
+    if (L->by_note) {
+      /* the note's first sample above the floor (note-onset.h): the patch's attack is not the plugin's latency */
+      seen_at = note_onset_at(mag, horizon, LATENCY_SILENCE);
+    } else {
+      float peak = 0.0f;
+      for (uint32_t i = 0; i < horizon; i++)
+        if (mag[i] > peak) peak = mag[i];
+      const float floor = peak * LATENCY_ONSET_OF_PEAK > LATENCY_SILENCE ? peak * LATENCY_ONSET_OF_PEAK : LATENCY_SILENCE;
+      for (uint32_t i = 0; i < horizon && peak > LATENCY_SILENCE; i++)
+        if (mag[i] >= floor) {
+          seen_at = i;
+          break;
+        }
+    }
     if (seen_at == UINT32_MAX) {
       L->unmeasured = "silent-output";
       L->detail = L->by_note ? "the note never sounded within the declared latency and the tail" : "the impulse never came out within the declared latency and the tail";

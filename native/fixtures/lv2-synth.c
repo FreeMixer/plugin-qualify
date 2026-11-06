@@ -10,6 +10,7 @@
  *   synth-alloc.lv2  built with -DFIXTURE_ALLOCATES_ON_NOTE, the same, which also allocates and frees a
  *                    scratch buffer on every note on: quiet and clean until it is played, the known
  *                    RT-unsafe instrument.
+ *   synth-attack.lv2 built with -DFIXTURE_ATTACK_MS=50, and synth-delay.lv2 with -DFIXTURE_DELAY_FRAMES=64: see voice_sample.
  *
  * Nothing else differs but the URI, so a verdict that tells them apart is what the note sweep counted.
  */
@@ -30,6 +31,10 @@
 /* through a volatile pointer, so the compiler cannot pair the malloc with the free and drop both */
 static void *(*volatile fixture_malloc)(size_t) = malloc;
 static void (*volatile fixture_free)(void *) = free;
+#elif defined FIXTURE_ATTACK_MS
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth-attack"
+#elif defined FIXTURE_DELAY_FRAMES
+#define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth-delay"
 #else
 #define FIXTURE_URI "urn:plugin-qualify:fixture:lv2-synth"
 #endif
@@ -45,7 +50,40 @@ enum { PORT_MIDI, PORT_OUT_L, PORT_OUT_R, PORT_GAIN };
 #define FIXTURE_DRUM_HIT_S 0.02
 #endif
 
-struct voice { int key; double phase, step; long left; };
+#define VOICE_LEVEL 0.05
+
+/*
+ * Two instruments whose latency is known, for the note-onset rule (note-onset.h):
+ *   FIXTURE_ATTACK_MS=50       a voice at FIXTURE_LEVEL with a 50 ms linear attack: no processing delay at all, so its
+ *                              latency is its first sample above the floor, never its attack.
+ *   FIXTURE_DELAY_FRAMES=64    a voice at FIXTURE_LEVEL that starts 64 frames after its note, at full level (a cosine): a
+ *                              real 64-frame processing delay.
+ */
+#if defined FIXTURE_ATTACK_MS || defined FIXTURE_DELAY_FRAMES
+#define FIXTURE_LEVEL 0.5
+#endif
+
+struct voice { int key; double phase, step; long left, since; };
+
+/* one voice's next sample, its phase and its age moved on */
+static double voice_sample(struct voice *v, double rate) {
+  (void)rate;
+#if defined FIXTURE_ATTACK_MS
+  const double attack = rate * FIXTURE_ATTACK_MS / 1000.0;
+  const double y = sin(v->phase) * FIXTURE_LEVEL * (v->since < attack ? (double)v->since / attack : 1.0);
+#elif defined FIXTURE_DELAY_FRAMES
+  if (v->since < FIXTURE_DELAY_FRAMES) {
+    v->since++;
+    return 0.0;
+  }
+  const double y = cos(v->phase) * FIXTURE_LEVEL;
+#else
+  const double y = sin(v->phase) * VOICE_LEVEL;
+#endif
+  v->phase += v->step;
+  v->since++;
+  return y;
+}
 
 struct synth {
   const LV2_Atom_Sequence *midi;
@@ -97,6 +135,7 @@ static void note_on(struct synth *s, int key) {
     if (s->voice[v].key < 0) {
       s->voice[v].key = key;
       s->voice[v].phase = 0.0;
+      s->voice[v].since = 0;
       s->voice[v].step = 2.0 * M_PI * 440.0 * pow(2.0, (key - 69) / 12.0) / s->rate;
 #ifdef FIXTURE_DRUM
       s->voice[v].left = (long)(s->rate * FIXTURE_DRUM_HIT_S);
@@ -124,8 +163,7 @@ static void render(struct synth *s, uint32_t from, uint32_t to) {
     double y = 0.0;
     for (int v = 0; v < VOICES; v++)
       if (s->voice[v].key >= 0) {
-        y += sin(s->voice[v].phase) * 0.05;
-        s->voice[v].phase += s->voice[v].step;
+        y += voice_sample(&s->voice[v], s->rate);
 #ifdef FIXTURE_DRUM
         if (--s->voice[v].left <= 0) s->voice[v].key = -1;
 #endif

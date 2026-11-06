@@ -62,6 +62,8 @@ const SYNTH = join(FIXTURES, "synth.clap");
 const SYNTH_ALLOC = join(FIXTURES, "synth-alloc.clap");
 const SYNTH_MIDI = join(FIXTURES, "synth-midi.clap");
 const SYNTH_STRICT = join(FIXTURES, "synth-strict.clap");
+const SYNTH_ATTACK = join(FIXTURES, "synth-attack.clap");
+const SYNTH_DELAY = join(FIXTURES, "synth-delay.clap");
 const REQUIRES_VOICE_INFO = join(FIXTURES, "requires-voice-info.clap");
 const REQUIRES_TIMER = join(FIXTURES, "requires-timer.clap");
 const REQUIRES_THREAD_POOL = join(FIXTURES, "requires-thread-pool.clap");
@@ -76,6 +78,8 @@ const BUILT = [
   SYNTH_ALLOC,
   SYNTH_MIDI,
   SYNTH_STRICT,
+  SYNTH_ATTACK,
+  SYNTH_DELAY,
   REQUIRES_VOICE_INFO,
   REQUIRES_TIMER,
   REQUIRES_THREAD_POOL,
@@ -184,6 +188,23 @@ describe("clap-qualify, live — the known RT-safe and RT-unsafe fixture plugins
     const [l] = qualifyClap(join(FIXTURES, "leaky-delay.clap"), undefined, { rates: QUALIFY_RATES });
     const latency = rtSafetyDocument(l!).measured.clap.latency;
     for (const rate of QUALIFY_RATES) expect(latency[String(rate)]).toEqual({ declaredFrames: 883, measuredFrames: 883 });
+  });
+
+  live("an instrument's latency is its first sample above silence: a 50 ms linear attack is the patch's, never a delay", () => {
+    // its first sample above silence comes within the sine's own first frames (1, or 2 above 96 kHz); read against the
+    // response's peak (the impulse's rule) the ramp reads 7 frames at 44.1 kHz and 27 at 192 kHz
+    const [l] = qualifyClap(SYNTH_ATTACK, undefined, { rates: QUALIFY_RATES });
+    const latency = rtSafetyDocument(l!).measured.clap.latency;
+    for (const rate of QUALIFY_RATES) {
+      expect(latency[String(rate)]).toMatchObject({ declaredFrames: 0, from: "note" });
+      expect(latency[String(rate)]!.measuredFrames).toBeLessThanOrEqual(2);
+    }
+  });
+
+  live("an instrument with a real 64-frame processing delay measures 64, at every rate", () => {
+    const [l] = qualifyClap(SYNTH_DELAY, undefined, { rates: QUALIFY_RATES });
+    const latency = rtSafetyDocument(l!).measured.clap.latency;
+    for (const rate of QUALIFY_RATES) expect(latency[String(rate)]).toEqual({ declaredFrames: 0, measuredFrames: 64, from: "note" });
   });
 
   live("a delay that declares no latency is still measured at its arrival, so the mismatch stands", () => {
