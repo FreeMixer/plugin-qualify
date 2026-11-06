@@ -9,10 +9,10 @@ Build-Depends: debhelper-compat (= 13),
                clap-headers,
                liblilv-dev,
                lv2-dev,
-               plugin-db-dev (>= 0.1.0~), plugin-db-dev (<< 0.2~),
-               libplugin-hostd-protocol-dev (>= 0.3.0~), libplugin-hostd-protocol-dev (<< 0.4~),
+               plugin-db-dev (>= 0.2.0~), plugin-db-dev (<< 0.3~),
+               libplugin-hostd-protocol-dev (>= 0.4.0~), libplugin-hostd-protocol-dev (<< 0.5~),
                libomx-contract-dev (>= 3.9.1~), libomx-contract-dev (<< 4~),
-               libomx-clap-lv2-dev (>= 0.26.2~), libomx-clap-lv2-dev (<< 0.30~),
+               libomx-clap-lv2-dev (>= 0.26.2~), libomx-clap-lv2-dev (<< 0.31~),
                libomxdsp-dev (>= 0.21.0~), libomxdsp-dev (<< 0.31~)
 Standards-Version: 4.6.2
 Homepage: https://github.com/FreeMixer/plugin-qualify
@@ -20,7 +20,7 @@ Rules-Requires-Root: no
 
 Package: plugin-qualify
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, nodejs (>= 18), python3, python3-jsonschema, plugin-hostd (>= 0.15.3~), plugin-hostd (<< 0.19~), omx-clap-host (>= 0.23.0~), omx-clap-host (<< 0.30~), libomx-clap-core1 (>= 0.26.2~), libomx-clap-core1 (<< 0.30~), liblilv-0-0, ${lilv:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}, nodejs (>= 18), python3, python3-jsonschema, plugin-hostd (>= 0.15.3~), plugin-hostd (<< 0.20~), omx-clap-host (>= 0.23.0~), omx-clap-host (<< 0.31~), libomx-clap-core1 (>= 0.26.2~), libomx-clap-core1 (<< 0.31~), liblilv-0-0, ${lilv:Depends}
 # mod-host is the comparison host: --host-profile mod-host and the hosting sweep run it when it is installed, and
 # without it those verdicts read mod-host.not-installed. Nothing else uses it, so it is only suggested; a machine
 # that runs a published comparison or benchmark installs mod-host (and jalv) itself.
