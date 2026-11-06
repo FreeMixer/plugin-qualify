@@ -113,6 +113,15 @@ describe("the qualification record and the probe output it judged", () => {
     expect(existsSync(`${w.recordPath}.new`)).toBe(false);
   });
 
+  it("writes a non-ASCII id one '_' per UTF-8 byte, as plugin-hostd reads it (plugin-hostd-protocol's descriptor name)", () => {
+    const text = fixtureText("success-msi");
+    const r = readProbeOutput(text);
+    if (!r.ok) throw new Error(r.problem);
+    const named = { ...r.output, plugin: { ...r.output.plugin, id: "org.example.caf\u00e9-\u{1F3B9}" } };
+    // é is two bytes in UTF-8 and 🎹 four: plugin-hostd's descriptors.c replaces each byte
+    expect(qualificationBaseName(named)).toBe("org.example.caf__-____@1.4.2-356902794a4e.omx-clap-host");
+  });
+
   it("names files by id, version, binary hash and offer, with nothing a path could use", () => {
     const text = fixtureText("success-msi");
     const r = readProbeOutput(text);
