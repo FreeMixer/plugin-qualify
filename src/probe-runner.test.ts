@@ -6,7 +6,8 @@
  * real script spawned the way the real runner is, to see the argument list, the environment and the
  * exit statuses cross a process boundary.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ import { HOSTING_CODE } from "./hosting-codes.js";
 import type { AdmissionRuns } from "./host-admission.js";
 import { JALV_PROFILE, OMX_CLAP_HOST_CONFIGURED_EXTENSIONS, OMX_CLAP_HOST_PROFILE, OPENMIXER_CONSOLE_PROFILE } from "./host-profiles.js";
 import { ProbeRunnerError, clapRunnerArgs, lv2RunnerArgs, probeRunnerTool, probeTarget, qualifyTargets, type ProbeRun } from "./probe-runner.js";
+import { mergeRunsByRecord, stderrCopyFileName, writeQualification } from "./qualification-record.js";
 import { fixtureJson, fixtureText, clapLineFixture, probeOutputOfLine, withoutMemoryBudget } from "./probe-output-fixtures.js";
 import {
   CLAP_QUALIFY_TOOL_ENV,
@@ -321,5 +323,61 @@ describe("no timeout of ours sits around a prober", () => {
     expect(TIMEOUT_OPTION.test(read("probe-runner.ts"))).toBe(false);
     expect(read("clap-qualify.ts")).not.toMatch(/spawnSync/);
     expect(TIMEOUT_OPTION.test(read("direct-prober.support.ts"))).toBe(true);
+  });
+});
+
+describe("the child's stderr is kept beside the record", () => {
+  // what samplv1 printed on a Pi with no display before Qt aborted it (omx-clap-host 0.30.0, 2026-11-07): 459 bytes
+  const QT_ABORT = [
+    "qt.qpa.xcb: could not connect to display ",
+    "qt.qpa.plugin: From 6.5.0, xcb-cursor0 or libxcb-cursor0 is needed to load the Qt xcb platform plugin.",
+    'qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "" even though it was found.',
+    "This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.",
+    "",
+    "Available platform plugins are: linuxfb, offscreen, vnc, xcb, vkkhrdisplay, minimal.",
+    "",
+    "",
+  ].join("\n");
+
+  /** A runner that writes the stderr of each cell's child to its `--log` and names it in the document, as plugin-hostd-probe does. */
+  const loggingRunner = (stderrOf: (rate: number) => string): ProbeRun => (_tool, args) => {
+    const log = args[args.indexOf("--log") + 1]!;
+    const rate = Number(args[args.indexOf("--rates") + 1]);
+    const text = stderrOf(rate);
+    writeFileSync(log, text);
+    const doc = JSON.parse(text === "" ? fixtureText("success-msi") : fixtureText("plugin-crash"));
+    const ok = fixtureJson("success-msi");
+    doc.plugin = { ...ok.plugin, format: "lv2", id: LV2.uri };
+    doc.binary = ok.binary;
+    doc.offer = ok.offer;
+    doc.logs = [{ name: "stderr", path: log, sha256: createHash("sha256").update(text).digest("hex"), bytes: Buffer.byteLength(text) }];
+    writeFileSync(args[args.indexOf("--out") + 1]!, JSON.stringify(doc));
+    return { status: text === "" ? 0 : 1, signal: null };
+  };
+
+  it("the stderr of a crashed cell survives the run and is written beside the record, named by the hash the probe copy cites", () => {
+    expect(Buffer.byteLength(QT_ABORT)).toBe(459);
+    const run = loggingRunner((rate) => (rate === 96000 ? QT_ABORT : ""));
+    const pass = qualifyTargets([LV2], { cells: [{ rate: 48000, quantum: 128 }, { rate: 96000, quantum: 128 }], rates: [48000, 96000], run, env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: HOSTS_ADMIT });
+    expect(pass.failures).toEqual([]);
+    const dir = join(scratch, "stderr-kept");
+    const [merged] = mergeRunsByRecord(pass.runs);
+    const w = writeQualification(dir, merged!.bytes, merged!.judgment, [], merged!.stderr);
+    const copy = JSON.parse(readFileSync(w.probePath, "utf8")) as { logs?: { sha256: string; bytes: number }[] };
+    const cited = (copy.logs ?? []).filter((l) => l.bytes > 0);
+    expect(cited.map((l) => l.bytes)).toEqual([459]);
+    const kept = join(dir, stderrCopyFileName(merged!.judgment.output, cited[0]!.sha256));
+    expect(readFileSync(kept, "utf8")).toBe(QT_ABORT);
+    expect(createHash("sha256").update(readFileSync(kept)).digest("hex")).toBe(cited[0]!.sha256);
+    expect(w.stderrPaths).toEqual([kept]);
+  });
+
+  it("a run whose children printed nothing writes no stderr file", () => {
+    const pass = qualifyTargets([LV2], { cells: [{ rate: 48000, quantum: 128 }], rates: [48000], run: loggingRunner(() => ""), env: {}, profiles: [OPENMIXER_CONSOLE_PROFILE], admissions: HOSTS_ADMIT });
+    const dir = join(scratch, "stderr-empty");
+    const [merged] = mergeRunsByRecord(pass.runs);
+    const w = writeQualification(dir, merged!.bytes, merged!.judgment, [], merged!.stderr);
+    expect(w.stderrPaths).toEqual([]);
+    expect(readdirSync(dir).filter((f) => f.includes(".stderr."))).toEqual([]);
   });
 });

@@ -1,3 +1,15 @@
+plugin-qualify (0.19.4) unstable; urgency=medium
+
+  * A probe run's child stderr is kept beside its record, as
+    <stem>.<offer>.stderr.<sha256 first 12>.log, the hash the probe copy's
+    logs cites: samplv1's Qt abort on a Pi with no display (459 bytes) was
+    counted in the record and then deleted with the run's directory. The
+    probe copy cites every cell's stderr, not only the first cell's.
+  * A plugin the sync no longer finds loses its stderr files with its
+    record.
+
+ -- Pau Aliagas <linuxnow@gmail.com>  Sat, 07 Nov 2026 12:00:00 +0100
+
 plugin-qualify (0.19.1) unstable; urgency=medium
 
   * Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3,

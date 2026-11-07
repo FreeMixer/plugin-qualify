@@ -428,6 +428,8 @@ export function qualificationBaseName(output: ProbeOutput): string {
 
 export const recordFileName = (output: ProbeOutput): string => `${qualificationBaseName(output)}.qualification.json`;
 export const probeCopyFileName = (output: ProbeOutput): string => `${qualificationBaseName(output)}.probe.json`;
+/** A child's stderr beside the record, named by the first 12 of the SHA-256 the probe copy's `logs` cites it by. */
+export const stderrCopyFileName = (output: ProbeOutput, sha256: string): string => `${qualificationBaseName(output)}.stderr.${sha256.slice(0, 12)}.log`;
 
 function tierOf(judgment: Judgment, host: string | undefined): TierVerdict | undefined {
   const v = judgment.hosts.find((h) => h.verdict.host === host)?.verdict;
@@ -518,6 +520,8 @@ export interface WrittenQualification {
   readonly recordPath: string;
   readonly probePath: string;
   readonly record: QualificationRecord;
+  /** The children's stderr written beside the record, one file each run that printed anything. */
+  readonly stderrPaths: readonly string[];
 }
 
 /**
@@ -530,33 +534,46 @@ export function writeQualification(
   probeBytes: Uint8Array,
   judgment: Judgment,
   notMeasured: readonly NotMeasured[] = [],
+  stderr: readonly Uint8Array[] = [],
 ): WrittenQualification {
   mkdirSync(dir, { recursive: true });
+  // the children's own words first, as the probe copy cites them: a crash's reason is kept, not only its size
+  const stderrPaths = stderr
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      const path = join(dir, stderrCopyFileName(judgment.output, sha256Hex(s)));
+      writeFileWhole(path, s);
+      return path;
+    });
   const probePath = join(dir, probeCopyFileName(judgment.output));
   writeFileWhole(probePath, probeBytes);
   const copy = readFileSync(probePath);
   const record = buildQualificationRecord(judgment, { file: probeCopyFileName(judgment.output), sha256: sha256Hex(copy), bytes: copy.length }, notMeasured);
   const recordPath = join(dir, recordFileName(judgment.output));
   writeFileWhole(recordPath, `${JSON.stringify(record, null, 2)}\n`);
-  return { recordPath, probePath, record };
+  return { recordPath, probePath, record, stderrPaths };
 }
 
 /**
  * Runs that name the same binary and offer share one record file (a CLAP judged with and without the extra extensions
  * offered): their verdicts become one record over the first run's probe output, so the second is never written over the first.
  */
-export function mergeRunsByRecord<T extends { readonly bytes: Uint8Array; readonly judgment: Judgment }>(runs: readonly T[]): { bytes: Uint8Array; judgment: Judgment }[] {
-  const byName = new Map<string, { bytes: Uint8Array; judgment: Judgment }>();
+export function mergeRunsByRecord<T extends { readonly bytes: Uint8Array; readonly judgment: Judgment; readonly stderr?: readonly Uint8Array[] }>(
+  runs: readonly T[],
+): { bytes: Uint8Array; judgment: Judgment; stderr: readonly Uint8Array[] }[] {
+  // the stderr kept is the first run's, as its probe output is the copy that cites it
+  const byName = new Map<string, { bytes: Uint8Array; judgment: Judgment; stderr: readonly Uint8Array[] }>();
   for (const r of runs) {
     const name = qualificationBaseName(r.judgment.output);
     const first = byName.get(name);
     byName.set(
       name,
       first === undefined
-        ? r
+        ? { bytes: r.bytes, judgment: r.judgment, stderr: r.stderr ?? [] }
         : {
             bytes: first.bytes,
             judgment: { ...first.judgment, hosts: [...first.judgment.hosts, ...r.judgment.hosts], documents: [...first.judgment.documents, ...r.judgment.documents] },
+            stderr: first.stderr,
           },
     );
   }
