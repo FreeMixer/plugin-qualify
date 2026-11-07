@@ -83,6 +83,10 @@ export function mergeProbeRuns(parts: readonly ProbeRunPart[], bound: MemoryBoun
   };
   merged["steps"] = steps;
   merged["grid"] = grid;
+  // every run's stderr is cited, not only the first's: the cell that crashed is as often a later one
+  const logs = docs.flatMap((d) => (Array.isArray(d["logs"]) ? (d["logs"] as Json[]) : []));
+  if (logs.length > 0) merged["logs"] = logs;
+  else delete merged["logs"];
   const bytes = Buffer.from(`${JSON.stringify(merged, null, 2)}\n`);
   const read = readProbeOutput(bytes.toString("utf8"));
   if (!read.ok) throw new ProbeMergeError(`the merged runs of ${first.output.plugin.id} do not read as a probe output (${read.code}): ${read.problem}`);

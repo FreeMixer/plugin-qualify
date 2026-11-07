@@ -735,10 +735,10 @@ function writeUnmeasuredRecord(ctx: SyncContext, item: SyncItem, files: readonly
 const isolatedEnv = (ctx: SyncContext): Readonly<Record<string, string | undefined>> => ({ ...ctx.env, [ADMIT_STEP_MS_ENV]: String(ctx.settings.budgetS * 1000) });
 
 /** Each judged run of a pass as the plugins it qualified: the record written, the pin taken, the outcome. */
-function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgment: Judgment }[], describeProblem?: string): SyncPlugin[] {
+function judgedPlugins(ctx: SyncContext, runs: readonly { bytes: Buffer; judgment: Judgment; stderr?: readonly Buffer[] }[], describeProblem?: string): SyncPlugin[] {
   const host = ctx.settings.hostProfile.id;
-  const entries = runs.map(({ bytes, judgment }) => {
-    const { recordPath, record } = writeQualification(ctx.settings.qualificationDir, bytes, judgment, QUICK_NOT_MEASURED);
+  const entries = runs.map(({ bytes, judgment, stderr }) => {
+    const { recordPath, record } = writeQualification(ctx.settings.qualificationDir, bytes, judgment, QUICK_NOT_MEASURED, stderr);
     const steps = baseSteps(record, describeProblem);
     let pin = withHostdFiles(ctx, judgmentPinEntries(judgment, host)[0]);
     let { outcome, code } = outcomeOf(judgment, host);
@@ -1102,9 +1102,9 @@ export function removedPinUris(before: string, after: string): string[] {
   return [...pinLinesOf(before).keys()].filter((uri) => !now.has(uri));
 }
 
-/** `<id>@<version>-<binary sha first 12>`, the stem a qualification record, its probe copy and its descriptor share. */
+/** `<id>@<version>-<binary sha first 12>`, the stem a qualification record, its probe copy, its children's stderr and its descriptor share. */
 export function recordStem(recordPath: string): string | undefined {
-  return /^(.*-[0-9a-f]{12})\.(?:[^.]+\.(?:qualification|probe)|unmeasured)\.json$/.exec(basename(recordPath))?.[1];
+  return /^(.*-[0-9a-f]{12})\.(?:(?:[^.]+\.(?:qualification|probe)|unmeasured)\.json|[^.]+\.stderr\.[0-9a-f]{12}\.log)$/.exec(basename(recordPath))?.[1];
 }
 
 /**

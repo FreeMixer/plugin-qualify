@@ -201,7 +201,8 @@ const pass = qualifyTargets(plugins, {
 for (const f of pass.failures) process.stderr.write(`plugin-qualify: ${f.uri}: ${f.problem}\n`);
 if (parsed.args.out !== undefined) {
   for (const run of mergeRunsByRecord(pass.runs)) {
-    const w = writeQualification(parsed.args.out, run.bytes, run.judgment);
+    const w = writeQualification(parsed.args.out, run.bytes, run.judgment, [], run.stderr);
+    for (const p of w.stderrPaths) process.stderr.write(`plugin-qualify: stderr ${p}\n`);
     process.stderr.write(`plugin-qualify: record ${w.recordPath}\n`);
   }
 }

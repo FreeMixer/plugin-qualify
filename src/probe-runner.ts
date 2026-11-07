@@ -165,6 +165,9 @@ export interface ProbeLoad {
 export interface ProbedTarget {
   readonly bytes: Buffer;
   readonly output: ProbeOutput;
+  /** What each run's child printed on stderr (the file the document's `logs` cites, read before the run's directory goes),
+   * one entry a run that printed anything: a crash's own words are kept with the record (#samplv1, 459 bytes lost on the Pi). */
+  readonly stderr: readonly Buffer[];
   /** The most loaded the machine was when any of the target's runs started. */
   readonly load?: ProbeLoad;
 }
@@ -226,7 +229,14 @@ function runOne(target: PluginTarget, options: ProbeTargetOptions, invocation: R
     if (read.output.plugin.id !== expectedId) {
       throw new ProbeRunnerError(`${tool} measured ${read.output.plugin.id} when asked for ${expectedId}: not judged as the plugin asked for`);
     }
-    return { bytes, output: read.output, load };
+    let stderr: Buffer[] = [];
+    try {
+      const said = readFileSync(log);
+      if (said.length > 0) stderr = [said];
+    } catch {
+      // the runner wrote no log: the document cites none
+    }
+    return { bytes, output: read.output, load, stderr };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -246,7 +256,7 @@ export function probeTarget(target: PluginTarget, options: ProbeTargetOptions): 
   const loads = parts.flatMap((p) => (p.load === undefined ? [] : [p.load]));
   const load = loads.length === 0 ? undefined : loads.reduce((a, b) => (b.loadavg1 > a.loadavg1 ? b : a));
   try {
-    return { ...mergeProbeRuns(parts, options.memory), ...(load === undefined ? {} : { load }) };
+    return { ...mergeProbeRuns(parts, options.memory), stderr: parts.flatMap((p) => p.stderr), ...(load === undefined ? {} : { load }) };
   } catch (e) {
     if (e instanceof ProbeMergeError) throw new ProbeRunnerError(e.message);
     throw e;
@@ -256,7 +266,7 @@ export function probeTarget(target: PluginTarget, options: ProbeTargetOptions): 
 /** What the pass over a run's targets produced. */
 export interface ProbePass {
   /** Every probe output that was judged, with its bytes, for the qualification directory. */
-  readonly runs: readonly { readonly bytes: Buffer; readonly judgment: Judgment }[];
+  readonly runs: readonly { readonly bytes: Buffer; readonly judgment: Judgment; readonly stderr: readonly Buffer[] }[];
   readonly verdicts: readonly QualifyVerdict[];
   /** The CLAP documents of today's judge, which the pins file is taken from. */
   readonly documents: readonly RtSafetyDocument[];
@@ -292,7 +302,7 @@ export function qualifyTargets(
   const admissionRuns = options.admissions ?? SPAWNED_ADMISSIONS;
   const runEnvironment = options.env ?? process.env;
   const admissionEnv = options.admissionLv2Path === undefined ? runEnvironment : { ...runEnvironment, LV2_PATH: options.admissionLv2Path.join(":") };
-  const runs: { bytes: Buffer; judgment: Judgment }[] = [];
+  const runs: { bytes: Buffer; judgment: Judgment; stderr: readonly Buffer[] }[] = [];
   const verdicts: QualifyVerdict[] = [];
   const documents: RtSafetyDocument[] = [];
   const failures: { uri: string; problem: string }[] = [];
@@ -330,13 +340,13 @@ export function qualifyTargets(
     const judged = new Map<string, QualifyVerdict>();
     // a target's runs and documents count only when every one of its runs gave a probe output: one that
     // failed leaves the target not measured, and then nothing of it is recorded or pinned
-    const targetRuns: { bytes: Buffer; judgment: Judgment }[] = [];
+    const targetRuns: { bytes: Buffer; judgment: Judgment; stderr: readonly Buffer[] }[] = [];
     try {
       for (const { offer, profiles: forOffer } of byOffer.values()) {
         const probed = probeTarget(target, { ...options, ...measured, offer });
         const plain = judgeProbeOutput(probed.output, forOffer, { admissions });
         const judgment = { ...plain, ...(adapter === undefined ? {} : { adapter }), ...(probed.load === undefined ? {} : { load: probed.load }) };
-        targetRuns.push({ bytes: probed.bytes, judgment });
+        targetRuns.push({ bytes: probed.bytes, judgment, stderr: probed.stderr });
         for (const v of judgmentVerdicts(judgment)) judged.set(v.host, v);
       }
     } catch (e) {

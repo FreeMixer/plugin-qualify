@@ -108,6 +108,11 @@ describe("recordStem", () => {
     expect(recordStem("a@unversioned-0123456789ab.unmeasured.json")).toBe("a@unversioned-0123456789ab");
     expect(recordStem("by-hand.json")).toBeUndefined();
   });
+
+  it("is also the stem of a child's stderr kept beside the record, so a stale plugin's stderr goes with its record", () => {
+    expect(recordStem("/q/org.x.id@1.2.3-0123456789ab.default.stderr.fedcba987654.log")).toBe("org.x.id@1.2.3-0123456789ab");
+    expect(recordStem("org.x.id@1.2.3-0123456789ab.default.stderr.log")).toBeUndefined();
+  });
 });
 
 describe("removedPinUris", () => {
