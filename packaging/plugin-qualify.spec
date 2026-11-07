@@ -24,7 +24,7 @@ BuildRequires: (pkgconfig(plugin-db) >= 0.2.0 with pkgconfig(plugin-db) < 0.3)
 BuildRequires: (pkgconfig(plugin-hostd-protocol) >= 0.4.0 with pkgconfig(plugin-hostd-protocol) < 0.5)
 BuildRequires: (pkgconfig(omx-contract) >= 3.9.1 with pkgconfig(omx-contract) < 4)
 BuildRequires: (pkgconfig(omx-clap-lv2) >= 0.26.2 with pkgconfig(omx-clap-lv2) < 0.31)
-BuildRequires: (pkgconfig(omxdsp) >= 0.21.0 with pkgconfig(omxdsp) < 0.31)
+BuildRequires: (pkgconfig(omxdsp) >= 0.31.0 with pkgconfig(omxdsp) < 0.32)
 BuildRequires: systemd-rpm-macros
 
 Requires: nodejs >= 18

@@ -47,7 +47,8 @@ jobs:
   # after the RPM: both publish into one tree, and a push that loses a race is refused
   deb:
     needs: rpm
-    if: ${{ !cancelled() }}
+    # only after the RPM passed: a DEB never ships beside a failed RPM (the shared release-order check)
+    if: ${{ !cancelled() && needs.rpm.result == 'success' }}
     uses: FreeMixer/.github/.github/workflows/build-deb.yml@v1
     with:
       package-name: plugin-qualify
