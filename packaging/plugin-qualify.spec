@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Pau Aliagas <linuxnow@gmail.com>
 Name: plugin-qualify
-Version:        0.19.1
+Version:        0.19.4
 Release: 1%{?dist}
 License: GPL-3.0-or-later
 Summary: Find out whether an audio plugin is safe to run in a live mixing console
@@ -133,6 +133,11 @@ fi
 %{_libexecdir}/%{name}/
 
 %changelog
+* Sat Nov 07 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.4-1
+- A probe run's child stderr is kept beside its record, as
+  <stem>.<offer>.stderr.<sha256 first 12>.log, the hash the probe copy's logs
+  cites; the probe copy cites every cell's stderr, not only the first cell's.
+  A plugin the sync no longer finds loses its stderr files with its record.
 * Fri Nov 06 2026 Pau Aliagas <linuxnow@gmail.com> - 0.19.1-1
 - Floors and ceilings follow the wave: plugin-db >= 0.2.0 and < 0.3, plugin-hostd-protocol
   >= 0.4.0 and < 0.5, plugin-hostd < 0.20, omx-clap-core and omx-clap-host < 0.31
